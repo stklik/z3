@@ -4860,6 +4860,27 @@ class DatatypeSortRef(SortRef):
             _z3_assert(j < self.constructor(i).arity(), "Invalid accessor index")
         return FuncDeclRef(Z3_get_datatype_sort_constructor_accessor(self.ctx_ref(), self.ast, i, j), self.ctx)
 
+    def cast(self, val):
+        """
+        This is so we can cast a string to a Z3 DatatypeRef.
+        This is useful if we want to compare strings with a Datatype/Enum to a String.
+
+        >>> Color = Datatype("Color")
+        >>> Color.declare("red")
+        >>> Color.declare("green")
+        >>> Color.declare("blue")
+        >>> Color = Color.create()
+
+        >>> x = Const("x", Color)
+        >>> solve(x != "red", x != "blue")
+        [x = green]
+        """
+        if type(val) == str:
+            for i in range(self.num_constructors()):
+                if self.constructor(i).name() == val:
+                    return self.constructor(i)()
+        return super().cast(val)
+
 class DatatypeRef(ExprRef):
     """Datatype expressions."""
     def sort(self):
