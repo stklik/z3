@@ -537,8 +537,9 @@ void int_solver::try_add_term_to_A_for_hnf(unsigned i) {
     mpq rs;
     const lar_term* t = m_lar_solver->terms()[i];
     constraint_index ci;
-    if (!hnf_cutter_is_full() && m_lar_solver->get_equality_and_right_side_for_term_on_current_x(i, rs, ci)) {
-        m_hnf_cutter.add_term(t, rs, ci);
+    bool upper_bound;
+    if (!hnf_cutter_is_full() && m_lar_solver->get_equality_and_right_side_for_term_on_current_x(i, rs, ci, upper_bound)) {
+        m_hnf_cutter.add_term(t, rs, ci, upper_bound);
     }
 }
 
@@ -577,17 +578,27 @@ lia_move int_solver::make_hnf_cut() {
         return lia_move::undef;
     }
     settings().st().m_hnf_cutter_calls++;
-    TRACE("hnf_cut", tout << "settings().st().m_hnf_cutter_calls = " << settings().st().m_hnf_cutter_calls;);
+    TRACE("hnf_cut", tout << "settings().st().m_hnf_cutter_calls = " << settings().st().m_hnf_cutter_calls << "\n";
+          for (unsigned i : m_hnf_cutter.constraints_for_explanation()) {
+              m_lar_solver->print_constraint(i, tout);
+          }              
+          m_lar_solver->print_constraints(tout);
+          );
 #ifdef Z3DEBUG
     vector<mpq> x0 = m_hnf_cutter.transform_to_local_columns(m_lar_solver->m_mpq_lar_core_solver.m_r_x);
+#else
+    vector<mpq> x0;
 #endif
-    lia_move r =  m_hnf_cutter.create_cut(*m_t, *m_k, *m_ex, *m_upper
-#ifdef Z3DEBUG
-                                          , x0
-#endif
-                                          );
-    CTRACE("hnf_cut", r == lia_move::cut, tout<< "cut:"; m_lar_solver->print_term(*m_t, tout); tout << " <= " << *m_k << std::endl;);
-    if (r == lia_move::cut) {        
+    lia_move r =  m_hnf_cutter.create_cut(*m_t, *m_k, *m_ex, *m_upper, x0);
+
+    if (r == lia_move::cut) {      
+        TRACE("hnf_cut",
+              m_lar_solver->print_term(*m_t, tout << "cut:"); 
+              tout << " <= " << *m_k << std::endl;
+              for (unsigned i : m_hnf_cutter.constraints_for_explanation()) {
+                  m_lar_solver->print_constraint(i, tout);
+              }              
+              );
         lp_assert(current_solution_is_inf_on_cut());
         settings().st().m_hnf_cuts++;
         m_ex->clear();        
