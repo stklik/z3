@@ -36,7 +36,7 @@ void throw_invalid_reference() {
 struct z3_replayer::imp {
     z3_replayer &            m_owner;
     std::istream &           m_stream;
-    char                     m_curr;  // current char;
+    int                      m_curr;  // current char;
     int                      m_line;  // line
     svector<char>            m_string;
     symbol                   m_id;
@@ -78,7 +78,8 @@ struct z3_replayer::imp {
             std::stringstream strm;
             strm << "expecting " << kind2string(k) << " at position "
                  << pos << " but got " << kind2string(m_args[pos].m_kind);
-            throw z3_replayer_exception(strm.str().c_str());
+            TRACE("z3_replayer", tout << strm.str() << "\n";);
+            throw z3_replayer_exception(strm.str());
         }
     }
 
@@ -89,12 +90,14 @@ struct z3_replayer::imp {
             uint64_t     m_uint;
             double       m_double;
             char const * m_str;
+            void const*  m_sym; // uint64_t
             void *       m_obj;
             float        m_float;
         };
         value():m_kind(OBJECT), m_int(0) {}
         value(void * obj):m_kind(OBJECT), m_obj(obj) {}
         value(value_kind k, char const * str):m_kind(k), m_str(str) {}
+        value(value_kind k, symbol const& s):m_kind(k), m_sym(s.c_api_symbol2ext()) {}
         value(value_kind k, uint64_t u):m_kind(k), m_uint(u) {}
         value(value_kind k, int64_t i):m_kind(k), m_int(i) {}
         value(value_kind k, double d):m_kind(k), m_double(d) {}
@@ -134,7 +137,7 @@ struct z3_replayer::imp {
             out << v.m_str;
             break;
         case SYMBOL:
-            out << symbol::mk_symbol_from_c_ptr(v.m_str);
+            out << symbol::c_api_ext2symbol(v.m_sym);
             break;
         case OBJECT:
             out << v.m_obj;
@@ -157,7 +160,7 @@ struct z3_replayer::imp {
         }
     }
 
-    char curr() const { return m_curr; }
+    int curr() const { return m_curr; }
     void new_line() { m_line++; }
     void next() { m_curr = m_stream.get(); }
 
@@ -167,7 +170,7 @@ struct z3_replayer::imp {
         m_string.reset();
         next();
         while (true) {
-            char c = curr();
+            int c = curr();
             if (c == EOF) {
                 throw z3_replayer_exception("unexpected end of file");
             }
@@ -186,10 +189,10 @@ struct z3_replayer::imp {
                         sz++;
                     }
                     else {
-                        throw z3_replayer_exception("invalid scaped character");
+                        throw z3_replayer_exception("invalid escaped character");
                     }
                     if (val > 255)
-                        throw z3_replayer_exception("invalid scaped character");
+                        throw z3_replayer_exception("invalid escaped character");
                     next();
                 }
                 TRACE("z3_replayer_escape", tout << "val: " << val << "\n";);
@@ -228,7 +231,7 @@ struct z3_replayer::imp {
         }
         m_int64 = 0;
         while (true) {
-            char c = curr();
+            int c = curr();
             if ('0' <= c && c <= '9') {
                 m_int64 = 10*m_int64 + (c - '0');
                 next();
@@ -246,7 +249,7 @@ struct z3_replayer::imp {
             throw z3_replayer_exception("invalid unsigned");
         m_uint64 = 0;
         while (true) {
-            char c = curr();
+            int c = curr();
             if ('0' <= c && c <= '9') {
                 m_uint64 = 10*m_uint64 + (c - '0');
                 next();
@@ -302,7 +305,7 @@ struct z3_replayer::imp {
         unsigned pos = 0;
         m_ptr = 0;
         while (true) {
-            char c = curr();
+            int c = curr();
             if ('0' <= c && c <= '9') {
                 m_ptr = m_ptr * 16 + (c - '0');
             }
@@ -324,7 +327,7 @@ struct z3_replayer::imp {
 
     void skip_blank() {
         while (true) {
-            char c = curr();
+            int c = curr();
             if (c == '\n') {
                 new_line();
                 next();
@@ -400,6 +403,7 @@ struct z3_replayer::imp {
 #define TICK_FREQUENCY 100000
 
     void parse() {
+        memory::exit_when_out_of_memory(false, nullptr);
         uint64_t counter = 0;
         unsigned tick = 0;
         while (true) {
@@ -411,7 +415,7 @@ struct z3_replayer::imp {
                 }
             });
             skip_blank();
-            char c = curr();
+            int c = curr();
             if (c == EOF)
                 return;
             switch (c) {
@@ -453,13 +457,13 @@ struct z3_replayer::imp {
                 // push null symbol
                 next();
                 TRACE("z3_replayer", tout << "[" << m_line << "] " << "N\n";);
-                m_args.push_back(value(SYMBOL, static_cast<char const *>(nullptr)));
+                m_args.push_back(value(SYMBOL, symbol::null));
                 break;
             case '$': {
                 // push symbol
                 next(); skip_blank(); read_quoted_symbol();
                 TRACE("z3_replayer", tout << "[" << m_line << "] " << "$ " << m_id << "\n";);
-                m_args.push_back(value(SYMBOL, m_id.bare_str()));
+                m_args.push_back(value(SYMBOL, m_id));
                 break;
             }
             case '#': {
@@ -467,7 +471,7 @@ struct z3_replayer::imp {
                 next(); skip_blank(); read_uint64();
                 TRACE("z3_replayer", tout << "[" << m_line << "] " << "# " << m_uint64 << "\n";);
                 symbol sym(static_cast<unsigned>(m_uint64));
-                m_args.push_back(value(SYMBOL, static_cast<char const *>(sym.c_ptr())));
+                m_args.push_back(value(SYMBOL, sym));
                 break;
             }
             case 'I':
@@ -497,6 +501,7 @@ struct z3_replayer::imp {
             case 'p':
             case 's':
             case 'u':
+            case 'i':
                 // push array
                 next(); skip_blank(); read_uint64();
                 TRACE("z3_replayer", tout << "[" << m_line << "] " << "A " << m_uint64 << "\n";);
@@ -504,6 +509,8 @@ struct z3_replayer::imp {
                     push_array(static_cast<unsigned>(m_uint64), OBJECT);
                 else if (c == 's')
                     push_array(static_cast<unsigned>(m_uint64), SYMBOL);
+                else if (c == 'i')
+                    push_array(static_cast<unsigned>(m_uint64), INT64);
                 else
                     push_array(static_cast<unsigned>(m_uint64), UINT64);
                 break;
@@ -610,7 +617,7 @@ struct z3_replayer::imp {
 
     Z3_symbol get_symbol(unsigned pos) const {
         check_arg(pos, SYMBOL);
-        return reinterpret_cast<Z3_symbol>(const_cast<char*>(m_args[pos].m_str));
+        return (Z3_symbol)m_args[pos].m_sym;
     }
 
     void * get_obj(unsigned pos) const {

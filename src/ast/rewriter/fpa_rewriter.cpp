@@ -17,7 +17,7 @@ Notes:
 
 --*/
 #include "ast/rewriter/fpa_rewriter.h"
-#include "ast/rewriter/fpa_rewriter_params.hpp"
+#include "params/fpa_rewriter_params.hpp"
 #include "ast/ast_smt2_pp.h"
 
 fpa_rewriter::fpa_rewriter(ast_manager & m, params_ref const & p) :
@@ -313,12 +313,12 @@ br_status fpa_rewriter::mk_neg(expr * arg1, expr_ref & result) {
     }
     if (m_util.is_pinf(arg1)) {
         // - +oo --> -oo
-        result = m_util.mk_ninf(m().get_sort(arg1));
+        result = m_util.mk_ninf(arg1->get_sort());
         return BR_DONE;
     }
     if (m_util.is_ninf(arg1)) {
         // - -oo -> +oo
-        result = m_util.mk_pinf(m().get_sort(arg1));
+        result = m_util.mk_pinf(arg1->get_sort());
         return BR_DONE;
     }
     if (m_util.is_neg(arg1)) {
@@ -476,7 +476,7 @@ br_status fpa_rewriter::mk_float_eq(expr * arg1, expr * arg2, expr_ref & result)
 
 // Return (= arg NaN)
 app * fpa_rewriter::mk_eq_nan(expr * arg) {
-    return m().mk_eq(arg, m_util.mk_nan(m().get_sort(arg)));
+    return m().mk_eq(arg, m_util.mk_nan(arg->get_sort()));
 }
 
 // Return (not (= arg NaN))
@@ -773,7 +773,7 @@ br_status fpa_rewriter::mk_to_ieee_bv(func_decl * f, expr * arg, expr_ref & resu
         if (m_fm.is_nan(v)) {
             if (m_hi_fp_unspecified) {
                 expr * args[4] = { bu.mk_numeral(0, 1),
-                                   bu.mk_bv_neg(bu.mk_numeral(1, x.get_ebits())),
+                                   bu.mk_numeral(rational::minus_one(), x.get_ebits()),
                                    bu.mk_numeral(0, x.get_sbits() - 2),
                                    bu.mk_numeral(1, 1) };
                 result = bu.mk_concat(4, args);

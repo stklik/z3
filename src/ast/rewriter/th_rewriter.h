@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef TH_REWRITER_H_
-#define TH_REWRITER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter_types.h"
@@ -41,13 +40,20 @@ public:
     static void get_param_descrs(param_descrs & r);
     unsigned get_cache_size() const;
     unsigned get_num_steps() const;
-
+   
     void operator()(expr_ref& term);
     void operator()(expr * t, expr_ref & result);
     void operator()(expr * t, expr_ref & result, proof_ref & result_pr);
     expr_ref operator()(expr * n, unsigned num_bindings, expr * const * bindings);
 
     expr_ref mk_app(func_decl* f, unsigned num_args, expr* const* args);
+
+    bool reduce_quantifier(quantifier * old_q, 
+                           expr * new_body, 
+                           expr * const * new_patterns, 
+                           expr * const * new_no_patterns,
+                           expr_ref & result,
+                           proof_ref & result_pr);
 
     void cleanup();
     void reset();
@@ -65,4 +71,3 @@ public:
 
 };
 
-#endif

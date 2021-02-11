@@ -73,7 +73,7 @@ namespace spacer {
                 // the current step needs to be interpolated:
                 expr* fact = m.get_fact(pf);
                 // if we trust the current step and we are able to use it
-                if (m_ctx.is_b_pure (pf) && (m.is_asserted(pf) || is_literal(m, fact))) {
+                if (m_ctx.is_b_pure (pf) && (m.is_asserted(pf) || spacer::is_literal(m, fact))) {
                     // just add it to the core
                     m_ctx.add_lemma_to_core(fact);
                 }
@@ -124,7 +124,7 @@ namespace spacer {
              * We can rewrite (E2) to rewrite (E1) to
              * (BP*Fark(BP)) => (neg(A*Fark(A) + BNP*Fark(BNP) + (neg D)*Fark(D))) (E3)
              * and since we can derive (A*Fark(A) + BNP*Fark(BNP) + (neg D)*Fark(D)) from
-             * A, BNP and D, we also know that it is inconsisent. Therefore
+             * A, BNP and D, we also know that it is inconsistent. Therefore
              * neg(A*Fark(A) + BNP*Fark(BNP) + (neg D)*Fark(D)) is a solution.
              *
              * Finally we also need the following workaround:
@@ -558,7 +558,7 @@ namespace spacer {
                     // if we trust the current step and we are able to use it
                     if (m_ctx.is_b_pure (current) &&
                         (m.is_asserted(current) ||
-                         is_literal(m, m.get_fact(current))))
+                         spacer::is_literal(m, m.get_fact(current))))
                     {
                         // we found a leaf of the subproof, so
                         // 1) we add corresponding edges

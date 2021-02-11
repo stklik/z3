@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_ASYMM_BRANCH_H_
-#define SAT_ASYMM_BRANCH_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "sat/sat_big.h"
@@ -36,6 +35,7 @@ namespace sat {
         int64_t    m_counter;
         random_gen m_rand;
         unsigned   m_calls;
+        unsigned   m_touch_index;
         
         // config
         bool       m_asymm_branch;
@@ -57,9 +57,10 @@ namespace sat {
        
         struct compare_left;
 
+        bool is_touched(bool_var v) const;
+
         void sort(big& big, literal const* begin, literal const* end);
         void sort(big & big, clause const& c);
-        void radix_sort(big & big, literal_vector& lits);
 
         bool uhle(scoped_detach& scoped_d, big & big, clause & c);
 
@@ -100,8 +101,6 @@ namespace sat {
         void collect_statistics(statistics & st) const;
         void reset_statistics();
 
-        void minimize(big& big, literal_vector& lemma);
-
         void init_search() { m_calls = 0; }
 
         inline void dec(unsigned c) { m_counter -= c; }
@@ -109,4 +108,3 @@ namespace sat {
 
 };
 
-#endif

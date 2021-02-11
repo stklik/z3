@@ -19,7 +19,6 @@ Revision History:
 #include "tactic/core/cofactor_elim_term_ite.h"
 #include "ast/rewriter/mk_simplified_app.h"
 #include "ast/rewriter/rewriter_def.h"
-#include "util/cooperate.h"
 #include "ast/for_each_expr.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/ast_ll_pp.h"
@@ -32,11 +31,9 @@ struct cofactor_elim_term_ite::imp {
     bool               m_cofactor_equalities;
 
     void checkpoint() { 
-        cooperate("cofactor ite");
         if (memory::get_allocation_size() > m_max_memory)
             throw tactic_exception(TACTIC_MAX_MEMORY_MSG);
-        if (m.canceled())
-            throw tactic_exception(m.limit().get_cancel_msg());
+        tactic::checkpoint(m);
     }
 
     // Collect atoms that contain term if-then-else
@@ -197,7 +194,7 @@ struct cofactor_elim_term_ite::imp {
                     switch (arg->get_kind()) {
                     case AST_VAR:
                     case AST_QUANTIFIER:
-                        // ingore quantifiers
+                        // ignore quantifiers
                         break;
                     case AST_APP:
                         if (to_app(arg)->get_num_args() > 0) {
@@ -264,7 +261,7 @@ struct cofactor_elim_term_ite::imp {
                     switch (arg->get_kind()) {
                     case AST_VAR:
                     case AST_QUANTIFIER:
-                        // ingore quantifiers
+                        // ignore quantifiers
                         break;
                     case AST_APP:
                         if (to_app(arg)->get_num_args() > 0) {

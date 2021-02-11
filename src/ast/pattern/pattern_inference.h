@@ -16,12 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef PATTERN_INFERENCE_H_
-#define PATTERN_INFERENCE_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter.h"
-#include "ast/pattern/pattern_inference_params.h"
+#include "params/pattern_inference_params.h"
 #include "util/vector.h"
 #include "util/uint_set.h"
 #include "util/nat_set.h"
@@ -62,7 +61,7 @@ public:
 
 class pattern_inference_cfg :  public default_rewriter_cfg {
     ast_manager&               m;
-    pattern_inference_params & m_params;
+    pattern_inference_params const & m_params;
     family_id                  m_bfid;
     family_id                  m_afid;
     svector<family_id>         m_forbidden;
@@ -216,7 +215,7 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
                      app_ref_buffer & result);           // OUT result
     
 public:
-    pattern_inference_cfg(ast_manager & m, pattern_inference_params & params);
+    pattern_inference_cfg(ast_manager & m, pattern_inference_params const & params);
     
     void register_forbidden_family(family_id fid) {
         SASSERT(fid != m_bfid);
@@ -253,8 +252,7 @@ public:
 class pattern_inference_rw : public rewriter_tpl<pattern_inference_cfg> {
     pattern_inference_cfg m_cfg;
 public:
-    pattern_inference_rw(ast_manager& m, pattern_inference_params & params);
+    pattern_inference_rw(ast_manager& m, pattern_inference_params const & params);
 };
 
-#endif /* PATTERN_INFERENCE_H_ */
 

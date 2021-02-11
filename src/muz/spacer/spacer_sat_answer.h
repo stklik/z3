@@ -17,8 +17,7 @@ Revision History:
 
 --*/
 
-#ifndef _SPACER_SAT_ANSWER_H_
-#define _SPACER_SAT_ANSWER_H_
+#pragma once
 
 #include "muz/spacer/spacer_context.h"
 #include "ast/ast.h"
@@ -29,9 +28,9 @@ Revision History:
 namespace spacer {
 
 class ground_sat_answer_op {
-    context &m_ctx;
+    const context &m_ctx;
     ast_manager &m;
-    manager &m_pm;
+    const manager &m_pm;
 
     expr_ref_vector m_pinned;
     obj_map<expr, proof*> m_cache;
@@ -46,10 +45,9 @@ class ground_sat_answer_op {
                                    model_ref &mdl, expr_ref_vector &subst);
 
 public:
-    ground_sat_answer_op(context &ctx);
+    ground_sat_answer_op(const context &ctx);
 
     proof_ref operator() (pred_transformer &query);
 };
 }
 
-#endif

@@ -26,7 +26,7 @@ Revision History:
 #include "shell/smtlib_frontend.h"
 #include "shell/z3_log_frontend.h"
 #include "util/warning.h"
-#include "util/version.h"
+#include "util/z3_version.h"
 #include "shell/dimacs_frontend.h"
 #include "shell/datalog_frontend.h"
 #include "shell/opt_frontend.h"
@@ -38,17 +38,24 @@ Revision History:
 #include "util/env_params.h"
 #include "util/file_path.h"
 #include "shell/lp_frontend.h"
+#include "shell/drat_frontend.h"
 
-typedef enum { IN_UNSPECIFIED, IN_SMTLIB_2, IN_DATALOG, IN_DIMACS, IN_WCNF, IN_OPB, IN_LP, IN_Z3_LOG, IN_MPS } input_kind;
+#if defined( _WINDOWS ) && defined( __MINGW32__ ) && ( defined( __GNUG__ ) || defined( __clang__ ) )
+#include <crtdbg.h>
+#endif
 
-std::string         g_aux_input_file;
-char const *        g_input_file          = nullptr;
-bool                g_standard_input      = false;
-input_kind          g_input_kind          = IN_UNSPECIFIED;
+typedef enum { IN_UNSPECIFIED, IN_SMTLIB_2, IN_DATALOG, IN_DIMACS, IN_WCNF, IN_OPB, IN_LP, IN_Z3_LOG, IN_MPS, IN_DRAT } input_kind;
+
+static std::string  g_aux_input_file;
+static char const * g_input_file          = nullptr;
+static char const * g_drat_input_file     = nullptr;
+static bool         g_standard_input      = false;
+static input_kind   g_input_kind          = IN_UNSPECIFIED;
 bool                g_display_statistics  = false;
-bool                g_display_istatistics = false;
+bool                g_display_model       = false;
+static bool         g_display_istatistics = false;
 
-void error(const char * msg) {
+static void error(const char * msg) {
     std::cerr << "Error: " << msg << "\n";
     std::cerr << "For usage information: z3 -h\n";
     exit(ERR_CMD_LINE);
@@ -60,7 +67,7 @@ void error(const char * msg) {
 void display_usage() {
     std::cout << "Z3 [version " << Z3_MAJOR_VERSION << "." << Z3_MINOR_VERSION << "." << Z3_BUILD_NUMBER;
     std::cout << " - ";
-#ifdef _AMD64_
+#if defined(__LP64__) || defined(_WIN64)
     std::cout << "64";
 #else
     std::cout << "32";
@@ -80,6 +87,7 @@ void display_usage() {
     std::cout << "  -lp         use parser for a modest subset of CPLEX LP input format.\n";
     std::cout << "  -log        use parser for Z3 log input format.\n";
     std::cout << "  -in         read formula from standard input.\n";
+    std::cout << "  -model      display model for satisfiable SMT.\n";
     std::cout << "\nMiscellaneous:\n";
     std::cout << "  -h, -?      prints this message.\n";
     std::cout << "  -version    prints version number of Z3.\n";
@@ -89,9 +97,11 @@ void display_usage() {
     std::cout << "  -pd         display Z3 global (and module) parameter descriptions.\n";
     std::cout << "  -pm:name    display Z3 module ('name') parameters.\n";
     std::cout << "  -pp:name    display Z3 parameter description, if 'name' is not provided, then all module names are listed.\n";
+    std::cout << "  -tactics[:name]  display built-in tactics or if argument is given, display detailed information on tactic.\n";
+    std::cout << "  -probes     display avilable probes.\n";
     std::cout << "  --"      << "          all remaining arguments are assumed to be part of the input file name. This option allows Z3 to read files with strange names such as: -foo.smt2.\n";
     std::cout << "\nResources:\n";
-    // timeout and memout are now available on Linux and OSX too.
+    // timeout and memout are now available on Linux and macOS too.
     std::cout << "  -T:timeout  set the timeout (in seconds).\n";
     std::cout << "  -t:timeout  set the soft timeout (in milli seconds). It only kills the current query.\n";
     std::cout << "  -memory:Megabytes  set a limit for virtual memory consumption.\n";
@@ -114,7 +124,8 @@ void display_usage() {
     std::cout << "Use 'z3 -p' for the complete list of global and module parameters.\n";
 }
    
-void parse_cmd_line_args(int argc, char ** argv) {
+static void parse_cmd_line_args(int argc, char ** argv) {
+    long timeout = 0;
     int i = 1;
     char * eq_pos = nullptr;
     while (i < argc) {
@@ -161,7 +172,7 @@ void parse_cmd_line_args(int argc, char ** argv) {
             if (strcmp(opt_name, "version") == 0) {
                 std::cout << "Z3 version " << Z3_MAJOR_VERSION << "." << Z3_MINOR_VERSION << "." << Z3_BUILD_NUMBER;
                 std::cout << " - ";
-#ifdef _AMD64_
+#if defined(__LP64__) || defined(_WIN64)
                 std::cout << "64";
 #else
                 std::cout << "32";
@@ -199,6 +210,10 @@ void parse_cmd_line_args(int argc, char ** argv) {
             }
             else if (strcmp(opt_name, "st") == 0) {
                 g_display_statistics = true; 
+                gparams::set("stats", "true");
+            }
+            else if (strcmp(opt_name, "model") == 0) {
+                g_display_model = true;
             }
             else if (strcmp(opt_name, "ist") == 0) {
                 g_display_istatistics = true; 
@@ -215,8 +230,7 @@ void parse_cmd_line_args(int argc, char ** argv) {
             else if (strcmp(opt_name, "T") == 0) {
                 if (!opt_arg)
                     error("option argument (-T:timeout) is missing.");
-                long tm = strtol(opt_arg, nullptr, 10);
-                set_timeout(tm * 1000);
+                timeout = strtol(opt_arg, nullptr, 10);
             }
             else if (strcmp(opt_name, "t") == 0) {
                 if (!opt_arg)
@@ -257,17 +271,24 @@ void parse_cmd_line_args(int argc, char ** argv) {
                 enable_trace(opt_arg);
             }
 #endif
-#ifdef Z3DEBUG
             else if (strcmp(opt_name, "dbg") == 0) {
                 if (!opt_arg)
                     error("option argument (-dbg:tag) is missing.");
                 enable_debug(opt_arg);
             }
-#endif
             else if (strcmp(opt_name, "memory") == 0) {
                 if (!opt_arg)
                     error("option argument (-memory:val) is missing.");
                 gparams::set("memory_max_size", opt_arg);
+            }
+            else if (strcmp(opt_name, "tactics") == 0) {
+                if (!opt_arg)
+                    help_tactics();
+                else
+                    help_tactic(opt_arg);
+            }
+            else if (strcmp(opt_name, "probes") == 0) {
+                help_probes();
             }
             else {
                 std::cerr << "Error: invalid command line option: " << arg << "\n";
@@ -282,20 +303,25 @@ void parse_cmd_line_args(int argc, char ** argv) {
             gparams::set(key, value);
         }
         else {
-            if (g_input_file) {
+            if (get_extension(arg) && strcmp(get_extension(arg), "drat") == 0) {
+                g_input_kind = IN_DRAT;
+                g_drat_input_file = arg;
+            }
+            else if (g_input_file) 
                 warning_msg("input file was already specified.");
-            }
-            else {
+            else 
                 g_input_file = arg;
-            }
         }
         i++;
     }
+
+    if (timeout)
+        set_timeout(timeout * 1000);
 }
 
 
 int STD_CALL main(int argc, char ** argv) {
-    try{
+     try{
         unsigned return_value = 0;
         memory::initialize(0);
         memory::exit_when_out_of_memory(true, "ERROR: out of memory");
@@ -339,7 +365,7 @@ int STD_CALL main(int argc, char ** argv) {
                     g_input_kind = IN_MPS;
                 }
             }
-    }
+        }
         switch (g_input_kind) {
         case IN_SMTLIB_2:
             memory::exit_when_out_of_memory(true, "(error \"out of memory\")");
@@ -366,9 +392,13 @@ int STD_CALL main(int argc, char ** argv) {
         case IN_MPS:
             return_value = read_mps_file(g_input_file);
             break;
+        case IN_DRAT:
+            return_value = read_drat(g_drat_input_file, g_input_file);
+            break;
         default:
             UNREACHABLE();
         }
+        disable_timeout();
         memory::finalize();
 #ifdef _WINDOWS
         _CrtDumpMemoryLeaks();

@@ -104,15 +104,16 @@ namespace datalog {
             generic_model_converter* mc0 = alloc(generic_model_converter, m, "dl_coi");
             for (auto const& kv : engine) {
                 if (!kv.m_value.is_reachable()) {
-                    mc0->add(kv.m_key, m.mk_false());
+                    unreachable.insert(kv.m_key);
                 }
             }
             for (func_decl* f : unreachable) {
                 mc0->add(f, m.mk_false());
             }
             m_context.add_model_converter(mc0);
+            TRACE("dl", m_context.get_model_converter()->display(tout););
         }
-        CTRACE("dl", 0 != res, res->display(tout););
+        CTRACE("dl", res, res->display(tout););
         return res.detach();
     }
 
@@ -127,7 +128,8 @@ namespace datalog {
             func_decl * pred = r->get_decl();
             if (engine.get_fact(pred).is_reachable()) {
                 res->add_rule(r);
-            } else if (m_context.get_model_converter()) {
+            } 
+            else if (m_context.get_model_converter()) {
                 pruned_preds.insert(pred);
             }
         }
@@ -147,7 +149,7 @@ namespace datalog {
                     for (unsigned j = 0; j < head->get_num_args(); ++j) {
                         expr* arg = head->get_arg(j);
                         if (!is_var(arg)) {
-                            conj.push_back(m.mk_eq(m.mk_var(j, m.get_sort(arg)), arg));
+                            conj.push_back(m.mk_eq(m.mk_var(j, arg->get_sort()), arg));
                         }
                     }
                     fmls.push_back(mk_and(conj));

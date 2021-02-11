@@ -135,7 +135,7 @@ namespace datalog {
         ddnf_node::hash        m_hash;
         ddnf_node::eq          m_eq;
         ddnf_nodes             m_nodes;
-        svector<bool>          m_marked;
+        bool_vector          m_marked;
         stats                  m_stats;
     public:
         ddnf_mgr(unsigned n): m_noderefs(*this), m_internalized(false), m_tbv(n),
@@ -332,13 +332,13 @@ namespace datalog {
 
 
         void internalize() {
-            // populate maps (should be bit-sets) of decendants.
+            // populate maps (should be bit-sets) of descendants.
             if (m_internalized) {                
                 return;
             }
             ptr_vector<ddnf_node> todo;
             todo.push_back(m_root);
-            svector<bool> done(m_noderefs.size(), false);
+            bool_vector done(m_noderefs.size(), false);
             while (!todo.empty()) {
                 ddnf_node& n = *todo.back();
                 if (done[n.get_id()]) {
@@ -453,10 +453,8 @@ namespace datalog {
         }
 
         void display(std::ostream& out) const {
-            u_map<ddnf_mgr*>::iterator it = m_mgrs.begin(), end = m_mgrs.end();
-            for (; it != end; ++it) {
-                it->m_value->display(out);
-            }
+            for (auto const& kv : m_mgrs)
+                kv.m_value->display(out);
         }
 
     private:
@@ -558,13 +556,9 @@ namespace datalog {
             m_todo.reset();
             m_cache.reset();
             m_expr2tbv.reset();
-            datalog::rule_set::iterator it  = rules.begin();
-            datalog::rule_set::iterator end = rules.end();
-            for (; it != end; ++it) {
-                if (!pre_process_rule(**it)) {
+            for (auto* r : rules) 
+                if (!pre_process_rule(*r)) 
                     return false;
-                }
-            }
             return true;
         }
 
@@ -729,7 +723,7 @@ namespace datalog {
             func_decl* d = p->get_decl();
             SASSERT(d->get_family_id() == null_family_id);
             for (unsigned i = 0; i < p->get_num_args(); ++i) {
-                domain.push_back(compile_sort(m.get_sort(p->get_arg(i))));
+                domain.push_back(compile_sort(p->get_arg(i)->get_sort()));
             }
             func_decl_ref fn(m);
             fn = m.mk_func_decl(d->get_name(), domain.size(), domain.c_ptr(), m.mk_bool_sort());
@@ -856,7 +850,7 @@ namespace datalog {
             ddnf_nodes const& ns = m_ddnfs.lookup(num_bits, *t);
             ddnf_nodes::iterator it = ns.begin(), end = ns.end();
             expr_ref_vector eqs(m);
-            sort* s = m.get_sort(w);
+            sort* s = w->get_sort();
             for (; it != end; ++it) {
                 eqs.push_back(m.mk_eq(w, bv.mk_numeral(rational((*it)->get_id()), s)));
             }

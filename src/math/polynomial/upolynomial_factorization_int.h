@@ -23,8 +23,7 @@ Notes:
    [3] Henri Cohen. A Course in Computational Algebraic Number Theory. Springer Verlag, 1993.
 
 --*/
-#ifndef UPOLYNOMIAL_FACTORIZATION_INT_H_
-#define UPOLYNOMIAL_FACTORIZATION_INT_H_
+#pragma once
 
 #include "math/polynomial/upolynomial_factorization.h"
 
@@ -138,7 +137,7 @@ namespace upolynomial {
         // the factors to select from
         factors_type const   & m_factors;
         // which factors are enabled
-        svector<bool>          m_enabled;
+        bool_vector          m_enabled;
         // the size of the current selection
         int                    m_current_size;
         // the current selection: indices at positions < m_current_size, other values are maxed out
@@ -195,7 +194,7 @@ namespace upolynomial {
 
                 // the index we are currently trying to fix
                 int current_i = m_current_size - 1;
-                // the value we found as plausable (-1 we didn't find anything)
+                // the value we found as plausible (-1 we didn't find anything)
                 int current_value = -1;
 
                 if (remove_current) {
@@ -401,7 +400,7 @@ namespace upolynomial {
                 } else {   
                     if (selection_i >= m_current.size() || (int) current < m_current[selection_i]) {
                         SASSERT(m_factors.get_degree(current) == 1);
-                        if (out.size() == 0) {
+                        if (out.empty()) {
                             upm.set(m_factors[current].size(), m_factors[current].c_ptr(), out);
                         } else {
                             upm.mul(out.size(), out.c_ptr(), m_factors[current].size(), m_factors[current].c_ptr(), out);
@@ -417,4 +416,3 @@ namespace upolynomial {
     };
 };
 
-#endif

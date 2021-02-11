@@ -24,13 +24,13 @@ namespace smt {
 
     void theory_dummy::found_theory_expr() {
         if (!m_theory_exprs) {
-            get_context().push_trail(value_trail<context, bool>(m_theory_exprs));
+            get_context().push_trail(value_trail<bool>(m_theory_exprs));
             m_theory_exprs = true;
         }
     }
 
-    theory_dummy::theory_dummy(family_id fid, char const * name):
-        theory(fid),
+    theory_dummy::theory_dummy(context& ctx, family_id fid, char const * name):
+        theory(ctx, fid),
         m_theory_exprs(false),
         m_name(name) {
     }

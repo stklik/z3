@@ -16,16 +16,15 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_BV_H_
-#define THEORY_BV_H_
+#pragma once
 
-#include "smt/smt_theory.h"
-#include "smt/params/theory_bv_params.h"
 #include "ast/rewriter/bit_blaster/bit_blaster.h"
 #include "util/trail.h"
 #include "util/union_find.h"
 #include "ast/arith_decl_plugin.h"
-#include "smt/proto_model/numeral_factory.h"
+#include "model/numeral_factory.h"
+#include "smt/smt_theory.h"
+#include "smt/params/theory_bv_params.h"
 
 namespace smt {
     
@@ -106,13 +105,13 @@ namespace smt {
         atom * get_bv2a(bool_var bv) const { return m_bool_var2atom.get(bv, 0); }
 #endif
         theory_bv_stats          m_stats;
-        theory_bv_params const & m_params;
         bv_util                  m_util;
         arith_util               m_autil;
         bit_blaster              m_bb;
         th_trail_stack           m_trail_stack;
         th_union_find            m_find;
         vector<literal_vector>   m_bits;     // per var, the bits of a given variable.
+        ptr_vector<expr>         m_bits_expr;
         svector<unsigned>        m_wpos;     // per var, watch position for fixed variable detection. 
         vector<zero_one_bits>    m_zero_one_bits; // per var, see comment in the struct zero_one_bit
         bool_var2atom            m_bool_var2atom;
@@ -123,7 +122,21 @@ namespace smt {
         typedef map<value_sort_pair, theory_var, value_sort_pair_hash, default_eq<value_sort_pair> > value2var;
 
         value2var                m_fixed_var_table;
+        mutable vector<rational>         m_power2;
         
+        unsigned char            m_eq_activity[256];
+        struct bv_diseq {
+            theory_var v1, v2;
+            unsigned idx;
+            bv_diseq(theory_var v1, theory_var v2, unsigned idx):v1(v1), v2(v2), idx(idx) {}
+        };
+        svector<bv_diseq> m_prop_diseqs;
+        unsigned          m_prop_diseqs_qhead { 0 };
+        vector<vector<std::pair<theory_var, theory_var>>> m_diseq_watch;
+        unsigned char            m_diseq_activity[256];
+        svector<bool_var> m_diseq_watch_trail;
+        unsigned_vector   m_diseq_watch_lim;
+
         literal_vector           m_tmp_literals;
         svector<var_pos>         m_prop_queue;
         bool                     m_approximates_large_bvs;
@@ -134,7 +147,7 @@ namespace smt {
         unsigned get_bv_size(app const * n) const { return m_util.get_bv_size(n); }
         unsigned get_bv_size(enode const * n) const { return m_util.get_bv_size(n->get_owner()); }
         unsigned get_bv_size(theory_var v) const { return get_bv_size(get_enode(v)); }
-        bool is_bv(app const* n) const { return m_util.is_bv_sort(get_manager().get_sort(n)); }
+        bool is_bv(app const* n) const { return m_util.is_bv_sort(n->get_sort()); }
         bool is_bv(enode const* n) const { return is_bv(n->get_owner()); }
         bool is_bv(theory_var v) const { return is_bv(get_enode(v)); }
         region & get_region() { return m_trail_stack.get_region(); }
@@ -155,7 +168,8 @@ namespace smt {
         void get_arg_bits(app * n, unsigned idx, expr_ref_vector & r);
         friend class add_var_pos_trail;
         void simplify_bit(expr * s, expr_ref & r);
-        void mk_new_diseq_axiom(theory_var v1, theory_var v2, unsigned idx);
+        void add_new_diseq_axiom(theory_var v1, theory_var v2, unsigned idx);
+        void assert_new_diseq_axiom(theory_var v1, theory_var v2, unsigned idx);
         friend class register_true_false_bit_trail;
         void register_true_false_bit(theory_var v, unsigned idx);
         void find_new_diseq_axioms(var_pos_occ * occs, theory_var v, unsigned idx);
@@ -166,6 +180,7 @@ namespace smt {
         void fixed_var_eh(theory_var v);
         void add_fixed_eq(theory_var v1, theory_var v2);
         bool get_fixed_value(theory_var v, numeral & result) const;
+        bool internalize_term_core(app * term);
         void internalize_num(app * n);
         void internalize_add(app * n);
         void internalize_sub(app * n);
@@ -216,7 +231,6 @@ namespace smt {
         void assert_bv2int_axiom(app* n);
 
     protected:
-        void init(context * ctx) override;
         theory_var mk_var(enode * n) override;
         bool internalize_atom(app * atom, bool gate_ctx) override;
         bool internalize_term(app * term) override;
@@ -233,6 +247,8 @@ namespace smt {
         bool include_func_interp(func_decl* f) override;
         svector<theory_var>   m_merge_aux[2]; //!< auxiliary vector used in merge_zero_one_bits
         bool merge_zero_one_bits(theory_var r1, theory_var r2);
+        bool can_propagate() override { return m_prop_diseqs_qhead < m_prop_diseqs.size(); }
+        void propagate() override;
 
         // -----------------------------------
         //
@@ -243,8 +259,9 @@ namespace smt {
         void init_model(model_generator & m) override;
         model_value_proc * mk_value(enode * n, model_generator & mg) override;
 
+        smt_params const& params() const;
     public:
-        theory_bv(ast_manager & m, theory_bv_params const & params, bit_blaster_params const & bb_params);
+        theory_bv(context& ctx);
         ~theory_bv() override;
         
         theory * mk_fresh(context * new_ctx) override;
@@ -256,6 +273,9 @@ namespace smt {
         void after_merge_eh(theory_var r1, theory_var r2, theory_var v1, theory_var v2) { SASSERT(check_zero_one_bits(r1)); }
         void unmerge_eh(theory_var v1, theory_var v2);
 
+        bool get_lower(enode* n, rational& v);
+        bool get_upper(enode* n, rational& v);
+
         void display_var(std::ostream & out, theory_var v) const;
         void display_bit_atom(std::ostream & out, bool_var v, bit_atom const * a) const;
         void display_atoms(std::ostream & out) const;
@@ -264,14 +284,8 @@ namespace smt {
 
         bool get_fixed_value(app* x, numeral & result) const;
 
-
-#ifdef Z3DEBUG
-        bool check_assignment(theory_var v) const;
-        bool check_invariant() const;
-        bool check_zero_one_bits(theory_var v) const;
-#endif
+        bool check_assignment(theory_var v);
+        bool check_invariant();
+        bool check_zero_one_bits(theory_var v);
     };
 };
-
-#endif /* THEORY_BV_H_ */
-

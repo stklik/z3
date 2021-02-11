@@ -16,14 +16,12 @@ Author:
 Notes:
 
 --*/
-#ifndef BV_REWRITER_H_
-#define BV_REWRITER_H_
+#pragma once
 
 #include "ast/rewriter/poly_rewriter.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/rewriter/mk_extract_proc.h"
-#include "ast/rewriter/bv_trailing.h"
 
 class bv_rewriter_core {
 protected:
@@ -41,6 +39,8 @@ protected:
     decl_kind add_decl_kind() const { return OP_BADD; }
     decl_kind mul_decl_kind() const { return OP_BMUL; }
     bool use_power() const { return false; }
+    app* mk_power(expr* x, rational const& r, sort* s) { UNREACHABLE(); return nullptr; }
+    expr* coerce(expr* x, sort* s) { UNREACHABLE(); return nullptr; }
     decl_kind power_decl_kind() const { UNREACHABLE(); return static_cast<decl_kind>(UINT_MAX); }
 
 public:
@@ -49,7 +49,6 @@ public:
 
 class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     mk_extract_proc m_mk_extract;
-    bv_trailing     m_rm_trailing;
     arith_util m_autil;
     bool       m_hi_div0;
     bool       m_elim_sign_ext;
@@ -59,14 +58,10 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_mkbv2num;
     bool       m_ite2id;
     bool       m_split_concat_eq;
-    bool       m_udiv2mul;
-    bool       m_bvnot2arith;
     bool       m_bv_sort_ac;
-    bool       m_trailing;
     bool       m_extract_prop;
     bool       m_bvnot_simpl;
     bool       m_le_extra;
-    bool       m_urem_simpl;
 
     bool is_zero_bit(expr * x, unsigned idx);
 
@@ -107,6 +102,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     br_status mk_bv_shl(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_bv_lshr(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_bv_ashr(expr * arg1, expr * arg2, expr_ref & result);
+    bool distribute_concat(decl_kind op, unsigned n, expr* const* args, expr_ref& result);
     bool is_minus_one_core(expr * arg) const;
     bool is_x_minus_one(expr * arg, expr * & x);
     bool is_add_no_overflow(expr* e);
@@ -134,6 +130,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     br_status mk_bv_redand(expr * arg, expr_ref & result);
     br_status mk_bv_comp(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_bit2bool(expr * lhs, expr * rhs, expr_ref & result);
+    br_status mk_bit2bool(expr * lhs, int idx, expr_ref & result);
     br_status mk_blast_eq_value(expr * lhs, expr * rhs, expr_ref & result);
     br_status mk_eq_concat(expr * lhs, expr * rhs, expr_ref & result);
     br_status mk_mkbv(unsigned num, expr * const * args, expr_ref & result);
@@ -158,7 +155,6 @@ public:
     bv_rewriter(ast_manager & m, params_ref const & p = params_ref()):
         poly_rewriter<bv_rewriter_core>(m, p),
         m_mk_extract(m_util),
-        m_rm_trailing(m_mk_extract),
         m_autil(m) {
         updt_local_params(p);
     }
@@ -223,4 +219,3 @@ public:
 
 };
 
-#endif

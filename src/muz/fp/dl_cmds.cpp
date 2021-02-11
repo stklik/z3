@@ -35,7 +35,7 @@ Notes:
 
 
 struct dl_context {
-    smt_params                    m_fparams;
+    scoped_ptr<smt_params>        m_fparams;
     params_ref                    m_params_ref;
     fp_params                     m_params;
     cmd_context &                 m_cmd;
@@ -70,10 +70,15 @@ struct dl_context {
         }
     }
 
+    smt_params& fparams() {
+        if (!m_fparams) m_fparams = alloc(smt_params);
+        return *m_fparams.get();
+    }
+
     void init() {
         ast_manager& m = m_cmd.m();
         if (!m_context) {
-            m_context = alloc(datalog::context, m, m_register_engine, m_fparams, m_params_ref);
+            m_context = alloc(datalog::context, m, m_register_engine, fparams(), m_params_ref);
         }
         if (!m_decl_plugin) {
             symbol name("datalog_relation");
@@ -94,7 +99,7 @@ struct dl_context {
     void register_predicate(func_decl* pred, unsigned num_kinds, symbol const* kinds) {
         if (m_collected_cmds) {
             m_collected_cmds->m_rels.push_back(pred);
-            m_trail.push(push_back_vector<dl_context, func_decl_ref_vector>(m_collected_cmds->m_rels));
+            m_trail.push(push_back_vector<func_decl_ref_vector>(m_collected_cmds->m_rels));
         }
         dlctx().register_predicate(pred, false);
         dlctx().set_predicate_representation(pred, num_kinds, kinds);
@@ -106,8 +111,8 @@ struct dl_context {
             expr_ref rl = m_context->bind_vars(rule, true);
             m_collected_cmds->m_rules.push_back(rl);
             m_collected_cmds->m_names.push_back(name);
-            m_trail.push(push_back_vector<dl_context, expr_ref_vector>(m_collected_cmds->m_rules));
-            m_trail.push(push_back_vector<dl_context, svector<symbol> >(m_collected_cmds->m_names));
+            m_trail.push(push_back_vector<expr_ref_vector>(m_collected_cmds->m_rules));
+            m_trail.push(push_back_vector<svector<symbol> >(m_collected_cmds->m_names));
         }
         else {
         m_context->add_rule(rule, name, bound);
@@ -125,7 +130,7 @@ struct dl_context {
             qr = m.mk_app(q, args.size(), args.c_ptr());
             qr = m_context->bind_vars(qr, false);
             m_collected_cmds->m_queries.push_back(qr);
-            m_trail.push(push_back_vector<dl_context, expr_ref_vector>(m_collected_cmds->m_queries));
+            m_trail.push(push_back_vector<expr_ref_vector>(m_collected_cmds->m_queries));
             return true;
         }
         else {
@@ -245,7 +250,8 @@ public:
         datalog::context& dlctx = m_dl_ctx->dlctx();
         set_background(ctx);
         dlctx.updt_params(m_params);
-        unsigned timeout   = m_dl_ctx->get_params().timeout();
+        unsigned timeout   = ctx.params().m_timeout;
+        unsigned rlimit    = ctx.params().rlimit();
         cancel_eh<reslimit> eh(ctx.m().limit());
         bool query_exn = false;
         lbool status = l_undef;
@@ -253,12 +259,14 @@ public:
             IF_VERBOSE(10, verbose_stream() << "(query)\n";);
             scoped_ctrl_c ctrlc(eh);
             scoped_timer timer(timeout, &eh);
+            scoped_rlimit _rlimit(ctx.m().limit(), rlimit);
             cmd_context::scoped_watch sw(ctx);
             try {
                 status = dlctx.rel_query(1, &m_target);
             }
             catch (z3_error & ex) {
                 ctx.regular_stream() << "(error \"query failed: " << ex.msg() << "\")" << std::endl;
+                print_statistics(ctx);
                 throw ex;
             }
             catch (z3_exception& ex) {
@@ -302,7 +310,6 @@ public:
 
             case datalog::OK:
                 (void)query_exn;
-                SASSERT(query_exn);
                 break;
 
             case datalog::CANCELED:
@@ -329,10 +336,8 @@ public:
 private:
     void set_background(cmd_context& ctx) {
         datalog::context& dlctx = m_dl_ctx->dlctx();
-        ptr_vector<expr>::const_iterator it  = ctx.begin_assertions();
-        ptr_vector<expr>::const_iterator end = ctx.end_assertions();
-        for (; it != end; ++it) {
-            dlctx.assert_expr(*it);
+        for (expr * e : ctx.assertions()) {
+            dlctx.assert_expr(e);
         }
     }
 
@@ -343,16 +348,13 @@ private:
             expr_ref query_result(dlctx.get_answer_as_formula(), m);
             sbuffer<symbol> var_names;
             unsigned num_decls = 0;
-            if (is_quantifier(m_target)) {
-                num_decls = to_quantifier(m_target)->get_num_decls();
-            }
             ctx.display(ctx.regular_stream(), query_result, 0, num_decls, "X", var_names);
             ctx.regular_stream() << std::endl;
         }
     }
 
     void print_statistics(cmd_context& ctx) {
-        if (m_dl_ctx->get_params().print_statistics()) {
+        if (ctx.params().m_statistics) {
             statistics st;
             datalog::context& dlctx = m_dl_ctx->dlctx();
             dlctx.collect_statistics(st);
@@ -478,44 +480,6 @@ public:
     }
 };
 
-/**
-   \brief fixedpoint-push command.
-*/
-class dl_push_cmd : public cmd {
-    ref<dl_context> m_dl_ctx;
-public:
-    dl_push_cmd(dl_context * dl_ctx):
-      cmd("fixedpoint-push"),
-      m_dl_ctx(dl_ctx)
-    {}
-
-    char const * get_usage() const override { return ""; }
-    char const * get_descr(cmd_context & ctx) const override { return "push the fixedpoint context"; }
-    unsigned get_arity() const override { return 0; }
-    void execute(cmd_context & ctx) override {
-        m_dl_ctx->push();
-    }
-};
-
-/**
-   \brief fixedpoint-pop command.
-*/
-class dl_pop_cmd : public cmd {
-    ref<dl_context> m_dl_ctx;
-public:
-    dl_pop_cmd(dl_context * dl_ctx):
-      cmd("fixedpoint-pop"),
-      m_dl_ctx(dl_ctx)
-    {}
-
-    char const * get_usage() const override { return ""; }
-    char const * get_descr(cmd_context & ctx) const override { return "pop the fixedpoint context"; }
-    unsigned get_arity() const override { return 0; }
-    void execute(cmd_context & ctx) override {
-        m_dl_ctx->pop();
-    }
-};
-
 
 static void install_dl_cmds_aux(cmd_context& ctx, dl_collected_cmds* collected_cmds) {
     dl_context * dl_ctx = alloc(dl_context, ctx, collected_cmds);
@@ -523,8 +487,6 @@ static void install_dl_cmds_aux(cmd_context& ctx, dl_collected_cmds* collected_c
     ctx.insert(alloc(dl_query_cmd, dl_ctx));
     ctx.insert(alloc(dl_declare_rel_cmd, dl_ctx));
     ctx.insert(alloc(dl_declare_var_cmd, dl_ctx));
-    ctx.insert(alloc(dl_push_cmd, dl_ctx));
-    ctx.insert(alloc(dl_pop_cmd, dl_ctx));
 }
 
 void install_dl_cmds(cmd_context & ctx) {

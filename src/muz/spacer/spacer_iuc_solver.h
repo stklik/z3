@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef SPACER_IUC_SOLVER_H_
-#define SPACER_IUC_SOLVER_H_
+#pragma once
 
 #include"solver/solver.h"
 #include"ast/expr_substitution.h"
@@ -121,13 +120,19 @@ public:
     void set_produce_models(bool f) override  { m_solver.set_produce_models(f); }
     void assert_expr_core(expr *t) override  { m_solver.assert_expr(t); }
     void assert_expr_core2(expr *t, expr *a) override   { NOT_IMPLEMENTED_YET(); }
+    void set_phase(expr* e) override { m_solver.set_phase(e); }
+    phase* get_phase() override { return m_solver.get_phase();  }
+    void set_phase(phase* p) override { m_solver.set_phase(p); }
+    void move_to_front(expr* e) override { m_solver.move_to_front(e); }
     expr_ref_vector cube(expr_ref_vector&, unsigned) override { return expr_ref_vector(m); }
+    void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth) override { m_solver.get_levels(vars, depth); }
+    expr_ref_vector get_trail() override { return m_solver.get_trail(); }
 
     void push() override;
     void pop(unsigned n) override;
     unsigned get_scope_level() const override { return m_solver.get_scope_level(); }
 
-    lbool check_sat(unsigned num_assumptions, expr * const *assumptions) override;
+    lbool check_sat_core(unsigned num_assumptions, expr * const *assumptions) override;
     lbool check_sat_cc(const expr_ref_vector &cube, vector<expr_ref_vector> const & clauses) override;
     void set_progress_callback(progress_callback *callback) override {
         m_solver.set_progress_callback(callback);
@@ -178,4 +183,3 @@ public:
     };
 };
 }
-#endif

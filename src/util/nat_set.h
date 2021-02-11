@@ -16,10 +16,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef NAT_SET_H_
-#define NAT_SET_H_
+#pragma once
 
-#include<limits.h>
+#include <climits>
 #include "util/vector.h"
 
 class nat_set {
@@ -73,16 +72,11 @@ public:
     }
 
     bool empty() const {
-        svector<unsigned>::const_iterator it  = m_timestamps.begin();
-        svector<unsigned>::const_iterator end = m_timestamps.end();
-        for (; it != end; ++it) {
-            if (*it > m_curr_timestamp) {
+        for (auto const& t : m_timestamps)
+            if (t > m_curr_timestamp) 
                 return false;
-            }
-        }
         return true;
     }
 };
 
-#endif /* NAT_SET_H_ */
 

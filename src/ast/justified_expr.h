@@ -1,6 +1,5 @@
 
-#ifndef JUSTIFIED_EXPR_H_
-#define JUSTIFIED_EXPR_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -40,13 +39,22 @@ public:
         m.inc_ref(m_proof);
     }
 
+    justified_expr(justified_expr && other) noexcept :
+        m(other.m),
+        m_fml(nullptr),
+        m_proof(nullptr)
+    {
+        std::swap(m_fml, other.m_fml);
+        std::swap(m_proof, other.m_proof);
+    }
+
     ~justified_expr() {
         m.dec_ref(m_fml);
         m.dec_ref(m_proof);
+		m_fml = nullptr;
+		m_proof = nullptr;
     }
     
     expr* get_fml() const { return m_fml; }
     proof* get_proof() const { return m_proof; }        
 };
-
-#endif

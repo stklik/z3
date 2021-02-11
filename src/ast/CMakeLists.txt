@@ -14,8 +14,11 @@ z3_add_component(ast
     ast_translation.cpp
     ast_util.cpp
     bv_decl_plugin.cpp
+    char_decl_plugin.cpp
+    cost_evaluator.cpp
     datatype_decl_plugin.cpp
     decl_collector.cpp
+    display_dimacs.cpp
     dl_decl_plugin.cpp
     expr2polynomial.cpp
     expr2var.cpp
@@ -35,11 +38,15 @@ z3_add_component(ast
     occurs.cpp
     pb_decl_plugin.cpp
     pp.cpp
+    quantifier_stat.cpp
+    recfun_decl_plugin.cpp
     reg_decl_plugins.cpp
     seq_decl_plugin.cpp
     shared_occs.cpp
+    special_relations_decl_plugin.cpp
     static_features.cpp
     used_vars.cpp
+    value_generator.cpp
     well_sorted.cpp
   COMPONENT_DEPENDENCIES
     polynomial

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_CLEANER_H_
-#define SAT_CLEANER_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "util/statistics.h"
@@ -40,6 +39,7 @@ namespace sat {
     public:
         cleaner(solver & s);
 
+        bool is_clean() const;
         bool operator()(bool force = false);
 
         void collect_statistics(statistics & st) const;
@@ -50,4 +50,3 @@ namespace sat {
 
 };
 
-#endif

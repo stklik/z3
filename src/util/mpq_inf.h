@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MPQ_INF_H_
-#define MPQ_INF_H_
+#pragma once
 
 #include "util/mpq.h"
 #include "util/hash.h"
@@ -40,14 +39,14 @@ public:
     }
 
     enum inf_kind { NEG=-1, ZERO, POS };
-    
+
     void reset(mpq_inf & a) {
         m.reset(a.first);
         m.reset(a.second);
     }
-    
+
     unsigned hash(mpq_inf const & a) const { return hash_u_u(m.hash(a.first), m.hash(a.second)); }
-    
+
     void del(mpq_inf & a) {
         m.del(a.first);
         m.del(a.second);
@@ -279,11 +278,14 @@ public:
     mpq_manager<SYNCH>& get_mpq_manager() { return m; }
 };
 
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
 typedef mpq_inf_manager<true>  synch_mpq_inf_manager;
 #else
 typedef mpq_inf_manager<false> synch_mpq_inf_manager;
 #endif
 typedef mpq_inf_manager<false> unsynch_mpq_inf_manager;
 
-#endif
+typedef _scoped_numeral<unsynch_mpq_inf_manager> scoped_mpq_inf;
+typedef _scoped_numeral<synch_mpq_inf_manager> scoped_synch_mpq_inf;
+typedef _scoped_numeral_vector<unsynch_mpq_inf_manager> scoped_mpq_inf_vector;
+

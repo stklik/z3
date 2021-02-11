@@ -28,8 +28,7 @@ Author:
 Notes:
 
 --*/
-#ifndef MPZ_MATRIX_H_
-#define MPZ_MATRIX_H_
+#pragma once
 
 #include "util/mpz.h"
 
@@ -107,7 +106,7 @@ public:
        this method will give preference to the row that occurs first.
        
        \remark The vector r must have at least A.n() capacity
-       The numer of linear independent rows is returned.
+       The number of linear independent rows is returned.
 
        Store the new matrix in B.
     */
@@ -153,4 +152,3 @@ inline std::ostream & operator<<(std::ostream & out, scoped_mpz_matrix const & m
     return out;
 }
 
-#endif

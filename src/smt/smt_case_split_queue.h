@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_CASE_SPLIT_QUEUE_H_
-#define SMT_CASE_SPLIT_QUEUE_H_
+#pragma once
 
 #include "smt/smt_types.h"
 #include "util/heap.h"
@@ -32,6 +31,7 @@ namespace smt {
     class case_split_queue {
     public:
         virtual void activity_increased_eh(bool_var v) = 0;
+        virtual void activity_decreased_eh(bool_var v) = 0;
         virtual void mk_var_eh(bool_var v) = 0;
         virtual void del_var_eh(bool_var v) = 0;
         virtual void assign_lit_eh(literal l) {}
@@ -54,5 +54,4 @@ namespace smt {
     case_split_queue * mk_case_split_queue(context & ctx, smt_params & p);
 };
 
-#endif /* SMT_CASE_SPLIT_QUEUE_H_ */
 

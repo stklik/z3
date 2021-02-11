@@ -1,3 +1,4 @@
+
 /*++
 Copyright (c) 2006 Microsoft Corporation
 
@@ -12,14 +13,15 @@ Abstract:
 Author:
 
     Leonardo de Moura (leonardo) 2006-10-16.
+    Daniel Schemmel 2019-2-23
 
 Revision History:
 
---*/
-#ifndef BUFFER_H_
-#define BUFFER_H_
 
-#include<string.h>
+--*/
+#pragma once
+
+#include <type_traits>
 #include "util/memory_manager.h"
 
 template<typename T, bool CallDestructors=true, unsigned INITIAL_SIZE=16>
@@ -37,9 +39,15 @@ protected:
     }
 
     void expand() {
+        static_assert(std::is_nothrow_move_constructible<T>::value, "");
         unsigned new_capacity = m_capacity << 1;
         T * new_buffer        = reinterpret_cast<T*>(memory::allocate(sizeof(T) * new_capacity));
-        memcpy(new_buffer, m_buffer, m_pos * sizeof(T));
+        for (unsigned i = 0; i < m_pos; ++i) {
+            new (&new_buffer[i]) T(std::move(m_buffer[i]));
+            if (CallDestructors) {
+                m_buffer[i].~T();
+            }
+        }
         free_memory();
         m_buffer              = new_buffer;
         m_capacity            = new_capacity;
@@ -247,6 +255,9 @@ public:
     }
 };
 
+// note that the append added is actually not an addition over its base class buffer,
+// which already has an append function with the same signature and implementation
+
 template<typename T, unsigned INITIAL_SIZE=16>
 class ptr_buffer : public buffer<T *, false, INITIAL_SIZE> {
 public:
@@ -263,6 +274,3 @@ public:
     sbuffer(): buffer<T, false, INITIAL_SIZE>() {}
     sbuffer(unsigned sz, const T& elem) : buffer<T, false, INITIAL_SIZE>(sz,elem) {}
 };
-
-#endif /* BUFFER_H_ */
-

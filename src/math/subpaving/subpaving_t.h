@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SUBPAVING_T_H_
-#define SUBPAVING_T_H_
+#pragma once
 
 #include<iostream>
 #include "util/tptr.h"
@@ -202,7 +201,7 @@ public:
     public:
         node(context_t & s, unsigned id);
         node(node * parent, unsigned id);
-        // return unique indentifier.
+        // return unique identifier.
         unsigned id() const { return m_id; }
         bound_array_manager & bm() const { return m_bm; }
         bound_array & lowers() { return m_lowers; }
@@ -476,7 +475,7 @@ private:
     interval_manager          m_im;
     scoped_numeral_vector     m_num_buffer;
 
-    svector<bool>             m_is_int;
+    bool_vector             m_is_int;
     ptr_vector<definition>    m_defs;
     vector<watch_list>        m_wlist;
 
@@ -848,4 +847,3 @@ public:
 
 };
 
-#endif

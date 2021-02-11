@@ -24,17 +24,19 @@ Revision History:
 
 namespace smt {
     class theory_lra : public theory, public theory_opt {
+    public:
         class imp;
+    private:
         imp* m_imp;
 
     public:
-        theory_lra(ast_manager& m, theory_arith_params& ap);
+        theory_lra(context& ctx);
         ~theory_lra() override;
         theory* mk_fresh(context* new_ctx) override;
         char const* get_name() const override { return "arithmetic"; }
-        
-        void init(context * ctx) override;
 
+        void init() override;
+        
         bool internalize_atom(app * atom, bool gate_ctx) override;
                                                      
         bool internalize_term(app * term) override;
@@ -42,6 +44,8 @@ namespace smt {
         void internalize_eq_eh(app * atom, bool_var v) override;
 
         void assign_eh(bool_var v, bool is_true) override;
+
+        lbool get_phase(bool_var v) override;
 
         void new_eq_eh(theory_var v1, theory_var v2) override;
 
@@ -73,19 +77,25 @@ namespace smt {
 
         void reset_eh() override;
 
+        void apply_sort_cnstr(enode * n, sort * s) override;
+
         void init_model(model_generator & m) override;
         
         model_value_proc * mk_value(enode * n, model_generator & mg) override;
 
         bool get_value(enode* n, expr_ref& r) override;
+        bool include_func_interp(func_decl* f) override;
+        bool get_value(enode* n, rational& r);
         bool get_lower(enode* n, expr_ref& r);
         bool get_upper(enode* n, expr_ref& r);
-
-        bool validate_eq_in_model(theory_var v1, theory_var v2, bool is_true) const override;
+        bool get_lower(enode* n, rational& r, bool& is_strict);
+        bool get_upper(enode* n, rational& r, bool& is_strict);
                 
         void display(std::ostream & out) const override;
         
         void collect_statistics(::statistics & st) const override;
+
+        void setup() override;
 
         // optimization
         expr_ref mk_ge(generic_model_converter& fm, theory_var v, inf_rational const& val);

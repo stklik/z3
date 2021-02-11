@@ -22,6 +22,7 @@ Revision History:
 #include<time.h>
 #include<signal.h>
 #include "util/timeout.h"
+#include "util/mutex.h"
 #include "parsers/smt2/smt2parser.h"
 #include "muz/fp/dl_cmds.h"
 #include "cmd_context/extra_cmds/dbg_cmds.h"
@@ -29,14 +30,17 @@ Revision History:
 #include "cmd_context/extra_cmds/polynomial_cmds.h"
 #include "cmd_context/extra_cmds/subpaving_cmds.h"
 #include "smt/smt2_extra_cmds.h"
-#include "tactic/portfolio/smt_strategic_solver.h"
 #include "smt/smt_solver.h"
 
+static mutex *display_stats_mux = new mutex;
+
 extern bool g_display_statistics;
+extern bool g_display_model;
 static clock_t             g_start_time;
 static cmd_context *       g_cmd_context = nullptr;
 
 static void display_statistics() {
+    lock_guard lock(*display_stats_mux);
     clock_t end_time = clock();
     if (g_cmd_context && g_display_statistics) {
         std::cout.flush();
@@ -48,23 +52,68 @@ static void display_statistics() {
     }
 }
 
-static void on_timeout() {
-    #pragma omp critical (g_display_stats)
-    {
-        display_statistics();
-        exit(0);
+static void display_model() {
+    if (g_display_model && g_cmd_context) {
+        model_ref mdl;
+        if (g_cmd_context->is_model_available(mdl))
+            g_cmd_context->display_model(mdl);
     }
+}
+
+static void on_timeout() {
+    display_statistics();
+    exit(0);    
 }
 
 static void STD_CALL on_ctrl_c(int) {
     signal (SIGINT, SIG_DFL);
-    #pragma omp critical (g_display_stats)
-    {
-        display_statistics();
-    }
+    display_statistics();
     raise(SIGINT);
 }
 
+void help_tactics() {
+    struct cmp {
+        bool operator()(tactic_cmd* a, tactic_cmd* b) const {
+            return a->get_name().str() < b->get_name().str();
+        }
+    };
+    cmd_context ctx;
+    ptr_vector<tactic_cmd> cmds;
+    for (auto cmd : ctx.tactics()) 
+        cmds.push_back(cmd);
+    cmp lt;
+    std::sort(cmds.begin(), cmds.end(), lt);
+    for (auto cmd : cmds) 
+        std::cout << "- " << cmd->get_name() << " " << cmd->get_descr() << "\n";
+}
+
+void help_tactic(char const* name) {
+    cmd_context ctx;
+    for (auto cmd : ctx.tactics()) {
+        if (cmd->get_name() == name) {
+            tactic_ref t = cmd->mk(ctx.m());
+            param_descrs descrs;
+            t->collect_param_descrs(descrs);
+            descrs.display(std::cout, 4);
+        }
+    }
+}
+
+void help_probes() {
+    struct cmp {
+        bool operator()(probe_info* a, probe_info* b) const {
+            return a->get_name().str() < b->get_name().str();
+        }
+    };
+    cmd_context ctx;
+    ptr_vector<probe_info> cmds;
+    for (auto cmd : ctx.probes()) 
+        cmds.push_back(cmd);
+    cmp lt;
+    std::sort(cmds.begin(), cmds.end(), lt);
+    for (auto cmd : cmds) 
+        std::cout << "- " << cmd->get_name() << " " << cmd->get_descr() << "\n";
+}
 
 unsigned read_smtlib2_commands(char const * file_name) {
     g_start_time = clock();
@@ -73,8 +122,6 @@ unsigned read_smtlib2_commands(char const * file_name) {
     cmd_context ctx;
 
     ctx.set_solver_factory(mk_smt_strategic_solver_factory());
-    ctx.set_interpolating_solver_factory(mk_smt_solver_factory());
-
     install_dl_cmds(ctx);
     install_dbg_cmds(ctx);
     install_polynomial_cmds(ctx);
@@ -98,12 +145,9 @@ unsigned read_smtlib2_commands(char const * file_name) {
         result = parse_smt2_commands(ctx, std::cin, true);
     }
 
-
-    #pragma omp critical (g_display_stats)
-    {
-        display_statistics();
-        g_cmd_context = nullptr;
-    }
+    display_statistics();
+    display_model();
+    g_cmd_context = nullptr;
     return result ? 0 : 1;
 }
 

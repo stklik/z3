@@ -61,9 +61,9 @@ int parse(string const & filename, map<string, map_entry> & data) {
         if (line.substr(0, prefix_len) == prefix) {
             line = trim(line.substr(prefix_len));
             size_t from = 0, ti = 0;
-            for (size_t inx = line.find(':', from);
+            for (size_t inx = line.find(" : ", from);
                 inx != string::npos;
-                inx = line.find(':', from)) {
+                inx = line.find(" : ", from)) {
                 tokens[ti] = trim(line.substr(from, inx-from));
                 from = inx+1;
                 ti++;
@@ -78,10 +78,13 @@ int parse(string const & filename, map<string, map_entry> & data) {
                 entry.num_instances = entry.max_generation = entry.max_cost = 0;
             }
 
+            // Existing entries represent previous occurrences of quantifiers
+            // that, at some point, were removed (e.g. backtracked). We sum
+            // up instances from all occurrences of the same qid.
             map_entry & entry = data[qid];
-            entry.num_instances = atoi(tokens[1].c_str());
-            entry.max_generation = (unsigned)atoi(tokens[2].c_str());
-            entry.max_cost = (unsigned)atoi(tokens[3].c_str());
+            entry.num_instances += atoi(tokens[1].c_str());
+            entry.max_generation = max(entry.max_generation, (unsigned)atoi(tokens[2].c_str()));
+            entry.max_cost = max(entry.max_cost, (unsigned)atoi(tokens[3].c_str()));
         }
     }
 
@@ -205,7 +208,7 @@ void diff(map<string, map_entry> & left, map<string, map_entry> & right) {
     }
 
     stable_sort(flat_data.begin(), flat_data.end(),
-        options.find("-si") != options.end() ? diff_item_lt_num_instances:
+        options.find("-si") != options.end() ? diff_item_lt_num_instances :
         options.find("-sg") != options.end() ? diff_item_lt_max_generation :
         options.find("-sc") != options.end() ? diff_item_lt_max_cost :
         diff_item_lt_num_instances);

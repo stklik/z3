@@ -17,8 +17,7 @@ Revision History:
 
 --*/
 
-#ifndef PROOF_UTILS_H_
-#define PROOF_UTILS_H_
+#pragma once
 #include "ast/ast.h"
 #include "ast/ast_pp.h"
 #include "ast/rewriter/bool_rewriter.h"
@@ -107,6 +106,7 @@ public:
     {
         ast_manager &m = args.get_manager();
         bool_rewriter brwr(m);
+        brwr.set_flat(false);
 
         if (m.is_or(decl))
         { mk_or_core(args, res); }
@@ -122,7 +122,7 @@ public:
     {
         DEBUG_CODE(proof_checker pc(m);
                    expr_ref_vector side(m);
-                   SASSERT(pc.check(pr, side));
+                   if (!pc.check(pr, side)) IF_VERBOSE(1, verbose_stream() << "check failed: " << mk_pp(pr, m) << "\n");
                   );
         obj_map<app, app*> cache;
         bool_rewriter brwr(m);
@@ -236,11 +236,10 @@ public:
         DEBUG_CODE(
             proof_checker pc(m);
             expr_ref_vector side(m);
-            SASSERT(pc.check(r, side));
+            if (!pc.check(r, side)) IF_VERBOSE(1, verbose_stream() << mk_pp(r, m) << "check failed\n");
         );
 
         res = r ;
     }
 };
 
-#endif

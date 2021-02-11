@@ -18,14 +18,15 @@ Revision History:
 
 --*/
 #include<typeinfo>
+#include "util/z3_version.h"
 #include "api/api_context.h"
-#include "util/version.h"
 #include "ast/ast_pp.h"
 #include "ast/ast_ll_pp.h"
 #include "api/api_log_macros.h"
 #include "api/api_util.h"
 #include "ast/reg_decl_plugins.h"
 #include "math/realclosure/realclosure.h"
+
 
 // The install_tactics procedure is automatically generated
 void install_tactics(tactic_manager & ctx);
@@ -79,6 +80,7 @@ namespace api {
         m_datalog_util(m()),
         m_fpa_util(m()),
         m_sutil(m()),
+        m_recfun(m()),
         m_last_result(m()),
         m_ast_trail(m()),
         m_pmanager(m_limit) {
@@ -100,6 +102,7 @@ namespace api {
         m_datalog_fid = m().mk_family_id("datalog_relation");
         m_fpa_fid   = m().mk_family_id("fpa");
         m_seq_fid   = m().mk_family_id("seq");
+        m_special_relations_fid   = m().mk_family_id("specrels");
         m_dt_plugin = static_cast<datatype_decl_plugin*>(m().get_plugin(m_dt_fid));
     
         install_tactics(*this);
@@ -108,40 +111,33 @@ namespace api {
 
     context::~context() {
         m_last_obj = nullptr;
-        u_map<api::object*>::iterator it = m_allocated_objects.begin();
-        while (it != m_allocated_objects.end()) {
-            api::object* val = it->m_value;
-            DEBUG_CODE(warning_msg("Uncollected memory: %d: %s", it->m_key, typeid(*val).name()););
-            m_allocated_objects.remove(it->m_key);
+        for (auto& kv : m_allocated_objects) {
+            api::object* val = kv.m_value;
+            DEBUG_CODE(warning_msg("Uncollected memory: %d: %s", kv.m_key, typeid(*val).name()););
             dealloc(val);
-            it = m_allocated_objects.begin();
         }
+        if (m_params.owns_manager())
+            m_manager.detach();
     }
 
     context::set_interruptable::set_interruptable(context & ctx, event_handler & i):
         m_ctx(ctx) {
-        #pragma omp critical (set_interruptable) 
-        {
-            SASSERT(m_ctx.m_interruptable == 0);
-            m_ctx.m_interruptable = &i;
-        }
+        lock_guard lock(ctx.m_mux);
+        SASSERT(m_ctx.m_interruptable == 0);
+        m_ctx.m_interruptable = &i;        
     }
 
     context::set_interruptable::~set_interruptable() {
-        #pragma omp critical (set_interruptable) 
-        {
-            m_ctx.m_interruptable = nullptr;
-        }
+        lock_guard lock(m_ctx.m_mux);
+        m_ctx.m_interruptable = nullptr;        
     }
 
     void context::interrupt() {
-        #pragma omp critical (set_interruptable)
-        {
-            if (m_interruptable)
-                (*m_interruptable)(API_INTERRUPT_EH_CALLER);
-            m_limit.cancel();
-            m().limit().cancel();
-        }
+        lock_guard lock(m_mux);
+        if (m_interruptable)
+            (*m_interruptable)(API_INTERRUPT_EH_CALLER);
+        m_limit.cancel();
+        m().limit().cancel();        
     }
     
     void context::set_error_code(Z3_error_code err, char const* opt_msg) {
@@ -153,11 +149,13 @@ namespace api {
         }
     }
 
-    void context::reset_error_code() { 
-        m_error_code = Z3_OK; 
+    void context::set_error_code(Z3_error_code err, std::string &&opt_msg) {
+        m_error_code = err;
+        if (err != Z3_OK) {
+            m_exception_msg = std::move(opt_msg);
+            invoke_error_handler(err);
+        }
     }
-
-
 
     void context::check_searching() {
         if (m_searching) { 
@@ -169,9 +167,15 @@ namespace api {
         m_string_buffer = str?str:"";
         return const_cast<char *>(m_string_buffer.c_str());
     }
+
+    char * context::mk_external_string(char const * str, unsigned n) {
+        m_string_buffer.clear();
+        m_string_buffer.append(str, n);
+        return const_cast<char *>(m_string_buffer.c_str());
+    }
     
-    char * context::mk_external_string(std::string const & str) {
-        m_string_buffer = str;
+    char * context::mk_external_string(std::string && str) {
+        m_string_buffer = std::move(str);
         return const_cast<char *>(m_string_buffer.c_str());
     }
 
@@ -191,6 +195,11 @@ namespace api {
                 invoke_error_handler(Z3_INVALID_ARG);
             }
             e = m_datalog_util.mk_numeral(n.get_uint64(), s);
+        }
+        else if (fid == m_fpa_fid) {
+            scoped_mpf tmp(fpautil().fm());
+            fpautil().fm().set(tmp, fpautil().get_ebits(s), fpautil().get_sbits(s), n.get_double());
+            e = fpautil().mk_value(tmp);
         }
         else {
             invoke_error_handler(Z3_INVALID_ARG);
@@ -219,7 +228,7 @@ namespace api {
         if (m_user_ref_count) {
             // Corner case bug: n may be in m_last_result, and this is the only reference to n.
             // When, we execute reset() it is deleted
-            // To avoid this bug, I bump the reference counter before reseting m_last_result
+            // To avoid this bug, I bump the reference counter before resetting m_last_result
             ast_ref node(n, m());
             m_last_result.reset();
             m_last_result.push_back(std::move(node));
@@ -291,9 +300,10 @@ namespace api {
                 if (a->get_num_args() > 1) buffer << "\n";
                 for (unsigned i = 0; i < a->get_num_args(); ++i) {
                     buffer << mk_bounded_pp(a->get_arg(i), m(), 3) << " of sort ";
-                    buffer << mk_pp(m().get_sort(a->get_arg(i)), m()) << "\n";
+                    buffer << mk_pp(a->get_arg(i)->get_sort(), m()) << "\n";
                 }
-                warning_msg("%s",buffer.str().c_str());
+                auto str = buffer.str();
+                warning_msg("%s", str.c_str());
                 break;
             }
             case AST_VAR:
@@ -362,7 +372,7 @@ extern "C" {
         Z3_CATCH;
     }
 
-    void Z3_API Z3_toggle_warning_messages(Z3_bool enabled) {
+    void Z3_API Z3_toggle_warning_messages(bool enabled) {
         LOG_Z3_toggle_warning_messages(enabled);
         enable_warning_messages(enabled != 0);
     }
@@ -379,12 +389,13 @@ extern "C" {
         Z3_TRY;
         LOG_Z3_dec_ref(c, a);
         RESET_ERROR_CODE();
-        if (to_ast(a)->get_ref_count() == 0) {
+        if (a && to_ast(a)->get_ref_count() == 0) {
             SET_ERROR_CODE(Z3_DEC_REF_ERROR, nullptr);
             return;
         }
-        mk_c(c)->m().dec_ref(to_ast(a));
-
+        if (a) {
+            mk_c(c)->m().dec_ref(to_ast(a));
+        }
         Z3_CATCH;
     }
 
@@ -420,13 +431,13 @@ extern "C" {
 
     void Z3_API Z3_reset_memory(void) {
         LOG_Z3_reset_memory();
-        memory::finalize();
+        memory::finalize(false);
         memory::initialize(0);
     }
 
     void Z3_API Z3_finalize_memory(void) {
         LOG_Z3_finalize_memory();
-        memory::finalize();
+        memory::finalize(true);
     }
 
     Z3_error_code Z3_API Z3_get_error_code(Z3_context c) {
@@ -437,7 +448,6 @@ extern "C" {
     void Z3_API Z3_set_error_handler(Z3_context c, Z3_error_handler h) {
         RESET_ERROR_CODE();    
         mk_c(c)->set_error_handler(h);
-        // [Leo]: using exception handling, we don't need global error handlers anymore
     }
 
     void Z3_API Z3_set_error(Z3_context c, Z3_error_code e) {
@@ -467,16 +477,10 @@ extern "C" {
         }
     }
 
-
     Z3_API char const * Z3_get_error_msg(Z3_context c, Z3_error_code err) {
         LOG_Z3_get_error_msg(c, err);
         return _get_error_msg(c, err);
     }
-
-    Z3_API char const * Z3_get_error_msg_ex(Z3_context c, Z3_error_code err) {
-        return Z3_get_error_msg(c, err);
-    }
-
 
     void Z3_API Z3_set_ast_print_mode(Z3_context c, Z3_ast_print_mode mode) {
         Z3_TRY;
@@ -487,9 +491,3 @@ extern "C" {
     }
     
 };
-
-Z3_API ast_manager& Z3_get_manager(Z3_context c) {
-    return mk_c(c)->m();
-}
-
-

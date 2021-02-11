@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_BIG_H_
-#define SAT_BIG_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "util/statistics.h"
@@ -30,12 +29,13 @@ namespace sat {
         random_gen&            m_rand;
         unsigned               m_num_vars;
         vector<literal_vector> m_dag;
-        svector<bool>          m_roots;
+        bool_vector          m_roots;
         svector<int>           m_left, m_right;
         literal_vector         m_root, m_parent;
         bool                   m_learned;
+        bool                   m_include_cardinality;
 
-        svector<std::pair<literal, literal>> m_del_bin;
+        vector<svector<literal> > m_del_bin;
         
 
         void init_dfs_num();
@@ -54,6 +54,9 @@ namespace sat {
         // static svector<std::pair<literal, literal>> s_del_bin;
 
         big(random_gen& rand);
+
+        void set_include_cardinality(bool f) { m_include_cardinality = f; }
+        
         /**
            \brief initialize a BIG from a solver.
          */
@@ -77,7 +80,8 @@ namespace sat {
         int get_left(literal l) const { return m_left[l.index()]; }
         int get_right(literal l) const { return m_right[l.index()]; }
         literal get_parent(literal l) const { return m_parent[l.index()]; }
-        literal get_root(literal l) const { return m_root[l.index()]; }
+        literal get_root(literal l);
+        bool is_root(literal l) { return get_root(l) == l; }
         bool reaches(literal u, literal v) const { return m_left[u.index()] < m_left[v.index()] && m_right[v.index()] < m_right[u.index()]; }        
         bool connected(literal u, literal v) const { return reaches(u, v) || reaches(~v, ~u); }
         void display(std::ostream& out) const;
@@ -85,4 +89,3 @@ namespace sat {
     };
 };
 
-#endif

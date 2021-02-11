@@ -22,17 +22,18 @@ import com.microsoft.z3.enumerations.Z3_sort_kind;
 /**
  * A Model contains interpretations (assignments) of constants and functions.
  **/
+@SuppressWarnings("unchecked")
 public class Model extends Z3Object {
     /**
      * Retrieves the interpretation (the assignment) of {@code a} in
      * the model. 
      * @param a A Constant
-     * 
+     *
      * @return An expression if the constant has an interpretation in the model,
      *         null otherwise.
      * @throws Z3Exception
      **/
-    public Expr getConstInterp(Expr a)
+    public <R extends Sort> Expr<R> getConstInterp(Expr<R> a)
     {
         getContext().checkContextMatch(a);
         return getConstInterp(a.getFuncDecl());
@@ -47,22 +48,19 @@ public class Model extends Z3Object {
      *         null otherwise.
      * @throws Z3Exception
      **/
-    public Expr getConstInterp(FuncDecl f)
+    public <R extends Sort> Expr<R> getConstInterp(FuncDecl<R> f)
     {
         getContext().checkContextMatch(f);
-        if (f.getArity() != 0
-                || Native.getSortKind(getContext().nCtx(),
-                        Native.getRange(getContext().nCtx(), f.getNativeObject())) == Z3_sort_kind.Z3_ARRAY_SORT
-                        .toInt())
+        if (f.getArity() != 0)
             throw new Z3Exception(
-                    "Non-zero arity functions and arrays have FunctionInterpretations as a model. Use getFuncInterp.");
+                    "Non-zero arity functions have FunctionInterpretations as a model. Use getFuncInterp.");
 
         long n = Native.modelGetConstInterp(getContext().nCtx(), getNativeObject(),
                 f.getNativeObject());
         if (n == 0)
             return null;
         else
-            return Expr.create(getContext(), n);
+            return (Expr<R>) Expr.create(getContext(), n);
     }
 
     /**
@@ -73,7 +71,7 @@ public class Model extends Z3Object {
      *         the model, null otherwise.
      * @throws Z3Exception
      **/
-    public FuncInterp getFuncInterp(FuncDecl f)
+    public <R extends Sort> FuncInterp<R> getFuncInterp(FuncDecl<R> f)
     {
         getContext().checkContextMatch(f);
 
@@ -93,7 +91,7 @@ public class Model extends Z3Object {
                 {
                     if (Native.isAsArray(getContext().nCtx(), n)) {
                       long fd = Native.getAsArrayFuncDecl(getContext().nCtx(), n);
-                      return getFuncInterp(new FuncDecl(getContext(), fd));
+                      return getFuncInterp(new FuncDecl<>(getContext(), fd));
                     }
 		    return null;
                 }
@@ -109,7 +107,7 @@ public class Model extends Z3Object {
             if (n == 0)
                 return null;
             else
-                return new FuncInterp(getContext(), n);
+                return new FuncInterp<>(getContext(), n);
         }
     }
 
@@ -126,12 +124,12 @@ public class Model extends Z3Object {
      * 
      * @throws Z3Exception
      **/
-    public FuncDecl[] getConstDecls()
+    public FuncDecl<?>[] getConstDecls()
     {
         int n = getNumConsts();
-        FuncDecl[] res = new FuncDecl[n];
+        FuncDecl<?>[] res = new FuncDecl[n];
         for (int i = 0; i < n; i++)
-            res[i] = new FuncDecl(getContext(), Native.modelGetConstDecl(getContext()
+            res[i] = new FuncDecl<>(getContext(), Native.modelGetConstDecl(getContext()
                     .nCtx(), getNativeObject(), i));
         return res;
     }
@@ -149,12 +147,12 @@ public class Model extends Z3Object {
      * 
      * @throws Z3Exception
      **/
-    public FuncDecl[] getFuncDecls()
+    public FuncDecl<?>[] getFuncDecls()
     {
         int n = getNumFuncs();
-        FuncDecl[] res = new FuncDecl[n];
+        FuncDecl<?>[] res = new FuncDecl[n];
         for (int i = 0; i < n; i++)
-            res[i] = new FuncDecl(getContext(), Native.modelGetFuncDecl(getContext()
+            res[i] = new FuncDecl<>(getContext(), Native.modelGetFuncDecl(getContext()
                     .nCtx(), getNativeObject(), i));
         return res;
     }
@@ -164,17 +162,17 @@ public class Model extends Z3Object {
      * 
      * @throws Z3Exception
      **/
-    public FuncDecl[] getDecls()
+    public FuncDecl<?>[] getDecls()
     {
         int nFuncs = getNumFuncs();
         int nConsts = getNumConsts();
         int n = nFuncs + nConsts;
-        FuncDecl[] res = new FuncDecl[n];
+        FuncDecl<?>[] res = new FuncDecl[n];
         for (int i = 0; i < nConsts; i++)
-            res[i] = new FuncDecl(getContext(), Native.modelGetConstDecl(getContext()
+            res[i] = new FuncDecl<>(getContext(), Native.modelGetConstDecl(getContext()
                     .nCtx(), getNativeObject(), i));
         for (int i = 0; i < nFuncs; i++)
-            res[nConsts + i] = new FuncDecl(getContext(), Native.modelGetFuncDecl(
+            res[nConsts + i] = new FuncDecl<>(getContext(), Native.modelGetFuncDecl(
                     getContext().nCtx(), getNativeObject(), i));
         return res;
     }
@@ -208,14 +206,14 @@ public class Model extends Z3Object {
      * @return The evaluation of {@code t} in the model.
      * @throws Z3Exception
      **/
-    public Expr eval(Expr t, boolean completion)
+    public <R extends Sort> Expr<R> eval(Expr<R> t, boolean completion)
     {
         Native.LongPtr v = new Native.LongPtr();
         if (!Native.modelEval(getContext().nCtx(), getNativeObject(),
             t.getNativeObject(), (completion), v))
             throw new ModelEvaluationFailedException();
         else
-            return Expr.create(getContext(), v.value);
+            return (Expr<R>) Expr.create(getContext(), v.value);
     }
 
     /**
@@ -223,7 +221,7 @@ public class Model extends Z3Object {
      * 
      * @throws Z3Exception
      **/
-    public Expr evaluate(Expr t, boolean completion)
+    public <R extends Sort> Expr<R> evaluate(Expr<R> t, boolean completion)
     {
         return eval(t, completion);
     }
@@ -268,12 +266,12 @@ public class Model extends Z3Object {
      *         of {@code s}
      * @throws Z3Exception
      **/
-    public Expr[] getSortUniverse(Sort s)
+    public <R extends Sort>  Expr<R>[] getSortUniverse(R s)
     {
 
         ASTVector nUniv = new ASTVector(getContext(), Native.modelGetSortUniverse(
                 getContext().nCtx(), getNativeObject(), s.getNativeObject()));
-        return nUniv.ToExprArray();
+        return (Expr<R>[]) nUniv.ToExprArray();
     }
 
     /**

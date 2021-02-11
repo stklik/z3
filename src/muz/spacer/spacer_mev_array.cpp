@@ -25,7 +25,6 @@ Revision History:
 #include"ast/rewriter/datatype_rewriter.h"
 #include"ast/rewriter/array_rewriter.h"
 #include"ast/rewriter/rewriter_def.h"
-#include"util/cooperate.h"
 #include"ast/ast_pp.h"
 #include"model/func_interp.h"
 
@@ -111,7 +110,7 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
         res = m.mk_true ();
         return;
     }
-    sort* s = m.get_sort(arg1);
+    sort* s = arg1->get_sort();
     sort* r = get_array_range(s);
     // give up evaluating finite domain/range arrays
     if (!r->is_infinite() && !r->is_very_big() && !s->is_infinite() && !s->is_very_big()) {
@@ -154,8 +153,8 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
         args2.resize(1);
         args1.append(store[i].size()-1, store[i].c_ptr());
         args2.append(store[i].size()-1, store[i].c_ptr());
-        s1 = m_array.mk_select(args1.size(), args1.c_ptr());
-        s2 = m_array.mk_select(args2.size(), args2.c_ptr());
+        s1 = m_array.mk_select(args1);
+        s2 = m_array.mk_select(args2);
         eval (mdl, s1, w1);
         eval (mdl, s2, w2);
         if (w1 == w2) {
@@ -199,7 +198,7 @@ void model_evaluator_array_util::eval(model& mdl, expr* e, expr_ref& r, bool mod
         expr_ref_vector args(m);
         expr_ref else_case(m);
         if (extract_array_func_interp(mdl, r, stores, else_case)) {
-            r = m_array.mk_const_array(m.get_sort(e), else_case);
+            r = m_array.mk_const_array(e->get_sort(), else_case);
             while (!stores.empty() && stores.back().back() == else_case) {
                 stores.pop_back();
             }
@@ -208,7 +207,7 @@ void model_evaluator_array_util::eval(model& mdl, expr* e, expr_ref& r, bool mod
                 args.resize(1);
                 args[0] = r;
                 args.append(stores[i]);
-                r = m_array.mk_store(args.size(), args.c_ptr());
+                r = m_array.mk_store(args);
             }
             return;
         }

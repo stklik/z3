@@ -16,11 +16,12 @@ Author:
 
 Notes:
 
+
+
 --*/
 
 #include <cmath>
 #include "sat/sat_solver.h"
-#include "sat/sat_extension.h"
 #include "sat/sat_lookahead.h"
 #include "sat/sat_scc.h"
 #include "util/union_find.h"
@@ -31,7 +32,7 @@ namespace sat {
     }
     
     lookahead::scoped_ext::~scoped_ext() {
-        if (p.m_s.m_ext) p.m_s.m_ext->set_lookahead(0); 
+        if (p.m_s.m_ext) p.m_s.m_ext->set_lookahead(nullptr);
     }
 
     lookahead::scoped_assumptions::scoped_assumptions(lookahead& p, literal_vector const& lits): p(p), lits(lits) {
@@ -90,7 +91,7 @@ namespace sat {
         m_binary[(~l2).index()].push_back(l1);
         m_binary_trail.push_back((~l1).index());
         ++m_stats.m_add_binary;
-        if (m_s.m_config.m_drat) validate_binary(l1, l2);
+        if (m_s.m_config.m_drat && m_search_mode == lookahead_mode::searching) validate_binary(l1, l2);
     }
 
     void lookahead::del_binary(unsigned idx) {
@@ -100,7 +101,6 @@ namespace sat {
         literal l = lits.back();
         lits.pop_back();            
         SASSERT(!m_binary[(~l).index()].empty());
-        IF_VERBOSE(0, if (m_binary[(~l).index()].back() != ~to_literal(idx)) verbose_stream() << "pop bad literal: " << idx << " " << (~l).index() << "\n";);
         SASSERT(m_binary[(~l).index()].back() == ~to_literal(idx));
         m_binary[(~l).index()].pop_back();
         ++m_stats.m_del_binary;
@@ -108,13 +108,11 @@ namespace sat {
 
 
     void lookahead::validate_binary(literal l1, literal l2) {
-        if (m_search_mode == lookahead_mode::searching) {
-            m_assumptions.push_back(l1);
-            m_assumptions.push_back(l2);
-            m_drat.add(m_assumptions);
-            m_assumptions.pop_back();
-            m_assumptions.pop_back();
-        }
+        m_assumptions.push_back(l1);
+        m_assumptions.push_back(l2);
+        m_s.m_drat.add(m_assumptions);
+        m_assumptions.pop_back();
+        m_assumptions.pop_back();
     }
 
     void lookahead::inc_bstamp() {
@@ -235,9 +233,9 @@ namespace sat {
         for (bool newbies = false; ; newbies = true) {
             sum = init_candidates(level, newbies);
             if (!m_candidates.empty()) break;
-            if (is_sat()) {
+            if (is_sat() || newbies) {
                 return false;
-            }         
+            }                     
         }
         SASSERT(!m_candidates.empty());
         // cut number of candidates down to max_num_cand.
@@ -321,9 +319,9 @@ namespace sat {
         double sum = 0;
         unsigned skip_candidates = 0;
         bool autarky = get_config().m_lookahead_global_autarky;
-        for (bool_var x : m_freevars) {
-            SASSERT(is_undef(x));
-            if (!m_select_lookahead_vars.empty()) {
+        if (!m_select_lookahead_vars.empty()) {
+            for (bool_var x : m_freevars) {
+                SASSERT(is_undef(x));
                 if (m_select_lookahead_vars.contains(x)) {
                     if (!autarky || newbies || in_reduced_clause(x)) {
                         m_candidates.push_back(candidate(x, m_rating[x]));
@@ -334,10 +332,15 @@ namespace sat {
                     }
                 }                
             }
-            else if (newbies || active_prefix(x)) {
-                m_candidates.push_back(candidate(x, m_rating[x]));
-                sum += m_rating[x];                
-            }           
+        }
+        if (m_candidates.empty() && (m_select_lookahead_vars.empty() && newbies)) {
+            for (bool_var x : m_freevars) {
+                SASSERT(is_undef(x));
+                if (newbies || active_prefix(x)) {
+                    m_candidates.push_back(candidate(x, m_rating[x]));
+                    sum += m_rating[x];                
+                }           
+            }
         } 
         TRACE("sat", display_candidates(tout << "sum: " << sum << "\n"););
         if (skip_candidates > 0) {
@@ -550,7 +553,7 @@ namespace sat {
                 }
             }
             unsigned len = n->size();
-            sum += pow(0.5, len) * to_add / len;            
+            sum += pow(0.5, static_cast<double>(len)) * to_add / len;
         }
         return sum;
     } 
@@ -572,7 +575,7 @@ namespace sat {
         unsigned sz = m_nary_count[(~l).index()];
         for (nary * n : m_nary[(~l).index()]) {
             if (sz-- == 0) break;
-            sum += pow(0.5, n->size());
+            sum += pow(0.5, static_cast<double>(n->size()));
         }
         return sum;
     }
@@ -631,9 +634,7 @@ namespace sat {
             if (sz-- == 0) break;
             tsum += h[b.m_u.index()] * h[b.m_v.index()];
         }
-        // std::cout << "sum: " << sum << " afactor " << afactor << " sqfactor " << sqfactor << " tsum " << tsum << "\n";
         sum = (double)(0.1 + afactor*sum + sqfactor*tsum);
-        // std::cout << "sum: " << sum << " max score " << m_config.m_max_score << "\n";
         return std::min(m_config.m_max_score, sum);
     }
 
@@ -995,6 +996,7 @@ namespace sat {
     void lookahead::init(bool learned) {
         m_delta_trigger = 0.0;
         m_delta_decrease = 0.0;
+        m_delta_fraction = m_s.m_config.m_lookahead_delta_fraction;
         m_config.m_dl_success = 0.8;
         m_inconsistent = false;
         m_qhead = 0;
@@ -1029,14 +1031,11 @@ namespace sat {
         for (unsigned i = 0; i < trail_sz; ++i) {
             literal l = m_s.m_trail[i];
             if (!m_s.was_eliminated(l.var())) {
-                if (m_s.m_config.m_drat) m_drat.add(l, false);
+                if (m_s.m_config.m_drat) m_s.m_drat.add(l, false);
                 assign(l);
             }
         }
         
-        if (m_s.m_ext) {
-            // m_ext = m_s.m_ext->copy(this, learned);
-        }
         propagate();
         m_qhead = m_trail.size();
         m_init_freevars = m_freevars.size();
@@ -1062,7 +1061,7 @@ namespace sat {
             case 3: add_ternary(c[0],c[1],c[2]); break;
             default: if (!learned) add_clause(c); break;
             }
-            if (m_s.m_config.m_drat) m_drat.add(c, false);
+            // if (m_s.m_config.m_drat) m_s.m_drat.add(c, false);
         }
     }
 
@@ -1215,10 +1214,10 @@ namespace sat {
         lookahead& lh;
     public:
         lookahead_literal_occs_fun(lookahead& lh): lh(lh) {}
-        double operator()(literal l) { return lh.literal_occs(l); }
+        double operator()(literal l) override { return lh.literal_occs(l); }
     };
 
-    // Ternary clause managagement:
+    // Ternary clause management:
 
     void lookahead::add_ternary(literal u, literal v, literal w) {
         SASSERT(u != w && u != v && v != w && ~u != w && ~u != v && ~w != v);
@@ -1309,7 +1308,7 @@ namespace sat {
                 }
             }
             break;
-        case lookahead2:
+        case lookahead_mode::lookahead2:
             // this could create a conflict from propagation, but we complete the loop.
             for (binary const& b : m_ternary[(~l).index()]) {
                 if (sz-- == 0) break;
@@ -1355,7 +1354,7 @@ namespace sat {
         watch_list::iterator it = wlist.begin(), it2 = it, end = wlist.end();
         for (; it != end && !inconsistent(); ++it) {
             SASSERT(it->get_kind() == watched::EXT_CONSTRAINT);
-            bool keep = m_s.m_ext->propagate(l, it->get_ext_constraint_idx());
+            bool keep = m_s.m_ext->propagated(l, it->get_ext_constraint_idx());
             if (m_search_mode == lookahead_mode::lookahead1 && !m_inconsistent) {
                 lookahead_literal_occs_fun literal_occs_fn(*this);
                 m_lookahead_reward += m_s.m_ext->get_reward(l, it->get_ext_constraint_idx(), literal_occs_fn);
@@ -1375,7 +1374,7 @@ namespace sat {
     }
 
     
-    // new n-ary clause managment
+    // new n-ary clause management
 
     void lookahead::add_clause(clause const& c) {
         SASSERT(c.size() > 3);
@@ -1491,14 +1490,14 @@ namespace sat {
                             to_add += literal_occs(lit);
                         }                        
                     }
-                    m_lookahead_reward += pow(0.5, nonfixed) * to_add / nonfixed;                    
+                    m_lookahead_reward += pow(0.5, static_cast<double>(nonfixed)) * to_add / nonfixed;
                     break;
                 }
                 case heule_unit_reward:
-                    m_lookahead_reward += pow(0.5, nonfixed);
+                    m_lookahead_reward += pow(0.5, static_cast<double>(nonfixed));
                     break;
                 case march_cu_reward:
-                    m_lookahead_reward += nonfixed >= 2 ? 3.3 * pow(0.5, nonfixed - 2) : 0.0;
+                    m_lookahead_reward += nonfixed >= 2 ? 3.3 * pow(0.5, static_cast<double>(nonfixed - 2)) : 0.0;
                     break;
                 case ternary_reward:
                     UNREACHABLE();
@@ -1616,14 +1615,14 @@ namespace sat {
                     to_add += literal_occs(l);
                 } 
             }
-            m_lookahead_reward += pow(0.5, sz) * to_add / sz;
+            m_lookahead_reward += pow(0.5, static_cast<double>(sz)) * to_add / sz;
             break;
         }
         case heule_unit_reward:
-            m_lookahead_reward += pow(0.5, sz);
+            m_lookahead_reward += pow(0.5, static_cast<double>(sz));
             break;
         case march_cu_reward:
-            m_lookahead_reward += 3.3 * pow(0.5, sz - 2);
+            m_lookahead_reward += 3.3 * pow(0.5, static_cast<double>(sz - 2));
             break;
         case ternary_reward:
             m_lookahead_reward = (double)0.001;            
@@ -1634,7 +1633,7 @@ namespace sat {
     }
 
     // Sum_{ clause C that contains ~l } 1 
-    // FIXME: counts occurences of ~l; misleading
+    // FIXME: counts occurrences of ~l; misleading
     double lookahead::literal_occs(literal l) {
         double result = m_binary[l.index()].size();
         result += literal_big_occs(l);
@@ -1642,11 +1641,82 @@ namespace sat {
     }
 
     // Sum_{ clause C that contains ~l such that |C| > 2} 1 
-    // FIXME: counts occurences of ~l; misleading
+    // FIXME: counts occurrences of ~l; misleading
     double lookahead::literal_big_occs(literal l) {
         double result = m_nary_count[(~l).index()];
         result += m_ternary_count[(~l).index()];
         return result;
+    }
+
+    void lookahead::get_clauses(literal_vector& clauses, unsigned max_clause_size) {
+        // push binary clauses
+        unsigned num_lits = m_s.num_vars() * 2;
+        for (unsigned idx = 0; idx < num_lits; ++idx) {
+            literal u = to_literal(idx);
+            if (m_s.was_eliminated(u.var()) || is_false(u) || is_true(u)) continue;
+            for (literal v : m_binary[idx]) {
+                if (u.index() < v.index() && !m_s.was_eliminated(v.var()) && !is_false(v) && !is_true(v)) {
+                    clauses.push_back(~u);
+                    clauses.push_back(v);
+                    clauses.push_back(null_literal);
+                }
+            }
+        }
+        // push ternary clauses
+        for (unsigned idx = 0; idx < num_lits; ++idx) {
+            literal u = to_literal(idx);
+            if (is_true(u) || is_false(u)) continue;
+            unsigned sz = m_ternary_count[u.index()];
+            for (binary const& b : m_ternary[u.index()]) {
+                if (sz-- == 0) break;
+                if (u.index() > b.m_v.index() || u.index() > b.m_u.index())
+                    continue;
+                if (is_true(b.m_u) || is_true(b.m_v)) 
+                    continue;
+                if (is_false(b.m_u) && is_false(b.m_v))
+                    continue;
+                clauses.push_back(u);
+                if (!is_false(b.m_u)) clauses.push_back(b.m_u);
+                if (!is_false(b.m_v)) clauses.push_back(b.m_v);
+                clauses.push_back(null_literal);            
+            }
+        }
+
+        // push n-ary clauses
+        for (unsigned idx = 0; idx < num_lits; ++idx) {
+            literal u = to_literal(idx);
+            unsigned sz = m_nary_count[u.index()];
+            for (nary* n : m_nary[u.index()]) {
+                if (sz-- == 0) break;
+                unsigned sz0 = clauses.size();
+                if (n->size() > max_clause_size) continue;
+                for (literal lit : *n) {
+                    if (is_true(lit)) {
+                        clauses.shrink(sz0);
+                        break;
+                    }
+                    if (!is_false(lit)) { 
+                        clauses.push_back(lit);
+                    }
+                }
+                if (clauses.size() > sz0) {
+                    clauses.push_back(null_literal);
+                }
+            }
+        }
+
+        TRACE("sat",
+              for (literal lit : clauses) {
+                  if (lit == null_literal) {
+                      tout << "\n";
+                  }
+                  else {
+                      tout << lit << " ";
+                  }
+              }
+              tout << "\n";
+              m_s.display(tout);
+              );
     }
 
     void lookahead::propagate_binary(literal l) {
@@ -1681,10 +1751,14 @@ namespace sat {
         unsigned base = 2;
         bool change = true;
         literal last_changed = null_literal;
-        while (change && !inconsistent()) {
+        unsigned ops = 0;
+        m_max_ops = 100000;
+        while (change && !inconsistent() && ops < m_max_ops) {
             change = false;
-            for (unsigned i = 0; !inconsistent() && i < m_lookahead.size(); ++i) {
+            IF_VERBOSE(10, verbose_stream() << "(sat.lookahead :compute-reward " << m_lookahead.size() << ")\n");
+            for (unsigned i = 0; !inconsistent() && i < m_lookahead.size() && ops < m_max_ops; ++i) {
                 checkpoint();
+                ++ops;
                 literal lit = m_lookahead[i].m_lit;
                 if (lit == last_changed) {
                     SASSERT(!change);
@@ -1708,15 +1782,13 @@ namespace sat {
                     num_units += do_double(lit, dl_lvl);
                     if (dl_lvl > level) {
                         base = dl_lvl;
-                        //SASSERT(get_level(m_trail.back()) == base + m_lookahead[i].m_offset);
                         SASSERT(get_level(m_trail.back()) == base);
                     }
                     unsat = inconsistent();
                     pop_lookahead1(lit, num_units);
                 }
-                // VERIFY(!missed_propagation());
                 if (unsat) {
-                    TRACE("sat", tout << "backtracking and settting " << ~lit << "\n";);
+                    TRACE("sat", tout << "backtracking and setting " << ~lit << "\n";);
                     lookahead_backtrack();
                     assign(~lit);
                     propagate();
@@ -1806,13 +1878,13 @@ namespace sat {
 
     unsigned lookahead::do_double(literal l, unsigned& base) {
         unsigned num_units = 0;
-        if (!inconsistent() && dl_enabled(l)) {
+        if (!inconsistent() && dl_enabled(l) && get_config().m_lookahead_double) {
             if (get_lookahead_reward(l) > m_delta_trigger) {
                 if (dl_no_overflow(base)) {
                     ++m_stats.m_double_lookahead_rounds;
                     num_units = double_look(l, base);
                     if (!inconsistent()) {
-                        m_delta_trigger = get_lookahead_reward(l);
+                        m_delta_trigger = m_delta_fraction*get_lookahead_reward(l);
                         dl_disable(l);
                     }
                 }
@@ -1843,13 +1915,15 @@ namespace sat {
         unsigned num_iterations = 0;
         while (change && num_iterations < m_config.m_dl_max_iterations && !inconsistent()) {
             num_iterations++;
-            for (unsigned i = 0; !inconsistent() && i < m_lookahead.size(); ++i) {
-                literal lit = m_lookahead[i].m_lit;
+            for (auto const& lh : m_lookahead) {
+                if (inconsistent()) break;
+	        
+                literal lit = lh.m_lit;
                 if (lit == last_changed) {
                     SASSERT(change == false);
                     break;
                 }
-                unsigned level = base + m_lookahead[i].m_offset;
+                unsigned level = base + lh.m_offset;
                 if (level + m_lookahead.size() >= dl_truth) {
                     change = false;
                     break;
@@ -1867,6 +1941,7 @@ namespace sat {
                     ++m_stats.m_double_lookahead_propagations;
                     SASSERT(m_level == dl_truth);
                     lookahead_backtrack();
+		    if (m_s.m_config.m_drat) validate_binary(~l, ~lit);
                     assign(~lit);
                     propagate();
                     change = true;
@@ -1924,7 +1999,7 @@ namespace sat {
     void lookahead::validate_assign(literal l) {
         if (m_s.m_config.m_drat && m_search_mode == lookahead_mode::searching) {
             m_assumptions.push_back(l);
-            m_drat.add(m_assumptions);
+            m_s.m_drat.add(m_assumptions);
             m_assumptions.pop_back();
         }
     }
@@ -2003,7 +2078,8 @@ namespace sat {
         }
     }
 
-    bool lookahead::backtrack(literal_vector& trail, svector<bool> & is_decision) {
+    bool lookahead::backtrack(literal_vector& trail, bool_vector & is_decision) {
+        m_cube_state.m_backtracks++;
         while (inconsistent()) {
             if (trail.empty()) return false;
             if (is_decision.back()) {
@@ -2024,6 +2100,7 @@ namespace sat {
     void lookahead::update_cube_statistics(statistics& st) {
         st.update("lh cube cutoffs", m_cube_state.m_cutoffs);
         st.update("lh cube conflicts", m_cube_state.m_conflicts);        
+        st.update("lh cube backtracks", m_cube_state.m_backtracks);        
     }
 
     double lookahead::psat_heur() {
@@ -2048,11 +2125,20 @@ namespace sat {
             }
         }
         for (nary * n : m_nary_clauses) {
-            h += 1.0 / pow(m_config.m_cube_psat_clause_base, n->size() - 1);
+            h += 1.0 / pow(m_config.m_cube_psat_clause_base, static_cast<double>(n->size() - 1));
         }
         h /= pow(m_freevars.size(), m_config.m_cube_psat_var_exp);
         IF_VERBOSE(10, verbose_stream() << "(sat-cube-psat :val " << h << ")\n";);
         return h;
+    }
+
+    bool lookahead::should_cutoff(unsigned depth) {
+        return depth > 0 && 
+            ((m_config.m_cube_cutoff == depth_cutoff && depth == m_config.m_cube_depth) ||
+             (m_config.m_cube_cutoff == freevars_cutoff && m_freevars.size() <= m_init_freevars * m_config.m_cube_freevars) ||
+             (m_config.m_cube_cutoff == psat_cutoff && psat_heur() >= m_config.m_cube_psat_trigger) ||
+             (m_config.m_cube_cutoff == adaptive_freevars_cutoff && m_freevars.size() < m_cube_state.m_freevars_threshold) ||
+             (m_config.m_cube_cutoff == adaptive_psat_cutoff && psat_heur() >= m_cube_state.m_psat_threshold));
     }
 
     lbool lookahead::cube(bool_var_vector& vars, literal_vector& lits, unsigned backtrack_level) {
@@ -2087,7 +2173,9 @@ namespace sat {
                 m_cube_state.m_freevars_threshold = m_freevars.size();     
                 m_cube_state.m_psat_threshold = m_config.m_cube_cutoff == adaptive_psat_cutoff ? psat_heur() : dbl_max;  // MN. only compute PSAT if enabled
                 m_cube_state.inc_conflict();
-                if (!backtrack(m_cube_state.m_cube, m_cube_state.m_is_decision)) return l_false;                
+                if (!backtrack(m_cube_state.m_cube, m_cube_state.m_is_decision)) {
+                    return l_false; 
+                }               
                 continue;
             }
         pick_up_work:
@@ -2100,22 +2188,13 @@ namespace sat {
             }
             backtrack_level = UINT_MAX;
             depth = m_cube_state.m_cube.size();
-            if ((m_config.m_cube_cutoff == depth_cutoff && depth == m_config.m_cube_depth) ||
-                (m_config.m_cube_cutoff == freevars_cutoff && m_freevars.size() <= m_init_freevars * m_config.m_cube_freevars) ||
-                (m_config.m_cube_cutoff == psat_cutoff && psat_heur() >= m_config.m_cube_psat_trigger) ||
-                (m_config.m_cube_cutoff == adaptive_freevars_cutoff && m_freevars.size() < m_cube_state.m_freevars_threshold) ||
-                (m_config.m_cube_cutoff == adaptive_psat_cutoff && psat_heur() >= m_cube_state.m_psat_threshold)) {
-                double dec = (1.0 - pow(m_config.m_cube_fraction, depth));
+            if (should_cutoff(depth)) {
+                double dec = (1.0 - pow(m_config.m_cube_fraction, static_cast<double>(depth)));
                 m_cube_state.m_freevars_threshold *= dec;
                 m_cube_state.m_psat_threshold *= 2.0 - dec;
                 set_conflict();
                 m_cube_state.inc_cutoff();
-#if 0
-                // return cube of all literals, not just the ones in the main cube
-                lits.append(m_trail.size() - init_trail, m_trail.c_ptr() + init_trail);
-#else
                 lits.append(m_cube_state.m_cube);
-#endif
                 vars.reset();
                 for (auto v : m_freevars) if (in_reduced_clause(v)) vars.push_back(v);
                 backtrack(m_cube_state.m_cube, m_cube_state.m_is_decision);
@@ -2129,15 +2208,20 @@ namespace sat {
                 m_cube_state.m_freevars_threshold = prev_nfreevars;
                 m_cube_state.m_psat_threshold = prev_psat;
                 m_cube_state.inc_conflict();
-                if (!backtrack(m_cube_state.m_cube, m_cube_state.m_is_decision)) return l_false;
+                if (!backtrack(m_cube_state.m_cube, m_cube_state.m_is_decision)) {
+                    return l_false;
+                }
                 continue;
             }
             if (lit == null_literal) {
                 vars.reset();
                 for (auto v : m_freevars) if (in_reduced_clause(v)) vars.push_back(v);
-                return l_true;
+                m_model.reset();
+                init_model();
+                return m_freevars.empty() ? l_true : l_undef;
             }
             TRACE("sat", tout << "choose: " << lit << " cube: " << m_cube_state.m_cube << "\n";);
+            SASSERT(vars.empty() || vars.contains(lit.var()));
             ++m_stats.m_decisions;
             push(lit, c_fixed_truth);
             m_cube_state.m_cube.push_back(lit);
@@ -2148,6 +2232,29 @@ namespace sat {
         return l_undef;
     }
 
+
+    void lookahead::display_lookahead_scores(std::ostream& out) {
+        scoped_ext _scoped_ext(*this);
+        m_select_lookahead_vars.reset();
+        init_search();
+        scoped_level _sl(*this, c_fixed_truth);
+        m_search_mode = lookahead_mode::searching;
+        literal l = choose_base();        
+        if (l == null_literal) {
+            out << "null\n";
+            return;
+        }
+        for (auto const& l : m_lookahead) {
+            literal lit = l.m_lit;
+            if (!lit.sign() && is_undef(lit)) {
+                double diff1 = get_lookahead_reward(lit);
+                double diff2 = get_lookahead_reward(~lit);
+                out << lit << " " << diff1 << " " << diff2 << "\n";
+            }       
+        }
+    }
+
+
     void lookahead::init_model() {
         m_model.reset();
         for (unsigned i = 0; i < m_num_vars; ++i) {
@@ -2156,7 +2263,7 @@ namespace sat {
             if (is_undef(lit)) {
                 val = l_undef;
             }
-            if (is_true(lit)) {
+            else if (is_true(lit)) {
                 val = l_true;
             }
             else {
@@ -2238,7 +2345,13 @@ namespace sat {
         }
     }
 
+
+
     literal lookahead::choose() {
+        return choose_base();
+    }
+
+    literal lookahead::choose_base() {
         literal l = null_literal;
         while (l == null_literal && !inconsistent()) {
             pre_select();
@@ -2267,7 +2380,7 @@ namespace sat {
         init(learned);                
         if (inconsistent()) return;
         inc_istamp();            
-        choose();        
+        choose_base();        
         if (inconsistent()) return;
         SASSERT(m_trail_lim.empty());
         unsigned num_units = 0;
@@ -2275,7 +2388,7 @@ namespace sat {
         for (unsigned i = 0; i < m_trail.size() && !m_s.inconsistent(); ++i) {
             literal lit = m_trail[i];
             if (m_s.value(lit) == l_undef && !m_s.was_eliminated(lit.var())) {
-                m_s.assign(lit, justification());
+                m_s.assign_scoped(lit);
                 ++num_units;
             }
         }        
@@ -2386,7 +2499,7 @@ namespace sat {
                         uf.merge((~u).index(), (~v).index());
                         VERIFY(!m_s.was_eliminated(u.var()));
                         VERIFY(!m_s.was_eliminated(v.var()));
-                        m_s.mk_clause(~u, v, true);
+                        m_s.mk_clause(~u, v, sat::status::redundant());
                     }
                     else {
                         candidates[k] = candidates[j];
@@ -2394,7 +2507,6 @@ namespace sat {
                     }
                 }
             }
-            // std::cout << candidates.size() << " -> " << k << "\n";
             if (k == candidates.size()) break;
             candidates.shrink(k);
             if (k == 0) break;
@@ -2453,7 +2565,7 @@ namespace sat {
         for (unsigned i = 0; i < m_watches.size(); ++i) {
             watch_list const& wl = m_watches[i];
             if (!wl.empty()) {
-                sat::display_watch_list(out << to_literal(i) << " -> ", dummy_allocator, wl);
+                sat::display_watch_list(out << to_literal(i) << " -> ", dummy_allocator, wl, nullptr);
                 out << "\n";
             }
         }

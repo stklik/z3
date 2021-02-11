@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef EXPR_DELTA_H_
-#define EXPR_DELTA_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -33,7 +32,7 @@ public:
     
     //
     // Create the n'th delta in dfs mode.
-    // resturn 'true' if a delta was obtained.
+    // return 'true' if a delta was obtained.
     //
     bool delta_dfs(unsigned n, expr_ref_vector& result);
 
@@ -49,4 +48,3 @@ private:
 };
 
 
-#endif

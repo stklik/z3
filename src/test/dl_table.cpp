@@ -1,8 +1,7 @@
 /*++
 Copyright (c) 2015 Microsoft Corporation
 --*/
-#if defined(_WINDOWS) || defined(_CYGWIN)
-
+#include "ast/reg_decl_plugins.h"
 #include "muz/base/dl_context.h"
 #include "muz/rel/dl_table.h"
 #include "muz/fp/dl_register_engine.h"
@@ -24,6 +23,7 @@ static void test_table(mk_table_fn mk_table) {
     sig.push_back(4);
     smt_params params;
     ast_manager ast_m;
+    reg_decl_plugins(ast_m);
     datalog::register_engine re;
     datalog::context ctx(ast_m, re, params);    
     datalog::relation_manager & m = ctx.get_rel_context()->get_rmanager();
@@ -98,7 +98,3 @@ void test_dl_bitvector_table() {
 void tst_dl_table() {
     test_dl_bitvector_table();
 }
-#else
-void tst_dl_table() {
-}
-#endif

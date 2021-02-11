@@ -16,14 +16,14 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_DATATYPE_H_
-#define THEORY_DATATYPE_H_
+#pragma once
 
-#include "smt/smt_theory.h"
 #include "util/union_find.h"
-#include "smt/params/theory_datatype_params.h"
+#include "ast/array_decl_plugin.h"
 #include "ast/datatype_decl_plugin.h"
-#include "smt/proto_model/datatype_factory.h"
+#include "model/datatype_factory.h"
+#include "smt/smt_theory.h"
+#include "smt/params/theory_datatype_params.h"
 
 namespace smt {
     class theory_datatype : public theory {
@@ -44,10 +44,9 @@ namespace smt {
             void reset() { memset(this, 0, sizeof(stats)); }
             stats() { reset(); }
         };
-
         
-        theory_datatype_params &  m_params;
         datatype_util             m_util;
+        array_util                m_autil;
         ptr_vector<var_data>      m_var_data;
         th_union_find             m_find;
         th_trail_stack            m_trail_stack;
@@ -73,7 +72,7 @@ namespace smt {
         void sign_recognizer_conflict(enode * c, enode * r);
 
         typedef enum { ENTER, EXIT } stack_op;
-        typedef map<enode*, enode*, obj_ptr_hash<enode>, ptr_eq<enode> > parent_tbl;
+        typedef obj_map<enode, enode*> parent_tbl;
         typedef std::pair<stack_op, enode*> stack_entry;
 
         ptr_vector<enode>     m_to_unmark;
@@ -82,6 +81,8 @@ namespace smt {
         parent_tbl            m_parent; // parent explanation for occurs_check
         svector<stack_entry>  m_stack; // stack for DFS for occurs_check
 
+        void clear_mark();
+
         void oc_mark_on_stack(enode * n);
         bool oc_on_stack(enode * n) const { return n->get_root()->is_marked(); }
 
@@ -89,6 +90,8 @@ namespace smt {
         bool oc_cycle_free(enode * n) const { return n->get_root()->is_marked2(); }
 
         void oc_push_stack(enode * n);
+        ptr_vector<enode> m_array_args;
+        ptr_vector<enode> const& get_array_args(enode* n);
 
         // class for managing state of final_check
         class final_check_st {
@@ -102,6 +105,7 @@ namespace smt {
         bool occurs_check(enode * n);
         bool occurs_check_enter(enode * n);
         void occurs_check_explain(enode * top, enode * root);
+        void explain_is_child(enode* parent, enode* child);
 
         void mk_split(theory_var v);
 
@@ -123,8 +127,9 @@ namespace smt {
         void reset_eh() override;
         void restart_eh() override { m_util.reset(); }
         bool is_shared(theory_var v) const override;
+        theory_datatype_params const& params() const;
     public:
-        theory_datatype(ast_manager & m, theory_datatype_params & p);
+        theory_datatype(context& ctx);
         ~theory_datatype() override;
         theory * mk_fresh(context * new_ctx) override;
         void display(std::ostream & out) const override;
@@ -142,5 +147,4 @@ namespace smt {
 
 };
 
-#endif /* THEORY_DATATYPE_H_ */
 

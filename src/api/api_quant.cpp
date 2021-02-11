@@ -26,7 +26,7 @@ extern "C" {
 
     Z3_ast Z3_API Z3_mk_quantifier(
         Z3_context c,
-        Z3_bool is_forall,
+        bool is_forall,
         unsigned weight,
         unsigned num_patterns, Z3_pattern const patterns[],
         unsigned num_decls, Z3_sort const sorts[],
@@ -37,8 +37,8 @@ extern "C" {
             c,
             is_forall,
             weight,
-            nullptr,
-            nullptr,
+            of_symbol(symbol::null),
+            of_symbol(symbol::null),
             num_patterns, patterns,
             0, nullptr,
             num_decls, sorts,
@@ -50,7 +50,7 @@ extern "C" {
 
     Z3_ast mk_quantifier_ex_core(
         Z3_context c,
-        Z3_bool is_forall,
+        bool is_forall,
         unsigned weight,
         Z3_symbol quantifier_id,
         Z3_symbol skolem_id,
@@ -72,14 +72,11 @@ extern "C" {
         expr * const* ps = reinterpret_cast<expr * const*>(patterns);
         expr * const* no_ps = reinterpret_cast<expr * const*>(no_patterns);
         symbol qid = to_symbol(quantifier_id);
-        bool is_rec = mk_c(c)->m().rec_fun_qid() == qid;
-        if (!is_rec) {
-            pattern_validator v(mk_c(c)->m());
-            for (unsigned i = 0; i < num_patterns; i++) {
-                if (!v(num_decls, ps[i], 0, 0)) {
-                    SET_ERROR_CODE(Z3_INVALID_PATTERN, nullptr);
-                    return nullptr;
-                }
+        pattern_validator v(mk_c(c)->m());
+        for (unsigned i = 0; i < num_patterns; i++) {
+            if (!v(num_decls, ps[i], 0, 0)) {
+                SET_ERROR_CODE(Z3_INVALID_PATTERN, nullptr);
+                return nullptr;
             }
         }
         sort* const* ts = reinterpret_cast<sort * const*>(sorts);
@@ -109,7 +106,7 @@ extern "C" {
 
     Z3_ast Z3_API Z3_mk_quantifier_ex(
         Z3_context c,
-        Z3_bool is_forall,
+        bool is_forall,
         unsigned weight,
         Z3_symbol quantifier_id,
         Z3_symbol skolem_id,
@@ -132,7 +129,7 @@ extern "C" {
                                unsigned num_decls, Z3_sort const types[],
                                Z3_symbol const decl_names[],
                                Z3_ast body) {
-        return Z3_mk_quantifier(c, 1, weight, num_patterns, patterns, num_decls, types, decl_names, body);
+        return Z3_mk_quantifier(c, true, weight, num_patterns, patterns, num_decls, types, decl_names, body);
     }
 
     Z3_ast Z3_API Z3_mk_exists(Z3_context c,
@@ -141,7 +138,7 @@ extern "C" {
                                unsigned num_decls, Z3_sort const types[],
                                Z3_symbol const decl_names[],
                                Z3_ast body) {
-        return Z3_mk_quantifier(c, 0, weight, num_patterns, patterns, num_decls, types, decl_names, body);
+        return Z3_mk_quantifier(c, false, weight, num_patterns, patterns, num_decls, types, decl_names, body);
     }
 
     Z3_ast Z3_API Z3_mk_lambda(Z3_context c,
@@ -155,7 +152,7 @@ extern "C" {
         expr_ref result(mk_c(c)->m());
         if (num_decls == 0) {
             SET_ERROR_CODE(Z3_INVALID_USAGE, nullptr);
-            RETURN_Z3(0);
+            RETURN_Z3(nullptr);
         }
 
         sort* const* ts = reinterpret_cast<sort * const*>(types);
@@ -166,7 +163,7 @@ extern "C" {
         result = mk_c(c)->m().mk_lambda(names.size(), ts, names.c_ptr(), to_expr(body));
         mk_c(c)->save_ast_trail(result.get());
         return of_ast(result.get());
-        Z3_CATCH_RETURN(0);
+        Z3_CATCH_RETURN(nullptr);
     }
 
     Z3_ast Z3_API Z3_mk_lambda_const(Z3_context c, 
@@ -178,7 +175,7 @@ extern "C" {
         RESET_ERROR_CODE();
         if (num_decls == 0) {
             SET_ERROR_CODE(Z3_INVALID_USAGE, nullptr);
-            RETURN_Z3(0);
+            RETURN_Z3(nullptr);
         }
 
         svector<symbol>  _names;
@@ -188,7 +185,7 @@ extern "C" {
             app* a = to_app(vars[i]);
             _names.push_back(to_app(a)->get_decl()->get_name());
             _args.push_back(a);
-            _vars.push_back(mk_c(c)->m().get_sort(a));
+            _vars.push_back(a->get_sort());
         }
         expr_ref result(mk_c(c)->m());        
         expr_abstract(mk_c(c)->m(), 0, num_decls, _args.c_ptr(), to_expr(body), result);
@@ -196,12 +193,12 @@ extern "C" {
         result = mk_c(c)->m().mk_lambda(_vars.size(), _vars.c_ptr(), _names.c_ptr(), result);
         mk_c(c)->save_ast_trail(result.get());
         return of_ast(result.get());
-        Z3_CATCH_RETURN(0);
+        Z3_CATCH_RETURN(nullptr);
     }
 
 
     Z3_ast Z3_API Z3_mk_quantifier_const_ex(Z3_context c,
-                                            Z3_bool is_forall,
+                                            bool is_forall,
                                             unsigned weight,
                                             Z3_symbol quantifier_id,
                                             Z3_symbol skolem_id,
@@ -235,7 +232,7 @@ extern "C" {
             }
             symbol s(to_app(a)->get_decl()->get_name());
             names.push_back(of_symbol(s));
-            types.push_back(of_sort(mk_c(c)->m().get_sort(a)));
+            types.push_back(of_sort(a->get_sort()));
             bound_asts.push_back(a);
             if (a->get_family_id() != null_family_id || a->get_num_args() != 0) {
                 SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
@@ -283,14 +280,14 @@ extern "C" {
     }
 
     Z3_ast Z3_API Z3_mk_quantifier_const(Z3_context c,
-                                         Z3_bool is_forall,
+                                         bool is_forall,
                                          unsigned weight,
                                          unsigned num_bound,
                                          Z3_app const bound[],
                                          unsigned num_patterns,
                                          Z3_pattern const patterns[],
                                          Z3_ast body) {
-        return Z3_mk_quantifier_const_ex(c, is_forall, weight, nullptr, nullptr,
+        return Z3_mk_quantifier_const_ex(c, is_forall, weight, of_symbol(symbol::null), of_symbol(symbol::null),
                                          num_bound, bound,
                                          num_patterns, patterns,
                                          0, nullptr,
@@ -327,7 +324,7 @@ extern "C" {
                 RETURN_Z3(nullptr);
             }
         }
-        app* a = mk_c(c)->m().mk_pattern(num_patterns, reinterpret_cast<app*const*>(to_exprs(terms)));
+        app* a = mk_c(c)->m().mk_pattern(num_patterns, reinterpret_cast<app*const*>(to_exprs(num_patterns, terms)));
         mk_c(c)->save_ast_trail(a);
         RETURN_Z3(of_pattern(a));
         Z3_CATCH_RETURN(nullptr);
@@ -343,28 +340,28 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
-    Z3_bool Z3_API Z3_is_quantifier_forall(Z3_context c, Z3_ast a) {
+    bool Z3_API Z3_is_quantifier_forall(Z3_context c, Z3_ast a) {
         Z3_TRY;
         LOG_Z3_is_quantifier_forall(c, a);
         RESET_ERROR_CODE();
-        return ::is_forall(to_ast(a)) ? Z3_TRUE : Z3_FALSE;
-        Z3_CATCH_RETURN(Z3_FALSE);
+        return ::is_forall(to_ast(a));
+        Z3_CATCH_RETURN(false);
     }
 
-    Z3_bool Z3_API Z3_is_quantifier_exists(Z3_context c, Z3_ast a) {
+    bool Z3_API Z3_is_quantifier_exists(Z3_context c, Z3_ast a) {
         Z3_TRY;
         LOG_Z3_is_quantifier_exists(c, a);
         RESET_ERROR_CODE();
-        return ::is_exists(to_ast(a))  ? Z3_TRUE : Z3_FALSE;
-        Z3_CATCH_RETURN(Z3_FALSE);
+        return ::is_exists(to_ast(a));
+        Z3_CATCH_RETURN(false);
     }
 
-    Z3_bool Z3_API Z3_is_lambda(Z3_context c, Z3_ast a) {
+    bool Z3_API Z3_is_lambda(Z3_context c, Z3_ast a) {
         Z3_TRY;
         LOG_Z3_is_lambda(c, a);
         RESET_ERROR_CODE();
-        return ::is_lambda(to_ast(a))  ? Z3_TRUE : Z3_FALSE;
-        Z3_CATCH_RETURN(Z3_FALSE);
+        return ::is_lambda(to_ast(a));
+        Z3_CATCH_RETURN(false);
     }
 
 
@@ -456,9 +453,9 @@ extern "C" {
         }
         else {
             SET_ERROR_CODE(Z3_SORT_ERROR, nullptr);
-            return nullptr;
+            return of_symbol(symbol::null);
         }
-        Z3_CATCH_RETURN(nullptr);
+        Z3_CATCH_RETURN(of_symbol(symbol::null));
     }
 
     Z3_sort Z3_API Z3_get_quantifier_bound_sort(Z3_context c, Z3_ast a, unsigned i) {

@@ -21,10 +21,12 @@ Revision History:
 #include<unistd.h>
 #endif
 #include<iostream>
+#include "util/mutex.h"
 #include "util/str_hashtable.h"
 #include "util/z3_exception.h"
+#include "util/z3_version.h"
 
-static volatile bool g_enable_assertions = true;
+static atomic<bool> g_enable_assertions(true);
 
 void enable_assertions(bool f) {
     g_enable_assertions = f;
@@ -35,10 +37,14 @@ bool assertions_enabled() {
 }
 
 void notify_assertion_violation(const char * fileName, int line, const char * condition) {
-    std::cerr << "ASSERTION VIOLATION\n";
-    std::cerr << "File: " << fileName << "\n";
-    std::cerr << "Line: " << line << "\n";
-    std::cerr << condition << "\n";
+    std::cerr << "ASSERTION VIOLATION\n"
+                 "File: " << fileName << "\n"
+                 "Line: " << line << '\n'
+              << condition << '\n';
+#ifndef Z3DEBUG
+    std::cerr << Z3_FULL_VERSION "\n"
+                 "Please file an issue with this message and more detail about how you encountered it at https://github.com/Z3Prover/z3/issues/new\n";
+#endif
 }
 
 static str_hashtable* g_enabled_debug_tags = nullptr;
@@ -56,20 +62,20 @@ void finalize_debug() {
 
 void enable_debug(const char * tag) {
     init_debug_table();
-    g_enabled_debug_tags->insert(const_cast<char *>(tag));
+    g_enabled_debug_tags->insert(tag);
 }
 
 void disable_debug(const char * tag) {
     init_debug_table();
-    g_enabled_debug_tags->erase(const_cast<char *>(tag));
+    g_enabled_debug_tags->erase(tag);
 }
 
 bool is_debug_enabled(const char * tag) {
     init_debug_table();
-    return g_enabled_debug_tags->contains(const_cast<char *>(tag));
+    return g_enabled_debug_tags->contains(tag);
 }
 
-#ifndef _WINDOWS
+#if !defined(_WINDOWS) && !defined(NO_Z3_DEBUGGER)
 void invoke_gdb() {
     char buffer[1024];
     int * x = nullptr;

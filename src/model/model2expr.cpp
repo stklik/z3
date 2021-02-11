@@ -52,7 +52,7 @@ symbol mk_fresh_name::next() {
             _name << m_char;
             if (m_num > 0) _name << m_num;
             ++m_char;
-            symbol name(_name.str().c_str());
+            symbol name(_name.str());
             if (!m_symbols.contains(name)) {
                 return name;
             }                
@@ -70,7 +70,7 @@ static void mk_entry_cond(unsigned arity, func_entry const* entry, expr_ref& res
             // no-op
         }
         else {
-            conjs.push_back(m.mk_eq(m.mk_var(i, m.get_sort(e)), e));
+            conjs.push_back(m.mk_eq(m.mk_var(i, e->get_sort()), e));
         }
     }
     bool_rewriter(m).mk_and(conjs.size(), conjs.c_ptr(), result);        

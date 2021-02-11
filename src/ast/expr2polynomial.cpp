@@ -22,8 +22,8 @@ Notes:
 #include "ast/arith_decl_plugin.h"
 #include "ast/ast_smt2_pp.h"
 #include "util/z3_exception.h"
-#include "util/cooperate.h"
 #include "util/common_msgs.h"
+#include <atomic>
 
 struct expr2polynomial::imp {
     struct frame {
@@ -52,7 +52,7 @@ struct expr2polynomial::imp {
 
     bool                               m_use_var_idxs;
 
-    volatile bool                      m_cancel;
+    std::atomic<bool>                  m_cancel;
 
     imp(expr2polynomial & w, ast_manager & am, polynomial::manager & pm, expr2var * e2v, bool use_var_idxs):
         m_wrapper(w),
@@ -96,7 +96,6 @@ struct expr2polynomial::imp {
     void checkpoint() {
         if (m_cancel)
             throw default_exception(Z3_CANCELED_MSG);
-        cooperate("expr2polynomial");
     }
 
     void throw_not_polynomial() {
@@ -183,7 +182,7 @@ struct expr2polynomial::imp {
         case OP_POWER: {
             rational k;
             SASSERT(t->get_num_args() == 2);
-            if (!m_autil.is_numeral(t->get_arg(1), k) || !k.is_int() || !k.is_unsigned()) {
+            if (!m_autil.is_numeral(t->get_arg(1), k) || !k.is_unsigned() || k.is_zero()) {
                 if (m_use_var_idxs)
                     throw_not_polynomial();
                 else
@@ -436,7 +435,7 @@ struct expr2polynomial::imp {
                         margs.push_back(t);
                 }
             }
-            if (margs.size() == 0) {
+            if (margs.empty()) {
                 args.push_back(m_autil.mk_numeral(rational(1), is_int));
             }
             else if (margs.size() == 1) {
@@ -447,7 +446,7 @@ struct expr2polynomial::imp {
             }
         }
 
-        if (args.size() == 0) {
+        if (args.empty()) {
             r = m_autil.mk_numeral(rational(0), is_int);
         }
         else if (args.size() == 1) {

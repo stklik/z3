@@ -48,10 +48,10 @@ namespace datalog {
         for (unsigned i = 0; i < sz; ++i) {
             expr* a = p1->get_arg(i);
             expr* b = p2->get_arg(i);
-            SASSERT(m.get_sort(a) == m.get_sort(b));
+            SASSERT(a->get_sort() == b->get_sort());
             m_sub1.push_back(a);
             m_sub2.push_back(b);
-            args.push_back(m.mk_var(m_idx++, m.get_sort(a)));
+            args.push_back(m.mk_var(m_idx++, a->get_sort()));
         }
         pred = m.mk_app(p1->get_decl(), args.size(), args.c_ptr());
     }
@@ -64,10 +64,10 @@ namespace datalog {
         expr_ref_vector revsub(m), conjs(m);
         rl.get_vars(m, sorts);
         revsub.resize(sorts.size());  
-        svector<bool> valid(sorts.size(), true);
+        bool_vector valid(sorts.size(), true);
         for (unsigned i = 0; i < sub.size(); ++i) {
             expr* e = sub[i];
-            sort* s = m.get_sort(e);
+            sort* s = e->get_sort();
             expr_ref w(m.mk_var(i, s), m);
             if (is_var(e)) {
                 unsigned v = to_var(e)->get_idx();
@@ -80,14 +80,14 @@ namespace datalog {
                     }
                     else {
                         SASSERT(revsub[v].get());
-                        SASSERT(m.get_sort(revsub[v].get()) == s);
+                        SASSERT(revsub[v]->get_sort() == s);
                         conjs.push_back(m.mk_eq(revsub[v].get(), w));    
                     }
                 }
             }
             else {
                 SASSERT(m.is_value(e));
-                SASSERT(m.get_sort(e) == m.get_sort(w));
+                SASSERT(e->get_sort() == w->get_sort());
                 conjs.push_back(m.mk_eq(e, w));
             }
         }
@@ -116,7 +116,7 @@ namespace datalog {
         expr_ref_vector conjs1(m), conjs(m);
         rule_ref res(rm);
         bool_rewriter bwr(m);
-        svector<bool> is_neg;
+        bool_vector is_neg;
         tgt->get_vars(m, sorts1);
         src.get_vars(m, sorts2);
 
@@ -172,7 +172,7 @@ namespace datalog {
     }    
         
     rule_set * mk_coalesce::operator()(rule_set const & source) {
-        rule_set* rules = alloc(rule_set, m_ctx);
+        scoped_ptr<rule_set> rules = alloc(rule_set, m_ctx);
         rules->inherit_predicates(source);
         rule_set::decl2rules::iterator it = source.begin_grouped_rules(), end = source.end_grouped_rules();
         for (; it != end; ++it) {
@@ -181,8 +181,8 @@ namespace datalog {
             for (unsigned i = 0; i < d_rules.size(); ++i) {
                 rule_ref r1(d_rules[i].get(), rm);
                 for (unsigned j = i + 1; j < d_rules.size(); ++j) {
-                    if (same_body(*r1.get(), *d_rules[j].get())) {
-                        merge_rules(r1, *d_rules[j].get());
+                    if (same_body(*r1.get(), *d_rules.get(j))) {
+                        merge_rules(r1, *d_rules.get(j));
                         d_rules[j] = d_rules.back();
                         d_rules.pop_back();
                         --j;
@@ -191,7 +191,7 @@ namespace datalog {
                 rules->add_rule(r1.get());
             }
         }
-        return rules;
+        return rules.detach();
     }
 
 };

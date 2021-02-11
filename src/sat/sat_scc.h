@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_SCC_H_
-#define SAT_SCC_H_
+#pragma once
 
 #include "util/statistics.h"
 #include "util/params.h"
@@ -60,9 +59,7 @@ namespace sat {
         void ensure_big(bool learned) { m_big.ensure_big(m_solver, learned); }
         int get_left(literal l) const { return m_big.get_left(l); }
         int get_right(literal l) const { return m_big.get_right(l); }
-        literal get_root(literal l) const { return m_big.get_root(l); }
         bool connected(literal u, literal v) const { return m_big.connected(u, v); }
     };
 };
 
-#endif

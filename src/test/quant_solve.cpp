@@ -65,7 +65,7 @@ static void validate_quant_solutions(app* x, expr* fml, expr_ref_vector& guards)
     expr_abstract(m, 0, 1, &_x, fml, fml2);
     std::cout << mk_pp(fml2, m) << "\n";
     symbol name(x->get_decl()->get_name());
-    sort* s = m.get_sort(x);
+    sort* s = x->get_sort();
     fml2 = m.mk_exists(1, &s, &name, fml2);
     std::cout << mk_pp(fml2, m) << "\n";
     tmp = m.mk_not(m.mk_iff(fml2, tmp));
@@ -131,8 +131,7 @@ static expr_ref parse_fml(ast_manager& m, char const* str) {
            << "(assert " << str << ")\n";
     std::istringstream is(buffer.str());
     VERIFY(parse_smt2_commands(ctx, is));
-    ENSURE(ctx.begin_assertions() != ctx.end_assertions());
-    result = *ctx.begin_assertions();
+    result = ctx.assertions().get(0);
     return result;
 }
 

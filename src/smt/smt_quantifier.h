@@ -16,10 +16,10 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_QUANTIFIER_H_
-#define SMT_QUANTIFIER_H_
+#pragma once
 
 #include "ast/ast.h"
+#include "ast/quantifier_stat.h"
 #include "util/statistics.h"
 #include "util/params.h"
 #include "smt/smt_types.h"
@@ -31,17 +31,19 @@ struct smt_params;
 namespace smt {
     class quantifier_manager_plugin;
     class quantifier_stat;
+    class context;
 
     class quantifier_manager {
         struct imp;
         imp *                       m_imp;
+        unsigned                    m_lazy_scopes;
+        bool                        m_lazy;
+        void flush();
     public:
         quantifier_manager(context & ctx, smt_params & fp, params_ref const & p);
         ~quantifier_manager();
 
         context & get_context() const;
-
-        void set_plugin(quantifier_manager_plugin * plugin);
 
         void add(quantifier * q, unsigned generation);
         void del(quantifier * q);
@@ -49,8 +51,10 @@ namespace smt {
 
         bool is_shared(enode * n) const;
 
-        quantifier_stat * get_stat(quantifier * q) const;
+        q::quantifier_stat * get_stat(quantifier * q) const;
         unsigned get_generation(quantifier * q) const;
+
+        static void log_justification_to_root(std::ostream & log, enode *en, obj_hashtable<enode> &already_visited, context &ctx, ast_manager &m);
 
         bool add_instance(quantifier * q, app * pat,
                           unsigned num_bindings,
@@ -77,6 +81,7 @@ namespace smt {
         };
 
         bool model_based() const;
+        bool has_quantifiers() const;
         bool mbqi_enabled(quantifier *q) const; // can mbqi instantiate this quantifier?
         void adjust_model(proto_model * m);
         check_model_result check_model(proto_model * m, obj_map<enode, app *> const & root2value);
@@ -176,4 +181,3 @@ namespace smt {
     };
 };
 
-#endif

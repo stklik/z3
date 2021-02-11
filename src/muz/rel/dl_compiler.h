@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_COMPILER_H_
-#define DL_COMPILER_H_
+#pragma once
 
 #include<iostream>
 #include<list>
@@ -148,7 +147,7 @@ namespace datalog {
         void make_join(reg_idx t1, reg_idx t2, const variable_intersection & vars, reg_idx & result, 
             bool reuse_t1, instruction_block & acc);
         void make_min(reg_idx source, reg_idx & target, const unsigned_vector & group_by_cols,
-            const unsigned min_col, instruction_block & acc);
+            unsigned min_col, instruction_block & acc);
         void make_join_project(reg_idx t1, reg_idx t2, const variable_intersection & vars, 
             const unsigned_vector & removed_cols, reg_idx & result, bool reuse_t1, instruction_block & acc);
         void make_filter_interpreted_and_project(reg_idx src, app_ref & cond,
@@ -284,5 +283,4 @@ namespace datalog {
 
 };
 
-#endif /* DL_COMPILER_H_ */
 

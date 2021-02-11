@@ -1,11 +1,12 @@
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/version.h")
-  message(FATAL_ERROR "\"${CMAKE_CURRENT_SOURCE_DIR}/version.h\""
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/z3_version.h")
+  message(FATAL_ERROR "\"${CMAKE_CURRENT_SOURCE_DIR}/z3_version.h\""
           ${z3_polluted_tree_msg}
   )
 endif()
 
 set(Z3_FULL_VERSION "\"${Z3_FULL_VERSION_STR}\"")
-configure_file(version.h.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/version.h)
+configure_file(z3_version.h.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/z3_version.h)
+
 
 z3_add_component(util
   SOURCES
@@ -15,7 +16,6 @@ z3_add_component(util
     bit_vector.cpp
     cmd_context_types.cpp
     common_msgs.cpp
-    cooperate.cpp
     debug.cpp
     env_params.cpp
     fixed_bit_vector.cpp
@@ -51,22 +51,26 @@ z3_add_component(util
     small_object_allocator.cpp
     smt2_util.cpp
     stack.cpp
+    state_graph.cpp
     statistics.cpp
     symbol.cpp
     timeit.cpp
     timeout.cpp
-    timer.cpp
     trace.cpp
     util.cpp
     warning.cpp
     z3_exception.cpp
+    zstring.cpp
   EXTRA_REGISTER_MODULE_HEADERS
     env_params.h
   MEMORY_INIT_FINALIZER_HEADERS
     debug.h
     gparams.h
+    scoped_timer.h
     prime_generator.h
     rational.h
+    rlimit.h
+    state_graph.h
     symbol.h
     trace.h
 )

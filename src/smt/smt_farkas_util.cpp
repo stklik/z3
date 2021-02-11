@@ -297,7 +297,7 @@ namespace smt {
         m_coeffs.reset();        
     }
     
-    void farkas_util::add(rational const & coef, app * c) {
+    bool farkas_util::add(rational const & coef, app * c) {
         bool is_pos = true;
         expr* e;
         while (m.is_not(c, e)) {
@@ -306,12 +306,25 @@ namespace smt {
         }
         
         if (!coef.is_zero() && !m.is_true(c)) {
-            m_coeffs.push_back(coef);                
-            m_ineqs.push_back(fix_sign(is_pos, c));                
+            if (m.is_eq(c) || a.is_le(c) || a.is_lt(c) || a.is_gt(c) || a.is_ge(c)) {
+                m_coeffs.push_back(coef);
+                m_ineqs.push_back(fix_sign(is_pos, c));
+            }
+            else {
+                return false;
+            }
         }
+        return true;
     }
     
     expr_ref farkas_util::get() {
+        TRACE("arith", 
+              for (unsigned i = 0; i < m_coeffs.size(); ++i) {
+                  tout << m_coeffs[i] << " * (" << mk_pp(m_ineqs[i].get(), m) << ") ";
+              }
+              tout << "\n";
+              );
+
         m_normalize_factor = rational::one();
         expr_ref res(m);
         if (m_coeffs.empty()) {
@@ -330,13 +343,12 @@ namespace smt {
             partition_ineqs();
             expr_ref_vector lits(m);
             unsigned lo = 0;
-            for (unsigned i = 0; i < m_his.size(); ++i) {
-                unsigned hi = m_his[i];
+            for (unsigned hi : m_his) {
                 lits.push_back(extract_consequence(lo, hi));
                 lo = hi;
             }
             bool_rewriter(m).mk_or(lits.size(), lits.c_ptr(), res);
-            IF_VERBOSE(2, { if (lits.size() > 1) { verbose_stream() << "combined lemma: " << mk_pp(res, m) << "\n"; } });
+            IF_VERBOSE(2, { if (lits.size() > 1) { verbose_stream() << "combined lemma: " << res << "\n"; } });
         }
         else {
             res = extract_consequence(0, m_coeffs.size());

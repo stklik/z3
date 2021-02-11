@@ -18,8 +18,7 @@ Notes:
     Based directly on smt_solver.
    
 --*/
-#ifndef OPT_SOLVER_H_
-#define OPT_SOLVER_H_
+#pragma once
 
 #include "util/inf_rational.h"
 #include "util/inf_eps_rational.h"
@@ -73,12 +72,12 @@ namespace opt {
         generic_model_converter& m_fm;
         progress_callback * m_callback;
         symbol              m_logic;
-        model_ref           m_model;
+        model_ref           m_last_model;
         svector<smt::theory_var>  m_objective_vars;
         vector<inf_eps>     m_objective_values;
         sref_vector<model>  m_models;
         expr_ref_vector     m_objective_terms;
-        svector<bool>       m_valid_objectives;
+        bool_vector       m_valid_objectives;
         bool                m_dump_benchmarks;
         static unsigned     m_dump_count;
         statistics          m_stats;
@@ -95,7 +94,7 @@ namespace opt {
         void assert_expr_core(expr * t) override;
         void push_core() override;
         void pop_core(unsigned n) override;
-        lbool check_sat_core(unsigned num_assumptions, expr * const * assumptions) override;
+        lbool check_sat_core2(unsigned num_assumptions, expr * const * assumptions) override;
         void get_unsat_core(expr_ref_vector & r) override;
         void get_model_core(model_ref & _m) override;
         proof * get_proof() override;
@@ -108,7 +107,13 @@ namespace opt {
         ast_manager& get_manager() const override { return m; }
         lbool find_mutexes(expr_ref_vector const& vars, vector<expr_ref_vector>& mutexes) override;
         lbool preferred_sat(expr_ref_vector const& asms, vector<expr_ref_vector>& cores) override;
+        void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth) override; 
+        expr_ref_vector get_trail() override { return m_context.get_trail(); }
         expr_ref_vector cube(expr_ref_vector&, unsigned) override { return expr_ref_vector(m); }
+        void set_phase(expr* e) override { m_context.set_phase(e); }
+        phase* get_phase() override { return m_context.get_phase(); }
+        void set_phase(phase* p) override { m_context.set_phase(p); }
+        void move_to_front(expr* e) override { m_context.move_to_front(e); }
 
         void set_logic(symbol const& logic);
 
@@ -148,4 +153,3 @@ namespace opt {
     };
 }
 
-#endif

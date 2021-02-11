@@ -17,8 +17,7 @@ Notes:
 
 --*/
 
-#ifndef THEORY_WMAXSAT_H_
-#define THEORY_WMAXSAT_H_
+#pragma once
 
 #include "smt/smt_theory.h"
 #include "smt/smt_clause.h"
@@ -53,19 +52,19 @@ namespace smt {
         bool                     m_can_propagate;
         bool                     m_normalize; 
         rational                 m_den;         // lcm of denominators for rational weights.
-        svector<bool>            m_assigned, m_enabled;
+        bool_vector            m_assigned, m_enabled;
         stats                    m_stats;
     public:
-        theory_wmaxsat(ast_manager& m, generic_model_converter& mc);
+        theory_wmaxsat(context& ctx, ast_manager& m, generic_model_converter& mc);
         ~theory_wmaxsat() override;
-        void get_assignment(svector<bool>& result);
+        void get_assignment(bool_vector& result);
         expr* assert_weighted(expr* fml, rational const& w);
         void  disable_var(expr* var);
         bool_var register_var(app* var, bool attach);
         rational get_cost();
         void init_min_cost(rational const& r);
 
-        class numeral_trail : public trail<context> {
+        class numeral_trail : public trail {
             typedef scoped_mpz T;
             T & m_value;
             scoped_mpz_vector&  m_old_values;            
@@ -79,7 +78,7 @@ namespace smt {
             ~numeral_trail() override {
             }
             
-            void undo(context & ctx) override {
+            void undo() override {
                 m_value = m_old_values.back();
                 m_old_values.shrink(m_old_values.size() - 1);
             }
@@ -140,4 +139,3 @@ namespace smt {
     };
 };
 
-#endif

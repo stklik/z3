@@ -263,7 +263,7 @@ namespace datalog {
         }
         uint64_t n, sz;
         ast_manager& m = get_ast_manager();
-        if (dl.is_numeral(e, n) && dl.try_get_size(m.get_sort(e), sz)) {
+        if (dl.is_numeral(e, n) && dl.try_get_size(e->get_sort(), sz)) {
             num_bits = 0;
             while (sz > 0) ++num_bits, sz = sz/2;
             r = rational(n, rational::ui64());
@@ -1112,7 +1112,7 @@ namespace datalog {
             SASSERT(joined_col_cnt > 0 || neg.get_signature().size() == 0);
             m_is_subtract = (joined_col_cnt == t.get_signature().size());
             m_is_subtract &= (joined_col_cnt == neg.get_signature().size());
-            svector<bool> found(joined_col_cnt, false);
+            bool_vector found(joined_col_cnt, false);
             for (unsigned i = 0; m_is_subtract && i < joined_col_cnt; ++i) {
                 m_is_subtract = !found[t_cols[i]] && (t_cols[i] == neg_cols[i]);
                 found[t_cols[i]] = true;

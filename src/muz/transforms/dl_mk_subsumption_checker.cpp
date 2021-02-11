@@ -45,7 +45,7 @@ namespace datalog {
 
         unsigned pt_len = r->get_positive_tail_size();
         if(pt_len != r->get_uninterpreted_tail_size()) {
-            // we dont' expect rules with negative tails to be total
+            // we don't expect rules with negative tails to be total
             return false;
         }
 
@@ -97,7 +97,7 @@ namespace datalog {
     void mk_subsumption_checker::scan_for_total_rules(const rule_set & rules) {
         bool new_discovered;
         //we cycle through the rules until we keep discovering new total relations
-        //(discovering a total relation migh reveal other total relations)
+        //(discovering a total relation might reveal other total relations)
         do {
             new_discovered = false;
             rule_set::iterator rend = rules.end();
@@ -125,7 +125,7 @@ namespace datalog {
         app_ref head(r->get_head(), m);
 
         app_ref_vector tail(m);
-        svector<bool> tail_neg;
+        bool_vector tail_neg;
 
         for(unsigned i=0; i<u_len; i++) {
             app * tail_atom = r->get_tail(i);
@@ -335,7 +335,7 @@ namespace datalog {
     rule_set * mk_subsumption_checker::operator()(rule_set const & source) {
         // TODO mc
         if (!m_context.get_params ().xform_subsumption_checker())
-          return nullptr;
+            return nullptr;
 
         m_have_new_total_rule = false;
         collect_ground_unconditional_rule_heads(source);
@@ -343,28 +343,24 @@ namespace datalog {
         scan_for_total_rules(source);
 
         m_have_new_total_rule = false;
-        rule_set * res = alloc(rule_set, m_context);
+        scoped_ptr<rule_set> res = alloc(rule_set, m_context);
         bool modified = transform_rules(source, *res);
 
         if (!m_have_new_total_rule && !modified) {
-            dealloc(res);
             return nullptr;
         }
-
 
         //During the construction of the new set we may discover new total relations
         //(by quantifier elimination on the uninterpreted tails).
         SASSERT(m_new_total_relation_discovery_during_transformation || !m_have_new_total_rule);
         while (m_have_new_total_rule) {
             m_have_new_total_rule = false;
-
-            rule_set * old = res;
+            scoped_ptr<rule_set> old = res.detach();
             res = alloc(rule_set, m_context);
             transform_rules(*old, *res);
-            dealloc(old);
         }
 
-        return res;
+        return res.detach();
     }
 
 };

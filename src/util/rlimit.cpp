@@ -18,12 +18,24 @@ Revision History:
 --*/
 #include "util/rlimit.h"
 #include "util/common_msgs.h"
+#include "util/mutex.h"
+
+
+static DECLARE_MUTEX(g_rlimit_mux);
+
+void initialize_rlimit() {
+    ALLOC_MUTEX(g_rlimit_mux);
+}
+
+void finalize_rlimit() {
+    DEALLOC_MUTEX(g_rlimit_mux);
+}
 
 reslimit::reslimit():
     m_cancel(0),
     m_suspend(false),
     m_count(0),
-    m_limit(0) {
+    m_limit(std::numeric_limits<uint64_t>::max()) {
 }
 
 uint64_t reslimit::count() const {
@@ -32,26 +44,26 @@ uint64_t reslimit::count() const {
 
 bool reslimit::inc() {
     ++m_count;
-    return (m_cancel == 0 && (m_limit == 0 || m_count <= m_limit)) || m_suspend;
+    return not_canceled();
 }
 
 bool reslimit::inc(unsigned offset) {
     m_count += offset;
-    return (m_cancel == 0 && (m_limit == 0 || m_count <= m_limit)) || m_suspend;
+    return not_canceled();
 }
 
 void reslimit::push(unsigned delta_limit) {
-    uint64_t new_limit = delta_limit + m_count;
+    uint64_t new_limit = delta_limit ? delta_limit + m_count : std::numeric_limits<uint64_t>::max();
     if (new_limit <= m_count) {
-        new_limit = 0;
+        new_limit = std::numeric_limits<uint64_t>::max();
     }
     m_limits.push_back(m_limit);
-    m_limit = m_limit==0 ? new_limit : std::min(new_limit, m_limit);
+    m_limit = std::min(new_limit, m_limit);
     m_cancel = 0;
 }
 
 void reslimit::pop() {
-    if (m_count > m_limit && m_limit > 0) {
+    if (m_count > m_limit) {
         m_count = m_limit;
     }
     m_limit = m_limits.back();
@@ -69,48 +81,34 @@ char const* reslimit::get_cancel_msg() const {
 }
 
 void reslimit::push_child(reslimit* r) {
-    #pragma omp critical (reslimit_cancel)
-    {
-        m_children.push_back(r);
-    }
+    lock_guard lock(*g_rlimit_mux);
+    m_children.push_back(r);    
 }
 
 void reslimit::pop_child() {
-    #pragma omp critical (reslimit_cancel)
-    {
-        m_children.pop_back();
-    }
+    lock_guard lock(*g_rlimit_mux);
+    m_children.pop_back();    
 }
 
 void reslimit::cancel() {
-    #pragma omp critical (reslimit_cancel)
-    {
-        set_cancel(m_cancel+1);
-    }
+    lock_guard lock(*g_rlimit_mux);
+    set_cancel(m_cancel+1);    
 }
 
-
 void reslimit::reset_cancel() {
-    #pragma omp critical (reslimit_cancel)
-    {
-        set_cancel(0);
-    }
+    lock_guard lock(*g_rlimit_mux);
+    set_cancel(0);    
 }
 
 void reslimit::inc_cancel() {
-    #pragma omp critical (reslimit_cancel)
-    {
-        set_cancel(m_cancel+1);
-    }
+    lock_guard lock(*g_rlimit_mux);
+    set_cancel(m_cancel+1);    
 }
 
-
 void reslimit::dec_cancel() {
-    #pragma omp critical (reslimit_cancel)
-    {
-        if (m_cancel > 0) {
-            set_cancel(m_cancel-1);
-        }
+    lock_guard lock(*g_rlimit_mux);
+    if (m_cancel > 0) {
+        set_cancel(m_cancel-1);
     }
 }
 

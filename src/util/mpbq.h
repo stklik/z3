@@ -24,8 +24,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MPBQ_H_
-#define MPBQ_H_
+#pragma once
 
 #include "util/mpq.h"
 #include "util/rational.h"
@@ -259,17 +258,17 @@ public:
     void select_small_core(unsynch_mpq_manager & qm, mpq const & lower, mpq const & upper, mpbq & r);
 
 
-    void display(std::ostream & out, mpbq const & a);
-    void display_pp(std::ostream & out, mpbq const & a);
-    void display_decimal(std::ostream & out, mpbq const & a, unsigned prec = 8);
+    std::ostream& display(std::ostream & out, mpbq const & a);
+    std::ostream& display_pp(std::ostream & out, mpbq const & a);
+    std::ostream& display_decimal(std::ostream & out, mpbq const & a, unsigned prec = 8);
     /**
        \brief Display a in decimal while its digits match b digits.
        This function is useful when a and b are representing an interval [a,b] which
        contains an algebraic number
     */
-    void display_decimal(std::ostream & out, mpbq const & a, mpbq const & b, unsigned prec);
+    std::ostream& display_decimal(std::ostream & out, mpbq const & a, mpbq const & b, unsigned prec);
 
-    void display_smt2(std::ostream & out, mpbq const & a, bool decimal);
+    std::ostream& display_smt2(std::ostream & out, mpbq const & a, bool decimal);
 
     /**
        \brief Approximate n as b/2^k' s.t. k' <= k.
@@ -360,4 +359,3 @@ MPBQ_MK_BINARY(operator*, mul)
 #undef MPBQ_MK_BINARY
 #undef MPBQ_MK_BINARY_CORE
 
-#endif

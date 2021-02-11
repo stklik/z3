@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_RELATION_MANAGER_H_
-#define DL_RELATION_MANAGER_H_
+#pragma once
 
 
 #include "util/map.h"
@@ -115,7 +114,7 @@ namespace datalog {
           m_next_relation_fid(0) {}
 
         virtual ~relation_manager();
-
+        
         void reset();
         void reset_relations();
 
@@ -155,6 +154,7 @@ namespace datalog {
             }
         }
 
+        decl_set collect_predicates() const;
         void collect_non_empty_predicates(decl_set & res) const;
         void restrict_predicates(const decl_set & preds);
 
@@ -253,7 +253,7 @@ namespace datalog {
             \brief Return functor that transforms a table into one that lacks columns listed in
             \c removed_cols array.
 
-            The \c removed_cols cotains columns of table \c t in strictly ascending order.
+            The \c removed_cols contains columns of table \c t in strictly ascending order.
             */
         relation_transformer_fn * mk_project_fn(const relation_base & t, unsigned col_cnt, 
             const unsigned * removed_cols);
@@ -263,7 +263,7 @@ namespace datalog {
         }
 
         /**
-            \brief Return an operation that is a composition of a join an a project operation.
+            \brief Return an operation that is a composition of a join and a project operation.
         */
         relation_join_fn * mk_join_project_fn(const relation_base & t1, const relation_base & t2,
                 unsigned joined_col_cnt, const unsigned * cols1, const unsigned * cols2, 
@@ -420,7 +420,7 @@ namespace datalog {
             \brief Return functor that transforms a table into one that lacks columns listed in
             \c removed_cols array.
 
-            The \c removed_cols cotains columns of table \c t in strictly ascending order.
+            The \c removed_cols contains columns of table \c t in strictly ascending order.
 
             If a project operation removes a non-functional column, all functional columns become 
             non-functional (so that none of the values in functional columns are lost)
@@ -433,7 +433,7 @@ namespace datalog {
         }
 
         /**
-            \brief Return an operation that is a composition of a join an a project operation.
+            \brief Return an operation that is a composition of a join and a project operation.
 
             This operation is equivalent to the two operations performed separately, unless functional 
             columns are involved.
@@ -672,7 +672,7 @@ namespace datalog {
         family_id get_relation_kind(const relation_signature & sig, const Spec & spec) {
             typename sig2store::entry * e = m_kind_assignment.find_core(sig);
             if(!e) {
-                e = m_kind_assignment.insert_if_not_there2(sig, alloc(family_id_idx_store));
+                e = m_kind_assignment.insert_if_not_there3(sig, alloc(family_id_idx_store));
                 m_kind_specs.insert(sig, alloc(family_id2spec));
             }
             family_id_idx_store & ids = *e->get_data().m_value;
@@ -701,5 +701,4 @@ namespace datalog {
 
 };
 
-#endif /* DL_RELATION_MANAGER_H_ */
 

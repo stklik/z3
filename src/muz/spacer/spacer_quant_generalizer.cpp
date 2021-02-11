@@ -120,7 +120,7 @@ struct index_lt_proc : public std::binary_function<app*, app *, bool> {
             for (expr *e : v)
                 quick_for_each_expr(fn, visited, e);
         }
-        catch (has_nlira_functor::found ) {
+        catch (const has_nlira_functor::found &) {
             return true;
         }
         return false;
@@ -186,7 +186,7 @@ void lemma_quantifier_generalizer::find_candidates(expr *e,
 
     std::sort(candidates.c_ptr(), candidates.c_ptr() + candidates.size(),
               index_lt_proc(m));
-    // keep actual select indecies in the order found at the back of
+    // keep actual select indices in the order found at the back of
     // candidate list. There is no particular reason for this order
     candidates.append(extra);
 }
@@ -199,24 +199,24 @@ bool lemma_quantifier_generalizer::match_sk_idx(expr *e, app_ref_vector const &z
     contains_app has_zk(m, zks.get(0));
 
     if (!contains_selects(e, m)) return false;
-    app_ref_vector indicies(m);
-    get_select_indices(e, indicies);
-    if (indicies.size() > 2) return false;
+    app_ref_vector indices(m);
+    get_select_indices(e, indices);
+    if (indices.size() > 2) return false;
 
     unsigned i=0;
-    if (indicies.size() == 1) {
-        if (!has_zk(indicies.get(0))) return false;
+    if (indices.size() == 1) {
+        if (!has_zk(indices.get(0))) return false;
     }
     else {
-        if (has_zk(indicies.get(0)) && !has_zk(indicies.get(1)))
+        if (has_zk(indices.get(0)) && !has_zk(indices.get(1)))
             i = 0;
-        else if (!has_zk(indicies.get(0)) && has_zk(indicies.get(1)))
+        else if (!has_zk(indices.get(0)) && has_zk(indices.get(1)))
             i = 1;
-        else if (!has_zk(indicies.get(0)) && !has_zk(indicies.get(1)))
+        else if (!has_zk(indices.get(0)) && !has_zk(indices.get(1)))
             return false;
     }
 
-    idx = indicies.get(i);
+    idx = indices.get(i);
     sk = zks.get(0);
     return true;
 }
@@ -226,7 +226,7 @@ expr* times_minus_one(expr *e, arith_util &arith) {
     expr *r;
     if (arith.is_times_minus_one (e, r)) { return r; }
 
-    return arith.mk_mul(arith.mk_numeral(rational(-1), arith.is_int(get_sort(e))), e);
+    return arith.mk_mul(arith.mk_numeral(rational(-1), arith.is_int(e->get_sort())), e);
 }
 }
 
@@ -502,7 +502,7 @@ bool lemma_quantifier_generalizer::generalize (lemma_ref &lemma, app *term) {
     expr_ref_vector abs_cube(m);
 
     var_ref var(m);
-    var = m.mk_var (m_offset, get_sort(term));
+    var = m.mk_var (m_offset, term->get_sort());
 
     mk_abs_cube(lemma, term, var, gnd_cube, abs_cube, lb, ub, stride);
     if (abs_cube.empty()) {return false;}

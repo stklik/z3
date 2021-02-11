@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MODEL_CORE_H_
-#define MODEL_CORE_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -25,7 +24,9 @@ Revision History:
 
 class model_core {
 protected:
-    typedef obj_map<func_decl, expr *>       decl2expr;
+    typedef std::pair<unsigned, expr*> i_expr;
+    typedef std::pair<unsigned, func_interp*> i_interp;
+    typedef obj_map<func_decl, i_expr>       decl2expr;
     typedef obj_map<func_decl, func_interp*> decl2finterp;
     ast_manager &                 m;
     unsigned                      m_ref_count;
@@ -44,7 +45,7 @@ public:
     unsigned get_num_decls() const { return m_decls.size(); }
     func_decl * get_decl(unsigned i) const { return m_decls[i]; }
     bool has_interpretation(func_decl * d) const { return m_interp.contains(d) || m_finterp.contains(d); }
-    expr * get_const_interp(func_decl * d) const { expr * v; return m_interp.find(d, v) ? v : nullptr; }
+    expr * get_const_interp(func_decl * d) const { i_expr v; return m_interp.find(d, v) ? v.second : nullptr; }
     func_interp * get_func_interp(func_decl * d) const { func_interp * fi; return m_finterp.find(d, fi) ? fi : nullptr; }
 
     bool eval(func_decl * f, expr_ref & r) const;
@@ -69,8 +70,11 @@ public:
     void register_decl(func_decl * d, expr * v);
     void register_decl(func_decl * f, func_interp * fi);
     void unregister_decl(func_decl * d);
+    func_interp* update_func_interp(func_decl* f, func_interp* fi);
 
     virtual expr * get_some_value(sort * s) = 0;
+    virtual expr * get_fresh_value(sort * s) = 0;
+    virtual bool get_some_values(sort * s, expr_ref & v1, expr_ref & v2) = 0;
 
     expr * get_some_const_interp(func_decl * d) { 
         expr * r = get_const_interp(d); 
@@ -93,4 +97,3 @@ public:
 std::ostream& operator<<(std::ostream& out, model_core const& m);
 
 
-#endif

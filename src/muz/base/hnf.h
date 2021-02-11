@@ -11,7 +11,7 @@ Copyright (c) 2015 Microsoft Corporation
  
  Abstract:
  
-     Horn normal form convertion.
+     Horn normal form conversion.
 
  Author:
  
@@ -22,8 +22,7 @@ Copyright (c) 2015 Microsoft Corporation
  
 --*/
  
-#ifndef HNF_H_
-#define HNF_H_
+#pragma once
  
 #include "ast/ast.h"
 #include "util/params.h"
@@ -48,4 +47,3 @@ class hnf {
     func_decl_ref_vector const& get_fresh_predicates();
 };
  
-#endif /* HNF_H_ */

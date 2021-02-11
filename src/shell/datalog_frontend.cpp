@@ -21,12 +21,9 @@ Revision History:
 #include<time.h>
 #include<signal.h>
 #include "util/stopwatch.h"
-#ifdef _CYGWIN
-#undef min
-#undef max
-#endif
 #include "smt/params/smt_params.h"
 #include "ast/arith_decl_plugin.h"
+#include "ast/reg_decl_plugins.h"
 #include "muz/rel/dl_compiler.h"
 #include "muz/transforms/dl_mk_filter_rules.h"
 #include "muz/rel/dl_finite_product_relation.h"
@@ -36,6 +33,7 @@ Revision History:
 #include "muz/fp/datalog_parser.h"
 #include "shell/datalog_frontend.h"
 #include "util/timeout.h"
+#include "util/mutex.h"
 
 static stopwatch g_overall_time;
 static stopwatch g_piece_timer;
@@ -46,6 +44,8 @@ static datalog::rule_set * g_orig_rules;
 static datalog::instruction_block * g_code;
 static datalog::execution_context * g_ectx;
 
+static mutex *display_stats_mux = new mutex;
+
 
 static void display_statistics(
     std::ostream& out,
@@ -54,8 +54,9 @@ static void display_statistics(
     datalog::instruction_block& code,
     datalog::execution_context& ex_ctx,
     bool verbose
-    ) 
+    )
 {
+    lock_guard lock(*display_stats_mux);
     g_piece_timer.stop();
     unsigned t_other = static_cast<int>(g_piece_timer.get_seconds()*1000);
     g_overall_time.stop();
@@ -67,11 +68,11 @@ static void display_statistics(
         p.set_uint("profile_milliseconds_threshold", 100);
         ctx.updt_params(p);
 
-        IF_VERBOSE(2, 
+        IF_VERBOSE(2,
                    out << "--------------\n";
                    out << "original rules\n";
                    orig_rules.display(out);
-                   
+
                    out << "---------------\n";
                    out << "generated rules\n";
                    ctx.display_rules(out);
@@ -79,12 +80,12 @@ static void display_statistics(
                    out << "--------------\n";
                    out << "instructions  \n";
                    code.display(ex_ctx, out);
-                   
+
                    out << "--------------\n";
                    out << "big relations \n";
                    ex_ctx.report_big_relations(1000, out););
     }
-    IF_VERBOSE(2, 
+    IF_VERBOSE(2,
                out << "--------------\n";
                out << "relation sizes\n";
                ctx.get_rel_context()->get_rmanager().display_relation_sizes(out););
@@ -122,6 +123,7 @@ unsigned read_datalog(char const * file) {
     IF_VERBOSE(1, verbose_stream() << "Z3 Datalog Engine\n";);
     smt_params     s_params;
     ast_manager m;
+    reg_decl_plugins(m);
     datalog::register_engine re;
     g_overall_time.start();
     register_on_timeout_proc(on_timeout);
@@ -132,9 +134,8 @@ unsigned read_datalog(char const * file) {
     datalog::context ctx(m, re, s_params, params);
     datalog::relation_manager & rmgr = ctx.get_rel_context()->get_rmanager();
     datalog::relation_plugin & inner_plg = *rmgr.get_relation_plugin(symbol("tr_hashtable"));
-    SASSERT(&inner_plg);
     rmgr.register_plugin(alloc(datalog::finite_product_relation_plugin, inner_plg, rmgr));
-    
+
     g_piece_timer.reset();
     g_piece_timer.start();
 
@@ -178,26 +179,26 @@ unsigned read_datalog(char const * file) {
     g_code = &rules_code;
     g_ectx = &ex_ctx;
 
-    try {    
+    try {
         g_piece_timer.reset();
         g_piece_timer.start();
-        
+
         bool early_termination;
-        unsigned timeout = ctx.initial_restart_timeout(); 
+        unsigned timeout = ctx.initial_restart_timeout();
         if (timeout == 0) {
             timeout = UINT_MAX;
         }
         do {
             ctx.get_rel_context()->transform_rules();
-            
+
             datalog::compiler::compile(ctx, ctx.get_rules(), rules_code, termination_code);
-            
+
             TRACE("dl_compiler", rules_code.display(ex_ctx, tout););
-            
+
             rules_code.make_annotations(ex_ctx);
-            
+
             ex_ctx.set_timelimit(timeout);
-            
+
             early_termination = !rules_code.perform(ex_ctx);
             if(early_termination) {
                 IF_VERBOSE(10, ex_ctx.report_big_relations(1000, verbose_stream()););
@@ -208,10 +209,10 @@ unsigned read_datalog(char const * file) {
             ex_ctx.reset_timelimit();
             TRUSTME( termination_code.perform(ex_ctx) );
             ctx.saturation_was_run();
-            
+
             if (early_termination) {
                 IF_VERBOSE(1, verbose_stream() << "restarting saturation\n";);
-                
+
                 uint64_t new_timeout = static_cast<uint64_t>(timeout)*ctx.initial_restart_timeout();
                 if(new_timeout>UINT_MAX) {
                     timeout=UINT_MAX;
@@ -219,7 +220,7 @@ unsigned read_datalog(char const * file) {
                 else {
                     timeout=static_cast<unsigned>(new_timeout);
                 }
-                
+
                 rules_code.process_all_costs();
                 rules_code.reset();
                 termination_code.reset();
@@ -229,35 +230,33 @@ unsigned read_datalog(char const * file) {
                 ctx.close();
             }
         } while (early_termination);
-        
+
 
         TRACE("dl_compiler", ctx.display(tout);
               rules_code.display(ex_ctx, tout););
-        
+
         if (ctx.output_tuples()) {
             ctx.get_rel_context()->display_output_facts(ctx.get_rules(), std::cout);
         }
         display_statistics(
             std::cout,
             ctx,
-            original_rules, 
+            original_rules,
             rules_code,
             ex_ctx,
             false);
 
     }
     catch (const out_of_memory_error &) {
-        std::cout << "\n\nOUT OF MEMORY!\n\n";        
+        std::cout << "\n\nOUT OF MEMORY!\n\n";
         display_statistics(
             std::cout,
             ctx,
-            original_rules, 
+            original_rules,
             rules_code,
             ex_ctx,
             true);
         return ERR_MEMOUT;
     }
-    register_on_timeout_proc(nullptr);
     return 0;
 }
-

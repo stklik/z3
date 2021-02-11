@@ -29,17 +29,55 @@ Notes:
 --*/
 
 #include "ast/ast_util.h"
+#include "ast/ast_pp.h"
 #include "ast/for_each_expr.h"
+#include "ast/rewriter/expr_safe_replace.h"
 #include "ast/rewriter/bool_rewriter.h"
+#include "ast/rewriter/th_rewriter.h"
 #include "ast/arith_decl_plugin.h"
 #include "model/model_evaluator.h"
 #include "solver/solver.h"
 #include "qe/qe_mbi.h"
-#include "qe/qe_term_graph.h"
-#include "qe/qe_arith.h"
+#include "qe/mbp/mbp_term_graph.h"
+#include "qe/mbp/mbp_arith.h"
+#include "qe/mbp/mbp_arrays.h"
 
 
 namespace qe {
+
+    void mbi_plugin::set_shared(expr* a, expr* b) {
+        struct fun_proc {
+            obj_hashtable<func_decl> s;
+            void operator()(app* a) { if (is_uninterp(a)) s.insert(a->get_decl()); }
+            void operator()(expr*) {}
+        };
+        fun_proc symbols_in_a;
+        expr_fast_mark1 marks;
+        quick_for_each_expr(symbols_in_a, marks, a);
+        marks.reset();
+        m_shared_trail.reset();
+        m_shared.reset();
+        m_is_shared.reset();
+        
+        struct intersect_proc {
+            mbi_plugin& p;
+            obj_hashtable<func_decl>& sA;
+            intersect_proc(mbi_plugin& p, obj_hashtable<func_decl>& sA):p(p), sA(sA) {}
+            void operator()(app* a) { 
+                func_decl* f = a->get_decl();
+                if (sA.contains(f) && !p.m_shared.contains(f)) {
+                    p.m_shared_trail.push_back(f);
+                    p.m_shared.insert(f);
+                }
+            }
+            void operator()(expr*) {}
+        };
+        intersect_proc symbols_in_b(*this, symbols_in_a.s);
+        quick_for_each_expr(symbols_in_b, marks, b);
+        TRACE("qe", 
+              tout << mk_pp(a, m) << "\n" << mk_pp(b, m) << "\n";
+              for (func_decl* f : m_shared) tout << f->get_name() << " "; tout << "\n";);
+    }
 
     lbool mbi_plugin::check(expr_ref_vector& lits, model_ref& mdl) {
         while (true) {
@@ -54,6 +92,29 @@ namespace qe {
                 break;
             }
         }
+    }
+
+    bool mbi_plugin::is_shared(func_decl* f) {
+        return f->get_family_id() != null_family_id || m_shared.contains(f);
+    }
+
+    bool mbi_plugin::is_shared(expr* e) {
+        e = m_rep ? m_rep(e) : e;
+        if (!is_app(e)) return false;
+        unsigned id = e->get_id();
+        m_is_shared.reserve(id + 1, l_undef);
+        lbool r = m_is_shared[id];
+        if (r != l_undef) return r == l_true;
+        app* a = to_app(e);
+        bool all_shared = is_shared(a->get_decl());
+        for (expr* arg : *a) {
+            if (!all_shared)
+                break;
+            if (!is_shared(arg)) 
+                all_shared = false;
+        }
+        m_is_shared[id] = all_shared ? l_true : l_false;
+        return all_shared;
     }
 
 
@@ -76,7 +137,7 @@ namespace qe {
             lits.reset();
             for (unsigned i = 0, sz = mdl->get_num_constants(); i < sz; ++i) {
                 func_decl* c = mdl->get_constant(i);
-                if (m_shared.contains(c)) {
+                if (is_shared(c)) {
                     if (m.is_true(mdl->get_const_interp(c))) {
                         lits.push_back(m.mk_const(c));
                     }
@@ -92,108 +153,14 @@ namespace qe {
     }
 
     void prop_mbi_plugin::block(expr_ref_vector const& lits) {
-        m_solver->assert_expr(mk_not(mk_and(lits)));
+        expr_ref clause(mk_not(mk_and(lits)), m);
+        m_solver->assert_expr(clause);
     }
 
     // -------------------------------
-    // euf_mbi
+    // uflia_mbi
 
-    struct euf_mbi_plugin::is_atom_proc {
-        ast_manager& m;
-        expr_ref_vector& m_atoms;
-        is_atom_proc(expr_ref_vector& atoms): m(atoms.m()), m_atoms(atoms) {}
-        void operator()(app* a) {
-            if (m.is_eq(a)) {
-                m_atoms.push_back(a);
-            }
-            else if (m.is_bool(a) && a->get_family_id() != m.get_basic_family_id()) {
-                m_atoms.push_back(a);
-            }
-        }
-        void operator()(expr*) {}
-    };
-
-    euf_mbi_plugin::euf_mbi_plugin(solver* s, solver* sNot):
-        mbi_plugin(s->get_manager()),
-        m_atoms(m),
-        m_solver(s),
-        m_dual_solver(sNot) {
-        params_ref p;
-        p.set_bool("core.minimize", true);
-        m_solver->updt_params(p);
-        m_dual_solver->updt_params(p);
-        expr_ref_vector fmls(m);
-        m_solver->get_assertions(fmls);
-        expr_fast_mark1 marks;
-        is_atom_proc proc(m_atoms);
-        for (expr* e : fmls) {
-            quick_for_each_expr(proc, marks, e);
-        }
-    }
-
-    mbi_result euf_mbi_plugin::operator()(expr_ref_vector& lits, model_ref& mdl) {
-        lbool r = m_solver->check_sat(lits);
-        switch (r) {
-        case l_false:
-            lits.reset();
-            m_solver->get_unsat_core(lits);
-            // optionally minimize core using superposition.
-            return mbi_unsat;
-        case l_true: {
-            m_solver->get_model(mdl);
-            model_evaluator mev(*mdl.get());
-            lits.reset();
-            for (expr* e : m_atoms) {
-                if (mev.is_true(e)) {
-                    lits.push_back(e);
-                }
-                else if (mev.is_false(e)) {
-                    lits.push_back(m.mk_not(e));
-                }
-            }
-            TRACE("qe", tout << "atoms from model: " << lits << "\n";);
-            r = m_dual_solver->check_sat(lits);
-            expr_ref_vector core(m);
-            term_graph tg(m);
-            switch (r) {
-            case l_false:
-                // use the dual solver to find a 'small' implicant
-                m_dual_solver->get_unsat_core(core);
-                TRACE("qe", tout << "core: " << core << "\n";);
-                // project the implicant onto vars
-                tg.set_vars(m_shared, false);
-                tg.add_lits(core);
-                lits.reset();
-                lits.append(tg.project(*mdl));
-                TRACE("qe", tout << "project: " << lits << "\n";);
-                return mbi_sat;
-            case l_undef:
-                return mbi_undef;
-            case l_true:
-                UNREACHABLE();
-                return mbi_undef;
-            }
-            return mbi_sat;
-        }
-        default:
-            // TBD: if not running solver to completion, then:
-            // 1. extract unit literals from m_solver.
-            // 2. run a cc over the units
-            // 3. extract equalities or other assignments over the congruence classes
-            // 4. ensure that at least some progress is made over original lits.
-            return mbi_undef;
-        }
-    }
-
-    void euf_mbi_plugin::block(expr_ref_vector const& lits) {
-        m_solver->assert_expr(mk_not(mk_and(lits)));
-    }
-
-
-    // -------------------------------
-    // euf_arith_mbi
-
-    struct euf_arith_mbi_plugin::is_atom_proc {
+    struct uflia_mbi::is_atom_proc {
         ast_manager&         m;
         expr_ref_vector&     m_atoms;
         obj_hashtable<expr>& m_atom_set;
@@ -217,32 +184,7 @@ namespace qe {
         void operator()(expr*) {}
     };
 
-    struct euf_arith_mbi_plugin::is_arith_var_proc {
-        ast_manager&    m;
-        app_ref_vector& m_pvars;
-        app_ref_vector& m_svars;
-        arith_util      arith;
-        obj_hashtable<func_decl> m_shared;
-        is_arith_var_proc(func_decl_ref_vector const& shared, app_ref_vector& pvars, app_ref_vector& svars):
-            m(pvars.m()), m_pvars(pvars), m_svars(svars), arith(m) {
-            for (func_decl* f : shared) m_shared.insert(f);
-        }
-        void operator()(app* a) {
-            if (!arith.is_int_real(a) || a->get_family_id() == arith.get_family_id()) {
-                // no-op
-            }
-            else if (m_shared.contains(a->get_decl())) {
-                m_svars.push_back(a);
-            }
-            else {
-                m_pvars.push_back(a);
-            }
-        }
-        void operator()(expr*) {}
-
-    };
-
-    euf_arith_mbi_plugin::euf_arith_mbi_plugin(solver* s, solver* sNot):
+    uflia_mbi::uflia_mbi(solver* s, solver* sNot):
         mbi_plugin(s->get_manager()),
         m_atoms(m),
         m_fmls(m),
@@ -256,7 +198,7 @@ namespace qe {
         collect_atoms(m_fmls);
     }
 
-    void euf_arith_mbi_plugin::collect_atoms(expr_ref_vector const& fmls) {
+    void uflia_mbi::collect_atoms(expr_ref_vector const& fmls) {
         expr_fast_mark1 marks;
         is_atom_proc proc(m_atoms, m_atom_set);
         for (expr* e : fmls) {
@@ -264,8 +206,9 @@ namespace qe {
         }
     }
 
-    bool euf_arith_mbi_plugin::get_literals(model_ref& mdl, expr_ref_vector& lits) {
+    bool uflia_mbi::get_literals(model_ref& mdl, expr_ref_vector& lits) {
         lits.reset();
+        IF_VERBOSE(10, verbose_stream() << "atoms: " << m_atoms << "\n");
         for (expr* e : m_atoms) {
             if (mdl->is_true(e)) {
                 lits.push_back(e);
@@ -290,31 +233,43 @@ namespace qe {
         }
     }
 
-    app_ref_vector euf_arith_mbi_plugin::get_arith_vars(model_ref& mdl, expr_ref_vector& lits) {
+
+    /** 
+     * \brief A subterm is an arithmetic variable if:
+     *  1. it is not shared.
+     *  2. it occurs under an arithmetic operation.
+     *  3. it is not an arithmetic expression.
+     * 
+     *  The result is ordered using deepest term first.
+     */
+    app_ref_vector uflia_mbi::get_arith_vars(expr_ref_vector const& lits) {
+        app_ref_vector avars(m); 
+        bool_vector seen;
         arith_util a(m);
-        app_ref_vector pvars(m), svars(m); // private and shared arithmetic variables.
-        is_arith_var_proc _proc(m_shared, pvars, svars);
-        for_each_expr(_proc, lits);
-        rational v1, v2;
-        for (expr* p : pvars) {
-            VERIFY(a.is_numeral((*mdl)(p), v1));
-            for (expr* s : svars) {
-                VERIFY(a.is_numeral((*mdl)(s), v2));                
-                if (v1 < v2) {
-                    lits.push_back(a.mk_lt(p, s));
-                }
-                else if (v2 < v1) {
-                    lits.push_back(a.mk_lt(s, p));                    
-                }
-                else {
-                    lits.push_back(m.mk_eq(s, p));
+        for (expr* e : subterms(lits)) {
+            if ((m.is_eq(e) && a.is_int_real(to_app(e)->get_arg(0))) || a.is_arith_expr(e)) {
+                for (expr* arg : *to_app(e)) {
+                    unsigned id = arg->get_id();
+                    seen.reserve(id + 1, false);
+                    if (is_app(arg) && !m.is_eq(arg) && !a.is_arith_expr(arg) && !is_shared(arg) && !seen[id]) {
+                        seen[id] = true;
+                        avars.push_back(to_app(arg));
+                    }
                 }
             }
         }
-        return pvars;
+        order_avars(avars);
+        TRACE("qe", tout << "vars: " << avars << " from " << lits << "\n";);
+        return avars;
     }
 
-    mbi_result euf_arith_mbi_plugin::operator()(expr_ref_vector& lits, model_ref& mdl) {
+    vector<mbp::def> uflia_mbi::arith_project(model_ref& mdl, app_ref_vector& avars, expr_ref_vector& lits) {
+        mbp::arith_project_plugin ap(m);
+        ap.set_check_purified(false);
+        return ap.project(*mdl.get(), avars, lits);
+    }
+
+    mbi_result uflia_mbi::operator()(expr_ref_vector& lits, model_ref& mdl) {
         lbool r = m_solver->check_sat(lits);
 
         switch (r) {
@@ -324,93 +279,13 @@ namespace qe {
             TRACE("qe", tout << "unsat core: " << lits << "\n";);
             // optionally minimize core using superposition.
             return mbi_unsat;
-        case l_true: {
+        case l_true: 
             m_solver->get_model(mdl);
             if (!get_literals(mdl, lits)) {
                 return mbi_undef;
             }
-            TRACE("qe", tout << lits << "\n";);
-
-            // 1. Extract projected variables, add inequalities between
-            //    projected variables and non-projected terms according to model.
-            // 2. Extract disequalities implied by congruence closure.
-            // 3. project arithmetic variables from pure literals.
-            // 4. Add projected definitions as equalities to EUF.
-            // 5. project remaining literals with respect to EUF.
-
-            app_ref_vector avars = get_arith_vars(mdl, lits);
-            TRACE("qe", tout << "vars: " << avars << " lits: " << lits << "\n";);
-
-            // 2.
-            term_graph tg1(m);
-            func_decl_ref_vector no_shared(m);
-            tg1.set_vars(no_shared, false);
-            tg1.add_lits(lits);
-            arith_util a(m);
-            expr_ref_vector foreign = tg1.shared_occurrences(a.get_family_id());
-            obj_hashtable<expr> _foreign;
-            for (expr* e : foreign) _foreign.insert(e);
-            vector<expr_ref_vector> partition = tg1.get_partition(*mdl);
-            expr_ref_vector diseq = tg1.get_ackerman_disequalities();
-            lits.append(diseq);
-            TRACE("qe", tout << "diseq: " << diseq << "\n";
-                  tout << "foreign: " << foreign << "\n";
-                  for (auto const& v : partition) {
-                      tout << "partition: {";
-                      bool first = true;
-                      for (expr* e : v) {
-                          if (first) first = false; else tout << ", ";
-                          tout << expr_ref(e, m);
-                      }
-                      tout << "}\n";
-                  }
-                  );
-            vector<expr_ref_vector> refined_partition;
-            for (auto & p : partition) {
-                unsigned j = 0; 
-                for (expr* e : p) {
-                    if (_foreign.contains(e) || 
-                        (is_app(e) && m_shared.contains(to_app(e)->get_decl()))) {
-                        p[j++] = e;
-                    }
-                }
-                p.shrink(j);
-                if (!p.empty()) refined_partition.push_back(p);
-            }
-            TRACE("qe",
-                  for (auto const& v : refined_partition) {
-                      tout << "partition: {";
-                      bool first = true;
-                      for (expr* e : v) {
-                          if (first) first = false; else tout << ", ";
-                          tout << expr_ref(e, m);
-                      }
-                      tout << "}\n";
-                  });
-
-            
-            
-            arith_project_plugin ap(m);
-            ap.set_check_purified(false);
-
-            // 3.
-            auto defs = ap.project(*mdl.get(), avars, lits);
-
-            // 4.
-            for (auto const& def : defs) {
-                lits.push_back(m.mk_eq(def.var, def.term));
-            }
-            TRACE("qe", tout << "# arith defs " << defs.size() << " avars: " << avars << " " << lits << "\n";);
-
-            // 5.
-            term_graph tg2(m);
-            tg2.set_vars(m_shared, false);
-            tg2.add_lits(lits);
-            lits.reset();
-            lits.append(tg2.project());
-            TRACE("qe", tout << "project: " << lits << "\n";);
+            project(mdl, lits);
             return mbi_sat;
-        }
         default:
             // TBD: if not running solver to completion, then:
             // 1. extract unit literals from m_solver.
@@ -421,10 +296,148 @@ namespace qe {
         }
     }
 
-    void euf_arith_mbi_plugin::block(expr_ref_vector const& lits) {
+    /**
+       \brief main projection routine
+    */
+    void uflia_mbi::project(model_ref& mdl, expr_ref_vector& lits) {
+        TRACE("qe", 
+              tout << "project literals: " << lits << "\n" << *mdl << "\n";
+              tout << m_solver->get_assertions() << "\n";);
+
+        add_dcert(mdl, lits);
+        expr_ref_vector alits(m), uflits(m);
+        split_arith(lits, alits, uflits);
+        auto avars = get_arith_vars(lits);
+        vector<mbp::def> defs = arith_project(mdl, avars, alits);
+        for (auto const& d : defs) uflits.push_back(m.mk_eq(d.var, d.term));
+        TRACE("qe", tout << "uflits: " << uflits << "\n";);
+        project_euf(mdl, uflits);
+        lits.reset();
+        lits.append(alits);
+        lits.append(uflits);
+        IF_VERBOSE(10, verbose_stream() << "projection : " << lits << "\n");
+        TRACE("qe", 
+              tout << "projection: " << lits << "\n";
+              tout << "avars: " << avars << "\n";
+              tout << "alits: " << lits << "\n";
+              tout << "uflits: " << uflits << "\n";);
+    }
+
+    void uflia_mbi::split_arith(expr_ref_vector const& lits, 
+                                expr_ref_vector& alits,
+                                expr_ref_vector& uflits) {
+        arith_util a(m);
+        for (expr* lit : lits) {
+            expr* atom = lit, *x = nullptr, *y = nullptr;
+            m.is_not(lit, atom);
+            if (m.is_eq(atom, x, y)) {
+                if (a.is_int_real(x)) {
+                    alits.push_back(lit);
+                }
+                uflits.push_back(lit);
+            }
+            else if (a.is_arith_expr(atom)) {
+                alits.push_back(lit);
+            }
+            else {
+                uflits.push_back(lit);
+            }
+        }
+        TRACE("qe", 
+              tout << "alits: " << alits << "\n";
+              tout << "uflits: " << uflits << "\n";);
+    }
+
+
+
+    /**
+       \brief add difference certificates to formula.       
+    */
+    void uflia_mbi::add_dcert(model_ref& mdl, expr_ref_vector& lits) {        
+        mbp::term_graph tg(m);
+        add_arith_dcert(*mdl.get(), lits);
+        func_decl_ref_vector shared(m_shared_trail);
+        tg.set_vars(shared, false);
+        lits.append(tg.dcert(*mdl.get(), lits));
+        TRACE("qe", tout << "project: " << lits << "\n";);                
+    }
+
+    /**
+       Add disequalities between functions that appear in arithmetic context.
+     */
+    void uflia_mbi::add_arith_dcert(model& mdl, expr_ref_vector& lits) {
+        obj_map<func_decl, ptr_vector<app>> apps;
+        arith_util a(m);
+        for (expr* e : subterms(lits)) {
+            if (a.is_int_real(e) && is_uninterp(e) && to_app(e)->get_num_args() > 0) {
+                func_decl* f = to_app(e)->get_decl();
+                apps.insert_if_not_there(f, ptr_vector<app>()).push_back(to_app(e));
+            }
+        }
+        for (auto const& kv : apps) {
+            ptr_vector<app> const& es = kv.m_value;
+            expr_ref_vector values(m);
+            for (expr* e : kv.m_value) values.push_back(mdl(e));
+            for (unsigned i = 0; i < es.size(); ++i) {
+                expr* v1 = values.get(i);
+                for (unsigned j = i + 1; j < es.size(); ++j) {
+                    expr* v2 = values.get(j);
+                    if (v1 != v2) {
+                        add_arith_dcert(mdl, lits, es[i], es[j]);
+                    }
+                }
+            }
+        }
+    }
+
+    void uflia_mbi::add_arith_dcert(model& mdl, expr_ref_vector& lits, app* a, app* b) {
+        arith_util arith(m);
+        SASSERT(a->get_decl() == b->get_decl());
+        for (unsigned i = a->get_num_args(); i-- > 0; ) {
+            expr* arg1 = a->get_arg(i), *arg2 = b->get_arg(i);
+            if (arith.is_int_real(arg1) && mdl(arg1) != mdl(arg2)) {
+                lits.push_back(m.mk_not(m.mk_eq(arg1, arg2)));
+                return;
+            }                
+        }
+    }
+
+    /**
+     * \brief project private symbols.
+     */
+    void uflia_mbi::project_euf(model_ref& mdl, expr_ref_vector& lits) {
+        mbp::term_graph tg(m);
+        func_decl_ref_vector shared(m_shared_trail);
+        tg.set_vars(shared, false);
+        tg.add_lits(lits);
+        lits.reset();
+        lits.append(tg.project(*mdl.get()));
+        TRACE("qe", tout << "project: " << lits << "\n";);                
+    }
+
+    /**
+     * \brief Order arithmetical variables:
+     * sort arithmetical terms, such that deepest terms are first.
+     */
+    void uflia_mbi::order_avars(app_ref_vector& avars) {
+
+        // sort avars based on depth
+        std::function<bool(app*, app*)> compare_depth = 
+            [](app* x, app* y) {
+                return 
+                    (x->get_depth() > y->get_depth()) || 
+                    (x->get_depth() == y->get_depth() && x->get_id() > y->get_id());
+        };
+        std::sort(avars.c_ptr(), avars.c_ptr() + avars.size(), compare_depth);
+        TRACE("qe", tout << "avars:" << avars << "\n";);
+    }
+
+    void uflia_mbi::block(expr_ref_vector const& lits) {
+        expr_ref clause(mk_not(mk_and(lits)), m);
         collect_atoms(lits);
-        m_fmls.push_back(mk_not(mk_and(lits)));
-        m_solver->assert_expr(m_fmls.back());
+        m_fmls.push_back(clause);
+        TRACE("qe", tout << "block " << lits << "\n";);
+        m_solver->assert_expr(clause);
     }
 
 
@@ -498,14 +511,14 @@ namespace qe {
                     return l_true;
                 case l_false:
                     a.block(lits);
-                    itps.push_back(mk_not(mk_and(lits)));
+                    itps.push_back(mk_and(lits));
                     break;
                 case l_undef:
                     return l_undef;
                 }
                 break;
             case l_false:
-                itp = mk_and(itps);
+                itp = mk_or(itps);
                 return l_false;
             case l_undef:
                 return l_undef;
@@ -513,83 +526,22 @@ namespace qe {
         }
     }
 
-    lbool interpolator::vurtego(mbi_plugin& a, mbi_plugin& b, expr_ref& itp, model_ref &mdl) {
-        /**
-           Assumptions on mbi_plugin()
-           Let local be assertions local to the plugin
-           Let blocked be clauses added by blocked, kept separately from local
-           mbi_plugin::check(lits, mdl, bool force_model):
-              if lits.empty()  and mdl == nullptr then
-                  if is_sat(local & blocked) then
-                      return l_true, mbp of local, mdl of local & blocked
-                  else
-                      return l_false
-              else if !lits.empty() then
-                  if is_sat(local & mdl & blocked)
-                      return l_true, lits, extension of mdl to local
-                  else if is_sat(local & lits & blocked)
-                      if (force_model) then
-                        return l_false, core of model, nullptr
-                      else
-                        return l_true, mbp of local, mdl of local & blocked
-                  else if !is_sat(local & lits) then
-                      return l_false, mbp of local, nullptr
-                  else if is_sat(local & lits) && !is_sat(local & lits & blocked)
-                      MISSING CASE
-                      MUST PRODUCE AN IMPLICANT OF LOCAL that is inconsistent with lits & blocked
-                      in this case !is_sat(local & lits & mdl) and is_sat(mdl, blocked)
-                          let mdl_blocked be lits of blocked that are true in mdl
-                          return l_false, core of lits & mdl_blocked, nullptr
-
-           mbi_plugin::block(phi): add phi to blocked
-
-           probably should use the operator() instead of check.
-           mbi_augment -- means consistent with lits but not with the mdl
-           mbi_sat -- means consistent with lits and mdl
-
-         */
-        expr_ref_vector lits(m), itps(m);
-        while (true) {
-            // when lits.empty(), this picks an A-implicant consistent with B
-            // when !lits.empty(), checks whether mdl of shared vocab extends to A
-            bool force_model = !lits.empty();
-            switch (a.check_ag(lits, mdl, force_model)) {
-            case l_true:
-                if (force_model)
-                    // mdl is a model for a && b
-                    return l_true;
-                switch (b.check_ag(lits, mdl, false)) {
-                case l_true:
-                    /* can return true if know that b did not change
-                       the model. For now, cycle back to A.  */
-                    SASSERT(!lits.empty());
-                    SASSERT(mdl);
-                    break;
-                case l_false:
-                    // Force a different A-implicant
-                    a.block(lits);
-                    lits.reset();
-                    mdl.reset();
-                    break;
-                case l_undef:
-                    return l_undef;
-                }
-            case l_false:
-                if (lits.empty()) {
-                    // no more A-implicants, terminate
-                    itp = mk_and(itps);
-                    return l_false;
-                }
-                // force B to pick a different model or a different implicant
-                b.block(lits);
-                itps.push_back(mk_not(mk_and(lits)));
-                lits.reset();
-                mdl.reset();
-                break;
-            case l_undef:
-                return l_undef;
-            }
-        }
+    lbool interpolator::pogo(solver_factory& sf, expr* _a, expr* _b, expr_ref& itp) {
+        params_ref p;
+        expr_ref a(_a, m), b(_b, m);
+        th_rewriter rewrite(m);
+        rewrite(a);
+        rewrite(b);
+        solver_ref sA = sf(m, p, false /* no proofs */, true, true, symbol::null);
+        solver_ref sB = sf(m, p, false /* no proofs */, true, true, symbol::null);
+        solver_ref sNotA = sf(m, p, false /* no proofs */, true, true, symbol::null);
+        sA->assert_expr(a);
+        sB->assert_expr(b);
+        uflia_mbi pA(sA.get(), sNotA.get());
+        prop_mbi_plugin pB(sB.get());
+        pA.set_shared(a, b);
+        pB.set_shared(a, b);
+        return pogo(pA, pB, itp);
     }
 
 };

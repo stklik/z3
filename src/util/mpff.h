@@ -20,8 +20,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MPFF_H_
-#define MPFF_H_
+#pragma once
 
 #include "util/id_gen.h"
 #include "util/util.h"
@@ -58,7 +57,7 @@ class mpz;
 class mpq;
 template<bool SYNCH> class mpz_manager;
 template<bool SYNCH> class mpq_manager;
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
 typedef mpz_manager<true>  synch_mpz_manager;
 typedef mpq_manager<true>  synch_mpq_manager;
 #else
@@ -218,7 +217,7 @@ public:
        \brief Return the significand as a mpz numeral.
     */
     void significand(mpff const & n, unsynch_mpz_manager & m, mpz & r);
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
     void significand(mpff const & n, synch_mpz_manager & m, mpz & r);
 #endif
 
@@ -386,7 +385,7 @@ public:
     void set(mpff & n, mpff const & v);
     void set(mpff & n, unsynch_mpz_manager & m, mpz const & v);
     void set(mpff & n, unsynch_mpq_manager & m, mpq const & v);
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
     void set(mpff & n, synch_mpq_manager & m, mpq const & v);
     void set(mpff & n, synch_mpz_manager & m, mpz const & v);
 #endif
@@ -429,7 +428,7 @@ public:
     */
     void to_mpz(mpff const & n, unsynch_mpz_manager & m, mpz & t);
 
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
     /**
        \brief Convert n into a mpz numeral.
        
@@ -440,6 +439,7 @@ public:
     void to_mpz(mpff const & n, synch_mpz_manager & m, mpz & t);
 #endif
 
+
     /**
        \brief Convert n into a mpq numeral.
 
@@ -447,7 +447,7 @@ public:
     */
     void to_mpq(mpff const & n, unsynch_mpq_manager & m, mpq & t);
 
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
     /**
        \brief Convert n into a mpq numeral.
 
@@ -492,4 +492,3 @@ public:
 typedef _scoped_numeral<mpff_manager> scoped_mpff;
 typedef _scoped_numeral_vector<mpff_manager> scoped_mpff_vector;
 
-#endif

@@ -415,7 +415,7 @@ namespace tb {
             try {
                 quick_for_each_expr(p, t);
             }
-            catch (non_constructor) {
+            catch (const non_constructor &) {
                 return false;
             }
             return true;
@@ -454,9 +454,7 @@ namespace tb {
             unsigned idx = m_rules.size();
             m_rules.push_back(g);
             func_decl* f = g->get_decl();
-            map::obj_map_entry* e = m_index.insert_if_not_there2(f, unsigned_vector());
-            SASSERT(e);
-            e->get_data().m_value.push_back(idx);
+            m_index.insert_if_not_there(f, unsigned_vector()).push_back(idx);
         }
 
         unsigned get_num_rules(func_decl* p) const {
@@ -581,7 +579,7 @@ namespace tb {
 
         // extract pre_cond => post_cond validation obligation from match.
         bool find_match(unsigned& subsumer) {
-            for (unsigned i = 0; !m.canceled() && i < m_index.size(); ++i) {
+            for (unsigned i = 0; m.inc() && i < m_index.size(); ++i) {
                 if (match_rule(i)) {
                     subsumer = m_index[i]->get_seqno();
                     return true;
@@ -618,7 +616,7 @@ namespace tb {
 
             app* q = g.get_predicate(predicate_index);
 
-            for (unsigned i = 0; !m.canceled() && i < m_preds.size(); ++i) {
+            for (unsigned i = 0; m.inc() && i < m_preds.size(); ++i) {
                 app* p = m_preds[i].get();
                 m_subst.push_scope();
                 unsigned limit = m_sideconds.size();
@@ -647,7 +645,7 @@ namespace tb {
             expr_ref_vector fmls(m_sideconds);
             m_subst.reset_cache();
 
-            for (unsigned i = 0; !m.canceled() && i < fmls.size(); ++i) {
+            for (unsigned i = 0; m.inc() && i < fmls.size(); ++i) {
                 m_subst.apply(2, deltas, expr_offset(fmls[i].get(), 0), q);
                 fmls[i] = q;
             }
@@ -664,7 +662,7 @@ namespace tb {
                 }
             }
             m_rw.mk_and(fmls.size(), fmls.c_ptr(), postcond);
-            if (m.canceled()) {
+            if (!m.inc()) {
                 return false;
             }
             if (m.is_false(postcond)) {
@@ -1097,7 +1095,7 @@ namespace tb {
             m_S1.apply(2, delta, expr_offset(src.get_constraint(), 1), tmp2);
             constraint = m.mk_and(tmp, tmp2);
 
-            // perform trival quantifier-elimination:
+            // perform trivial quantifier-elimination:
             uint_set index_set;
             expr_free_vars fv;
             fv(head);
@@ -1218,9 +1216,9 @@ namespace tb {
             func_decl_ref delta(m);
             sort_ref_vector dom(m);
             for (unsigned j = 0; j < 1; ++j) {
-                for (unsigned i = 0; i < zs.size(); ++i) {
-                    dom.push_back(m.get_sort(zs[i].get()));
-                    zszs.push_back(zs[i].get());
+                for (expr* arg : zs) {
+                    dom.push_back(arg->get_sort());
+                    zszs.push_back(arg);
                 }
             }
             app_ref_vector preds(m);
@@ -1284,7 +1282,7 @@ namespace tb {
             app* p = g.get_head();
             unsigned num_vars = g.get_num_vars();
             for (unsigned i = 0; i < p->get_num_args(); ++i) {
-                result.push_back(m.mk_var(num_vars+i, m.get_sort(p->get_arg(i))));
+                result.push_back(m.mk_var(num_vars+i, p->get_arg(i)->get_sort()));
             }
             return result;
         }
@@ -1354,7 +1352,6 @@ namespace datalog {
         {
             // m_fparams.m_relevancy_lvl = 0;
             m_fparams.m_mbqi = false;
-            m_fparams.m_timeout = 1000;
         }
 
         ~imp() {}
@@ -1494,7 +1491,7 @@ namespace datalog {
             m_status      = l_undef;
             while (true) {
                 IF_VERBOSE(2, verbose_stream() << m_instruction << "\n";);
-                if (m.canceled()) {
+                if (!m.inc()) {
                     cleanup();
                     return l_undef;
                 }

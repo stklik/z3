@@ -17,8 +17,7 @@ Notes:
 
 --*/
 
-#ifndef SLS_EVALUATOR_H_
-#define SLS_EVALUATOR_H_
+#pragma once
 
 #include "model/model_evaluator.h"
 
@@ -508,7 +507,7 @@ public:
             for (unsigned i = 0; i < n_args; i++) {
                 expr * arg = a->get_arg(i);
                 const mpz & v = m_tracker.get_value(arg);
-                m_temp_exprs.push_back(m_tracker.mpz2value(m_manager.get_sort(arg), v));
+                m_temp_exprs.push_back(m_tracker.mpz2value(arg->get_sort(), v));
             }
             expr_ref q(m_manager), temp(m_manager);
             q = m_manager.mk_app(a->get_decl(), m_temp_exprs.size(), m_temp_exprs.c_ptr());                                
@@ -820,4 +819,3 @@ public:
     } 
 };
 
-#endif

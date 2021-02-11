@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef BV_DECL_PLUGIN_H_
-#define BV_DECL_PLUGIN_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -126,6 +125,7 @@ inline func_decl * get_div0_decl(ast_manager & m, func_decl * decl) {
 }
 
 class bv_decl_plugin : public decl_plugin {
+    friend class bv_util;
 protected:
     symbol m_bv_sym;
     symbol m_concat_sym;
@@ -298,8 +298,9 @@ public:
     bool is_numeral(expr const * n) const { return is_app_of(n, get_fid(), OP_BV_NUM); }
     bool is_allone(expr const * e) const;
     bool is_zero(expr const * e) const;
+    bool is_one(expr const* e) const;
     bool is_bv_sort(sort const * s) const;
-    bool is_bv(expr const* e) const {  return is_bv_sort(get_sort(e)); }
+    bool is_bv(expr const* e) const {  return is_bv_sort(e->get_sort()); }
 
     bool is_concat(expr const * e) const { return is_app_of(e, get_fid(), OP_CONCAT); }
     bool is_extract(func_decl const * f) const { return is_decl_of(f, get_fid(), OP_EXTRACT); }
@@ -349,6 +350,7 @@ public:
     bool is_bv_lshr(expr const * e) const { return is_app_of(e, get_fid(), OP_BLSHR); }
     bool is_bv_shl(expr const * e) const { return is_app_of(e, get_fid(), OP_BSHL); }
     bool is_sign_ext(expr const * e) const { return is_app_of(e, get_fid(), OP_SIGN_EXT); }
+    bool is_bv_umul_no_ovfl(expr const* e) const { return is_app_of(e, get_fid(), OP_BUMUL_NO_OVFL); }
 
     MATCH_BINARY(is_bv_add);
     MATCH_BINARY(is_bv_mul);
@@ -368,6 +370,9 @@ public:
     MATCH_BINARY(is_bv_sdivi);
     MATCH_BINARY(is_bv_udivi);
     MATCH_BINARY(is_bv_smodi);
+    MATCH_UNARY(is_bit2bool);
+    MATCH_UNARY(is_int2bv);
+    bool is_bit2bool(expr* e, expr*& bv, unsigned& idx) const;
 
     rational norm(rational const & val, unsigned bv_size, bool is_signed) const ;
     rational norm(rational const & val, unsigned bv_size) const { return norm(val, bv_size, false); }
@@ -393,7 +398,7 @@ public:
         SASSERT(is_bv_sort(s));
         return static_cast<unsigned>(s->get_parameter(0).get_int());
     }
-    unsigned get_bv_size(expr const * n) const { return get_bv_size(m_manager.get_sort(n)); }
+    unsigned get_bv_size(expr const * n) const { return get_bv_size(n->get_sort()); }
     unsigned get_int2bv_size(parameter const& p);
 
 
@@ -404,16 +409,36 @@ public:
         return m_manager.mk_app(get_fid(), OP_EXTRACT, 2, params, 1, &n);
     }
     app * mk_concat(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_CONCAT, num, args);  }
-    app * mk_concat(expr * arg1, expr * arg2) { expr * args[2] = { arg1, arg2 }; return mk_concat(2, args); }
+    app * mk_concat(expr_ref_vector const& es) { return m_manager.mk_app(get_fid(), OP_CONCAT, es.size(), es.c_ptr());  }
     app * mk_bv_or(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_BOR, num, args);  }
-    app * mk_bv_not(expr * arg) { return m_manager.mk_app(get_fid(), OP_BNOT, arg); }
+    app * mk_bv_and(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_BAND, num, args);  }
     app * mk_bv_xor(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_BXOR, num, args);  }
+
+    app * mk_concat(expr * arg1, expr * arg2) { expr * args[2] = { arg1, arg2 }; return mk_concat(2, args); }
+    app * mk_bv_and(expr* x, expr* y) { expr* args[2] = { x, y }; return mk_bv_and(2, args); }
+    app * mk_bv_or(expr* x, expr* y) { expr* args[2] = { x, y }; return mk_bv_or(2, args); }
+    app * mk_bv_xor(expr* x, expr* y) { expr* args[2] = { x, y }; return mk_bv_xor(2, args); }
+
+    app * mk_bv_not(expr * arg) { return m_manager.mk_app(get_fid(), OP_BNOT, arg); }
     app * mk_bv_neg(expr * arg) { return m_manager.mk_app(get_fid(), OP_BNEG, arg); }
     app * mk_bv_urem(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUREM, arg1, arg2); }
     app * mk_bv_srem(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSREM, arg1, arg2); }
+    app * mk_bv_smod(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSMOD, arg1, arg2); }
     app * mk_bv_add(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BADD, arg1, arg2); }
     app * mk_bv_sub(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSUB, arg1, arg2); }
     app * mk_bv_mul(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BMUL, arg1, arg2); }
+    app * mk_bv_udiv(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUDIV, arg1, arg2); }
+    app * mk_bv_udiv_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUDIV_I, arg1, arg2); }
+    app * mk_bv_udiv0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BUDIV0, arg); }
+    app * mk_bv_sdiv(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSDIV, arg1, arg2); }
+    app * mk_bv_sdiv_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSDIV_I, arg1, arg2); }
+    app * mk_bv_sdiv0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BSDIV0, arg); }
+    app * mk_bv_srem_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSREM_I, arg1, arg2); }
+    app * mk_bv_srem0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BSREM0, arg); }
+    app * mk_bv_urem_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUREM_I, arg1, arg2); }
+    app * mk_bv_urem0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BUREM0, arg); }
+    app * mk_bv_smod_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSMOD_I, arg1, arg2); }
+    app * mk_bv_smod0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BSMOD0, arg); }
     app * mk_zero_extend(unsigned n, expr* e) {
         parameter p(n);
         return m_manager.mk_app(get_fid(), OP_ZERO_EXT, 1, &p, 1, &e);
@@ -431,10 +456,56 @@ public:
     app * mk_bvsmul_no_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_NO_OVFL, n, m); }
     app * mk_bvsmul_no_udfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_NO_UDFL, n, m); }
     app * mk_bvumul_no_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BUMUL_NO_OVFL, n, m); }
+    app * mk_bit2bool(expr* e, unsigned idx) { parameter p(idx); return m_manager.mk_app(get_fid(), OP_BIT2BOOL, 1, &p, 1, &e); }
 
-    app * mk_bv(unsigned n, expr* const* es) { return m_manager.mk_app(get_fid(), OP_MKBV, n, es); }
+    private:
+    void log_bv_from_exprs(app * r, unsigned n, expr* const* es) {
+        if (m_manager.has_trace_stream()) {
+            for (unsigned i = 0; i < n; ++i) {
+                if (!m_manager.is_true(es[i]) && !m_manager.is_false(es[i]))
+                    return;
+            } 
+
+            if (m_plugin->log_constant_meaning_prelude(r)) {
+                if (n % 4 == 0) {
+                    m_manager.trace_stream() << " #x";
+
+                    m_manager.trace_stream() << std::hex;
+                    uint8_t hexDigit = 0;
+                    unsigned curLength = (4 - n % 4) % 4;
+                    for (unsigned i = 0; i < n; ++i) {
+                        hexDigit <<= 1;
+                        ++curLength;
+                        if (m_manager.is_true(es[i])) {
+                            hexDigit |= 1;
+                        }
+                        if (curLength == 4) {
+                            m_manager.trace_stream() << hexDigit;
+                            hexDigit = 0;
+                        }
+                    }
+                    m_manager.trace_stream() << std::dec;
+                } else {
+                    m_manager.trace_stream() << " #b";
+                    for (unsigned i = 0; i < n; ++i) {
+                        m_manager.trace_stream() << (m_manager.is_true(es[i]) ? 1 : 0);
+                    }
+                }
+
+                m_manager.trace_stream() << ")\n";
+            }
+        }
+    }
+
+public:
+    app * mk_bv(unsigned n, expr* const* es) {
+        app * r = m_manager.mk_app(get_fid(), OP_MKBV, n, es);
+
+        log_bv_from_exprs(r, n, es);
+
+        return r;
+    }
 
 };
 
-#endif /* BV_DECL_PLUGIN_H_ */
 

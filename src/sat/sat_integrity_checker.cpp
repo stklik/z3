@@ -135,7 +135,6 @@ namespace sat {
         VERIFY(s.m_decision.size() == s.num_vars());
         VERIFY(s.m_eliminated.size() == s.num_vars());
         VERIFY(s.m_external.size() == s.num_vars());
-        VERIFY(s.m_level.size() == s.num_vars());
         VERIFY(s.m_mark.size() == s.num_vars());
         VERIFY(s.m_activity.size() == s.num_vars());
         VERIFY(s.m_phase.size() == s.num_vars());
@@ -203,6 +202,7 @@ namespace sat {
 
     bool integrity_checker::check_reinit_stack() const {
         for (auto const& c : s.m_clauses_to_reinit) {
+            SASSERT(c.is_binary() || c.get_clause()->on_reinit_stack());
             VERIFY(c.is_binary() || c.get_clause()->on_reinit_stack());
         }
         return true;

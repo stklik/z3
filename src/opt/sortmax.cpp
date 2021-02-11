@@ -39,9 +39,9 @@ namespace opt {
         sortmax(maxsat_context& c, weights_t& ws, expr_ref_vector const& soft): 
             maxsmt_solver_base(c, ws, soft), m_sort(*this), m_trail(m), m_fresh(m) {}
 
-        virtual ~sortmax() {}
+        ~sortmax() override {}
 
-        lbool operator()() {
+        lbool operator()() override {
             obj_map<expr, rational> soft;            
             if (!init()) {
                 return l_false;
@@ -90,7 +90,7 @@ namespace opt {
                 s().assert_expr(out[first]);
                 is_sat = s().check_sat(0, nullptr);
                 TRACE("opt", tout << is_sat << "\n"; s().display(tout); tout << "\n";);
-                if (m.canceled()) {
+                if (!m.inc()) {
                     is_sat = l_undef;
                 }
                 if (is_sat == l_true) {
@@ -114,7 +114,7 @@ namespace opt {
         }
 
         void update_assignment() {
-            for (soft& s : m_soft) s.is_true = is_true(s.s);
+            for (soft& s : m_soft) s.set_value(is_true(s.s));
         }
 
         bool is_true(expr* e) {

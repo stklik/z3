@@ -3,7 +3,7 @@ Copyright (c) 2012 Microsoft Corporation
 
 Module Name:
 
-    smt_strategic_solver.h
+    smt_strategic_solver.cpp
 
 Abstract:
 
@@ -33,7 +33,8 @@ Notes:
 #include "tactic/smtlogics/qfidl_tactic.h"
 #include "tactic/smtlogics/nra_tactic.h"
 #include "tactic/portfolio/default_tactic.h"
-#include "tactic/portfolio/fd_solver.h"
+#include "tactic/fd_solver/fd_solver.h"
+#include "tactic/fd_solver/smtfd_solver.h"
 #include "tactic/ufbv/ufbv_tactic.h"
 #include "tactic/fpa/qffp_tactic.h"
 #include "muz/fp/horn_tactic.h"
@@ -41,6 +42,11 @@ Notes:
 #include "sat/sat_solver/inc_sat_solver.h"
 #include "ast/rewriter/bv_rewriter.h"
 #include "solver/solver2tactic.h"
+#include "solver/parallel_tactic.h"
+#include "solver/parallel_params.hpp"
+#include "tactic/tactic_params.hpp"
+#include "parsers/smt2/smt2parser.h"
+
 
 
 tactic * mk_tactic_for_logic(ast_manager & m, params_ref const & p, symbol const & logic) {
@@ -99,15 +105,21 @@ tactic * mk_tactic_for_logic(ast_manager & m, params_ref const & p, symbol const
 }
 
 static solver* mk_special_solver_for_logic(ast_manager & m, params_ref const & p, symbol const& logic) {
-    if ((logic == "QF_FD" || logic == "SAT") && !m.proofs_enabled())
+    parallel_params pp(p);
+    if ((logic == "QF_FD" || logic == "SAT") && !m.proofs_enabled() && !pp.enable())
         return mk_fd_solver(m, p);
+    if (logic == "SMTFD" && !m.proofs_enabled() && !pp.enable())
+        return mk_smtfd_solver(m, p);
     return nullptr;
 }
 
 static solver* mk_solver_for_logic(ast_manager & m, params_ref const & p, symbol const& logic) {
     bv_rewriter rw(m);
     solver* s = mk_special_solver_for_logic(m, p, logic);
+    tactic_params tp;
     if (!s && logic == "QF_BV" && rw.hi_div0()) 
+        s = mk_inc_sat_solver(m, p);
+    if (!s && tp.default_tactic() == "sat")
         s = mk_inc_sat_solver(m, p);
     if (!s) 
         s = mk_smt_solver(m, p, logic);
@@ -126,10 +138,30 @@ public:
             l = m_logic;
         else
             l = logic;
-        solver* s = mk_special_solver_for_logic(m, p, l);
-        if (s) return s;
-        tactic * t = mk_tactic_for_logic(m, p, l);
-        return mk_combined_solver(mk_tactic2solver(m, t, p, proofs_enabled, models_enabled, unsat_core_enabled, l),
+
+        tactic_params tp;
+        tactic_ref t;
+        if (tp.default_tactic() != symbol::null &&
+            !tp.default_tactic().is_numerical() && 
+            tp.default_tactic().bare_str() && 
+            tp.default_tactic().bare_str()[0]) {
+            cmd_context ctx(false, &m, l);
+            std::istringstream is(tp.default_tactic().bare_str());
+            char const* file_name = "";
+            sexpr_ref se = parse_sexpr(ctx, is, p, file_name);
+            if (se) {
+                t = sexpr2tactic(ctx, se.get());
+            }
+        }
+
+        if (!t) {
+            solver* s = mk_special_solver_for_logic(m, p, l);
+            if (s) return s;
+        }
+        if (!t) {
+            t = mk_tactic_for_logic(m, p, l);
+        }
+        return mk_combined_solver(mk_tactic2solver(m, t.get(), p, proofs_enabled, models_enabled, unsat_core_enabled, l),
                                   mk_solver_for_logic(m, p, l), 
                                   p);
     }
@@ -139,3 +171,6 @@ solver_factory * mk_smt_strategic_solver_factory(symbol const & logic) {
     return alloc(smt_strategic_solver_factory, logic);
 }
 
+solver* mk_smt2_solver(ast_manager& m, params_ref const& p) {
+    return mk_inc_sat_solver(m, p);
+}

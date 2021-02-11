@@ -24,7 +24,6 @@ Notes:
 #include "ast/rewriter/var_subst.h"
 #include "model/model_pp.h"
 #include "tactic/tactic.h"
-#include "util/cooperate.h"
 #include "util/luby.h"
 
 #include "tactic/sls/sls_params.hpp"
@@ -94,9 +93,7 @@ void sls_engine::collect_statistics(statistics& st) const {
 }
 
 void sls_engine::checkpoint() {
-    if (m_manager.canceled())
-        throw tactic_exception(m_manager.limit().get_cancel_msg());
-    cooperate("sls");
+    tactic::checkpoint(m_manager);
 }
 
 bool sls_engine::full_eval(model & mdl) {
@@ -182,7 +179,7 @@ bool sls_engine::what_if(
     // Andreas: Had this idea on my last day. Maybe we could add a noise here similar to the one that worked so well for ucb assertion selection.
     // r += 0.0001 * m_tracker.get_random_uint(8);
 
-    // Andreas: For some reason it is important to use > here instead of >=. Probably related to prefering the LSB.
+    // Andreas: For some reason it is important to use > here instead of >=. Probably related to preferring the LSB.
     if (r > best_score) {
         best_score = r;
         best_const = fd_inx;
@@ -440,7 +437,7 @@ lbool sls_engine::search() {
 
         // get candidate variables
         ptr_vector<func_decl> & to_evaluate = m_tracker.get_unsat_constants(m_assertions);
-        if (!to_evaluate.size())
+        if (to_evaluate.empty())
         {
             res = l_true;
             goto bailout;
@@ -492,7 +489,7 @@ lbool sls_engine::search() {
 
             score = m_tracker.get_top_sum();
 
-            // update assertion weights if a weigthing is enabled (sp < 1024)
+            // update assertion weights if a weighting is enabled (sp < 1024)
             if (m_paws)
             {
                 for (unsigned i = 0; i < sz; i++)

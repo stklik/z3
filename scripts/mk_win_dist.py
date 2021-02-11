@@ -24,9 +24,10 @@ BUILD_X86_DIR=os.path.join('build-dist', 'x86')
 VERBOSE=True
 DIST_DIR='dist'
 FORCE_MK=False
-DOTNET_ENABLED=True
+DOTNET_CORE_ENABLED=True
 DOTNET_KEY_FILE=None
 JAVA_ENABLED=True
+ZIP_BUILD_OUTPUTS=False
 GIT_HASH=False
 PYTHON_ENABLED=True
 X86ONLY=False
@@ -62,9 +63,10 @@ def display_help():
     print("  -b <sudir>, --build=<subdir>  subdirectory where x86 and x64 Z3 versions will be built (default: build-dist).")
     print("  -f, --force                   force script to regenerate Makefiles.")
     print("  --nodotnet                    do not include .NET bindings in the binary distribution files.")
-    print("  --dotnet-key=<file>           sign the .NET assembly with the private key in <file>.")
+    print("  --dotnet-key=<file>           strongname sign the .NET assembly with the private key in <file>.")
     print("  --nojava                      do not include Java bindings in the binary distribution files.")
     print("  --nopython                    do not include Python bindings in the binary distribution files.")
+    print("  --zip                         package build outputs in zip file.")
     print("  --githash                     include git hash in the Zip file.")
     print("  --x86-only                    x86 dist only.")
     print("  --x64-only                    x64 dist only.")
@@ -72,7 +74,7 @@ def display_help():
 
 # Parse configuration option for mk_make script
 def parse_options():
-    global FORCE_MK, JAVA_ENABLED, GIT_HASH, DOTNET_ENABLED, DOTNET_KEY_FILE, PYTHON_ENABLED, X86ONLY, X64ONLY
+    global FORCE_MK, JAVA_ENABLED, ZIP_BUILD_OUTPUTS, GIT_HASH, DOTNET_CORE_ENABLED, DOTNET_KEY_FILE, PYTHON_ENABLED, X86ONLY, X64ONLY
     path = BUILD_DIR
     options, remainder = getopt.gnu_getopt(sys.argv[1:], 'b:hsf', ['build=',
                                                                    'help',
@@ -81,6 +83,7 @@ def parse_options():
                                                                    'nojava',
                                                                    'nodotnet',
                                                                    'dotnet-key=',
+                                                                   'zip',
                                                                    'githash',
                                                                    'nopython',
                                                                    'x86-only',
@@ -98,13 +101,15 @@ def parse_options():
         elif opt in ('-f', '--force'):
             FORCE_MK = True
         elif opt == '--nodotnet':
-            DOTNET_ENABLED = False
+            DOTNET_CORE_ENABLED = False
         elif opt == '--nopython':
             PYTHON_ENABLED = False
         elif opt == '--dotnet-key':
             DOTNET_KEY_FILE = arg
         elif opt == '--nojava':
             JAVA_ENABLED = False
+        elif opt == '--zip':
+            ZIP_BUILD_OUTPUTS = True
         elif opt == '--githash':
             GIT_HASH = True
         elif opt == '--x86-only' and not X64ONLY:
@@ -124,7 +129,7 @@ def mk_build_dir(path, x64):
     if not check_build_dir(path) or FORCE_MK:
         parallel = '--parallel=' + MAKEJOBS
         opts = ["python", os.path.join('scripts', 'mk_make.py'), parallel, "-b", path]
-        if DOTNET_ENABLED:
+        if DOTNET_CORE_ENABLED:
             opts.append('--dotnet')
             if not DOTNET_KEY_FILE is None:
                 opts.append('--dotnet-key=' + DOTNET_KEY_FILE)
@@ -137,6 +142,7 @@ def mk_build_dir(path, x64):
             opts.append('--git-describe')
         if PYTHON_ENABLED:
             opts.append('--python')
+        opts.append('--guardcf')
         if subprocess.call(opts) != 0:
             raise MKException("Failed to generate build directory at '%s'" % path)
 
@@ -208,10 +214,6 @@ def mk_dist_dir(x64):
         build_path = BUILD_X86_DIR
     dist_path = os.path.join(DIST_DIR, get_z3_name(x64))
     mk_dir(dist_path)
-    mk_util.DOTNET_ENABLED = DOTNET_ENABLED
-    mk_util.DOTNET_KEY_FILE = DOTNET_KEY_FILE
-    mk_util.JAVA_ENABLED = JAVA_ENABLED
-    mk_util.PYTHON_ENABLED = PYTHON_ENABLED
     mk_win_dist(build_path, dist_path)
     if is_verbose():
         print("Generated %s distribution folder at '%s'" % (platform, dist_path))
@@ -247,29 +249,40 @@ def mk_zips():
 
 VS_RUNTIME_PATS = [re.compile('vcomp.*\.dll'),
                    re.compile('msvcp.*\.dll'),
-                   re.compile('msvcr.*\.dll')]
+                   re.compile('msvcr.*\.dll'),
+                   re.compile('vcrun.*\.dll')]
 
 # Copy Visual Studio Runtime libraries
 def cp_vs_runtime(x64):
     if x64:
         platform = "x64"
-
     else:
         platform = "x86"
     vcdir = os.environ['VCINSTALLDIR']
-    path  = '%sredist\\%s' % (vcdir, platform)
-    VS_RUNTIME_FILES = []
+    path  = '%sredist' % vcdir
+    vs_runtime_files = []
+    print("Walking %s" % path)
+    # Everything changes with every release of VS
+    # Prior versions of VS had DLLs under "redist\x64"
+    # There are now several variants of redistributables
+    # The naming convention defies my understanding so 
+    # we use a "check_root" filter to find some hopefully suitable
+    # redistributable.
+    def check_root(root):
+        return platform in root and ("CRT" in root or "MP" in root) and "onecore" not in root and "debug" not in root
     for root, dirs, files in os.walk(path):
         for filename in files:
-            if fnmatch(filename, '*.dll'):
+            if fnmatch(filename, '*.dll') and check_root(root):
+                print("Checking %s %s" % (root, filename))
                 for pat in VS_RUNTIME_PATS:
                     if pat.match(filename):
                         fname = os.path.join(root, filename)
                         if not os.path.isdir(fname):
-                            VS_RUNTIME_FILES.append(fname)
-
+                            vs_runtime_files.append(fname)
+    if not vs_runtime_files:
+        raise MKException("Did not find any runtime files to include")       
     bin_dist_path = os.path.join(DIST_DIR, get_dist_path(x64), 'bin')
-    for f in VS_RUNTIME_FILES:
+    for f in vs_runtime_files:
         shutil.copy(f, bin_dist_path)
         if is_verbose():
             print("Copied '%s' to '%s'" % (f, bin_dist_path))
@@ -285,6 +298,15 @@ def cp_licenses():
     cp_license(True)
     cp_license(False)
 
+def init_flags():
+    global DOTNET_KEY_FILE, JAVA_ENABLED, PYTHON_ENABLED
+    mk_util.DOTNET_CORE_ENABLED = True
+    mk_util.DOTNET_KEY_FILE = DOTNET_KEY_FILE
+    mk_util.JAVA_ENABLED = JAVA_ENABLED
+    mk_util.PYTHON_ENABLED = PYTHON_ENABLED
+    mk_util.ALWAYS_DYNAMIC_BASE = True
+
+
 # Entry point
 def main():
     if os.name != 'nt':
@@ -292,6 +314,7 @@ def main():
 
     parse_options()
     check_vc_cmd_prompt()
+    init_flags()
 
     if X86ONLY:
         mk_build_dir(BUILD_X86_DIR, False)
@@ -300,7 +323,8 @@ def main():
         mk_dist_dir(False)
         cp_license(False)
         cp_vs_runtime(False)
-        mk_zip(False)
+        if ZIP_BUILD_OUTPUTS:
+            mk_zip(False)
     elif X64ONLY:
         mk_build_dir(BUILD_X64_DIR, True)
         mk_z3(True)
@@ -308,7 +332,8 @@ def main():
         mk_dist_dir(True)
         cp_license(True)
         cp_vs_runtime(True)
-        mk_zip(True)
+        if ZIP_BUILD_OUTPUTS:
+            mk_zip(True)
     else:
         mk_build_dirs()
         mk_z3s()
@@ -316,7 +341,8 @@ def main():
         mk_dist_dirs()
         cp_licenses()
         cp_vs_runtimes()
-        mk_zips()
+        if ZIP_BUILD_OUTPUTS:
+            mk_zips()
 
 main()
 

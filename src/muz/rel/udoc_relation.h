@@ -19,8 +19,7 @@ Revision History:
 
 --*/
 
-#ifndef UDOC_RELATION_H_
-#define UDOC_RELATION_H_
+#pragma once
 
 #include "muz/rel/doc.h"
 #include "muz/rel/dl_base.h"
@@ -106,7 +105,7 @@ namespace datalog {
         static udoc_relation const & get(relation_base const& r);   
         void mk_union(doc_manager& dm, udoc& dst, udoc const& src, udoc* delta);
         bool is_numeral(expr* e, rational& r, unsigned& num_bits);
-        unsigned num_sort_bits(expr* e) const { return num_sort_bits(get_ast_manager().get_sort(e)); }
+        unsigned num_sort_bits(expr* e) const { return num_sort_bits(e->get_sort()); }
         unsigned num_sort_bits(sort* s) const;
         bool     is_finite_sort(sort* s) const;
         unsigned num_signature_bits(relation_signature const& sig);
@@ -149,5 +148,4 @@ namespace datalog {
     };
 };
        
-#endif /* UDOC_RELATION_H_ */
 

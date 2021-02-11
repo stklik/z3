@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MODEL_EVALUATOR_H_
-#define MODEL_EVALUATOR_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter_types.h"
@@ -25,6 +24,7 @@ Revision History:
 
 class model;
 class model_core;
+class expr_solver;
 
 typedef rewriter_exception model_evaluator_exception;
 
@@ -36,6 +36,7 @@ public:
     ~model_evaluator();
 
     ast_manager & m () const;
+    model_core const& get_model() const;
     void set_model_completion(bool f);
     bool get_model_completion() const; 
     void set_expand_array_equalities(bool f);
@@ -54,6 +55,11 @@ public:
     bool is_true(expr * t);
     bool is_false(expr * t);
     bool is_true(expr_ref_vector const& ts);
+    bool are_equal(expr* s, expr* t);
+
+
+    void set_solver(expr_solver* solver);
+    bool has_solver();
 
     /**
      * best effort evaluator of extensional array equality.
@@ -67,4 +73,3 @@ public:
     unsigned get_num_steps() const;
 };
 
-#endif

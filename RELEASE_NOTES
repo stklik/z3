@@ -1,5 +1,113 @@
 RELEASE NOTES
 
+Version 4.8.next
+================
+- Planned features
+  - specialized solver support for QF_ABV and ABV based on lazy SMT and dual reduction
+    - the smtfd solver and tactic implement this strategy, but is not prime for users.
+  - introduction of simple induction lemmas to handle a limited repertoire of induction proofs.
+  - circuit optimization techniques for BV in-processing are available as the sat.cut
+    option, but at this point does not translate into benefits. It is currently 
+    turned off by default.
+
+Version 4.8.11
+==============
+  - self-contained character theory, direct support for UTF8, Unicode character sets.
+    Characters are by default unicode with an 18 bit range.
+  - support for incremental any-time MaxSAT using the option opt.enable_lns. The API
+    allows registering a callback function that is invoked on each incremental improvement
+    to objectives. 
+
+Version 4.8.10
+==============
+  - rewritten arithmetic solver replacing legacy arithmetic solver and on by default
+
+Version 4.8.9
+=============
+- New features
+  - significant improvements to regular expression solving
+  - expose user theory plugin. It is a leaner user theory plugin that was once available.
+    It allows for registering callbacks that react to when bit-vector and Boolean variables
+    receive fixed values.
+- Bug fixes
+  - many
+- Notes
+  - the new arithmetic theory is turned on by default. It _does_ introduce regressions on 
+    several scenarios, but has its own advantages. Users can turn on the old solver by setting smt.arith.solver=2.
+    Depending on feedback, we may turn toggle this default setting again back to smt.arith.solver=2.
+
+Version 4.8.8
+=============
+- New features
+  - rewritten NIA (non-linear integer arithmetic) core solver 
+    It is enabled in selected theories as default. 
+    The legacy arithmetic solver remains the overall default in this release
+    as the rewritten solver shows regressions (on mainly NRA problems).
+  - recursive function representation without hoisting ite expressions. Issue #2601
+  - model-based interpolation for quantifier-free UF, arithmetic 
+  - Julia bindings over the C++ API, thanks to ahumenberger 
+- Bug fixes
+  - numerous, many based on extensive fuzz testing. 
+    Thanks to 5hadowblad3, muchang, numairmansur, rainoftime, wintered
+- Notes
+  - recursive functions are unfolded with separate increments based on unsat core
+    analysis of blocking literals that are separate for different recursive functions.   
+  - the seq (string) solver has been revised in several ways and likely shows some 
+    regressions in this release.
+
+Version 4.8.7
+=============
+- New features
+  - setting parameter on solver over the API by
+    solver.smtlib2_log=<filename>
+    enables tracing calls into the solver as SMTLIB2 commands.
+    It traces, assert, push, pop, check_sat, get_consequences.
+- Notes
+  - various bug fixes
+  - remove model_compress. Use model.compact
+  - print weights with quantifiers when weight is != 1
+  
+
+Version 4.8.6
+=============
+- Notes
+  - various bug fixes
+  - built in support for PIP, thanks to Audrey Dutcher
+  - VS compilation mode including misc flags for managed packages
+
+Version 4.8.5
+=============
+- Notes
+  - various bug fixes
+
+Version 4.8.4
+=============
+
+- Notes
+  - fixes bugs
+  - a substantial update to how the seq theory solver handles regular
+    expressions. Other performance improvements to the seq solver.
+  - Managed .NET DLLs include dotnet standard 1.4 on supported platforms.
+  - Windows Managed DLLs are strong signed in the released binaries.
+
+Version 4.8.3
+=============
+- New features
+  - Native handling of recursive function definitions, thanks to Simon Cruanes
+  - PB rounding based option for conflict resolution when reasoning about PB constraints.
+  - Access to numeral constants as a double from the native API.
+
+- Notes
+  - fixes several bugs discovered since the 4.8.1 release.
+
+Version 4.8.2
+=============
+- Post-Release. 
+
+Version 4.8.1
+=============
+- Release. Bug-fix for 4.8.0
+
 Version 4.8.0
 =============
 
@@ -21,7 +129,7 @@ Version 4.8.0
      extracting models from apply_result have been replaced.
    - An optional mode handles xor constraints using a custom xor propagator. 
      It is off by default and its value not demonstrated.
-   - The SAT solver includes new inprocessing technques that are available during simplification. 
+   - The SAT solver includes new inprocessing techniques that are available during simplification.
      It performs asymmetric tautology elimination by default, and one can turn on more powerful inprocessing techniques 
      (known as ACCE, ABCE, CCE). Asymmetric branching also uses features introduced in Lingeling by exploiting binary implication graphs.
      Use sat.acce=true to enable the full repertoire of inprocessing methods. By default, clauses that are "eliminated" by acce are tagged
@@ -38,7 +146,7 @@ Version 4.8.0
        in "cuts from proofs" and "cutting the mix").
      . extracting integer solutions from LP solutions by tightening bounds selectively.
        We use a generalization of Bromberger and Weidenbach that allows avoiding selected
-       bounds tighthenings (https://easychair.org/publications/paper/qGfG).
+       bounds tightenings (https://easychair.org/publications/paper/qGfG).
      It solves significantly more problems in the QF_LIA category and may at this point also 
      be the best solver for your problem as well.
      The new solver is enabled only for select SMT-LIB logics. These include QF_LIA, QF_IDL, and QF_UFLIA.
@@ -210,7 +318,7 @@ xor88, parno, gario, Bauna, GManNickG, hanwentao, dinu09, fhowar, Cici, chinissa
       (check-sat a)
       (check-sat)
   If 'F' is unstatisfiable independently of the assumption 'a', and 
-  the inconsistenty can be detected by just performing propagation,
+  the inconsistency can be detected by just performing propagation,
   Then, version <= 4.3.1 may return
       unsat
       sat
@@ -262,8 +370,6 @@ Version 4.3.0
 
 - Removed tactic mip. It was based on code that was deleted during the code reorganization. 
      
-- Remark: We skipped version 4.2 due to a mistake when releasing 4.1.2. It accidentatly 
-
 - Fixed compilation problems with clang/llvm. Many thanks to Xi Wang for finding the problem, and suggesting the fix. 
 
 - Now, Z3 automatically adds arithmetic coercions: to_real and to_int.
@@ -280,7 +386,7 @@ Version 4.3.0
 
 - Added "--with-python=<path>" option to configure script.
 
-- Cleanned c++, maxsat, test_mapi examples.
+- Cleaned c++, maxsat, test_mapi examples.
 
 - Move RELEASE_NOTES files to source code distribution.
 
@@ -318,7 +424,7 @@ First source code release (October 2, 2012)
 
 - Added support for numbers in scientific notation at Z3_ast Z3_mk_numeral(__in Z3_context c, __in Z3_string numeral, __in Z3_sort ty).
 
-- New builtin symbols in the arithmetic theory: pi, euler, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh. The first two are constants, and the others are unary functions. These symbols are not available if the a SMT 2.0 logic is specified (e.g., QF_LRA, QF_NRA, QF_LIA, etc) because these symbols are not defined in these logics. That is, the new symbols are only available if the logic is not specified.
+- New builtin symbols in the arithmetic theory: pi, euler, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh. The first two are constants, and the others are unary functions. These symbols are not available if a SMT 2.0 logic is specified (e.g., QF_LRA, QF_NRA, QF_LIA, etc) because these symbols are not defined in these logics. That is, the new symbols are only available if the logic is not specified.
 
 Version 4.1
 ===========
@@ -424,7 +530,7 @@ Temporarily disabled features:
 
 - User theories cannot be used with the new Solver API yet. Users may still use them with the deprecated solver API.
 
-- Parallel Z3 is also disabled in this release. However, we have parallel combinators for creating stragegies (See <a href="http://rise4fun.com/Z3/tutorial/strategies"> tutorial</a>).
+- Parallel Z3 is also disabled in this release. However, we have parallel combinators for creating strategies (See <a href="http://rise4fun.com/Z3/tutorial/strategies"> tutorial</a>).
       
 The two features above will return in future releases. 
 

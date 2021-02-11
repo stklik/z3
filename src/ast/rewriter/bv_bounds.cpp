@@ -111,7 +111,7 @@ bv_bounds::conv_res bv_bounds::convert(expr * e, vector<ninterval>& nis, bool ne
     numeral val, val1;
     unsigned bv_sz1;
 
-    if (0) {
+    if (false) {
         if (m_m.is_eq(e, lhs, rhs) && to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz1)) {
             return record(to_app(lhs), val, val, negated, nis);
         }
@@ -125,7 +125,7 @@ bv_bounds::conv_res bv_bounds::convert(expr * e, vector<ninterval>& nis, bool ne
         return record(to_app(lhs), numeral::zero(), val, negated, nis);
     }
 
-    if (1) {
+    if (true) {
         numeral rhs_val;
         unsigned rhs_sz;
         if (m_m.is_eq(e, lhs, rhs)
@@ -343,7 +343,7 @@ bool bv_bounds::add_constraint(expr* e) {
     numeral val, val1;
     unsigned bv_sz1;
 
-    if (0) {
+    if (false) {
         if (m_m.is_eq(e, lhs, rhs) && to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz1)) {
             return add_bound_unsigned(to_app(lhs), val, val, negated);
         }
@@ -523,10 +523,10 @@ bool bv_bounds::bound_lo(app * v, const numeral& l) {
     SASSERT(in_range(v, l));
     TRACE("bv_bounds", tout << "lower " << mk_ismt2_pp(v, m_m) << ":" << l << std::endl;);
     // l <= v
-    bound_map::obj_map_entry * const entry = m_unsigned_lowers.insert_if_not_there2(v, l);
-    if (!(entry->get_data().m_value < l)) return m_okay;
+    auto& value = m_unsigned_lowers.insert_if_not_there(v, l);
+    if (!(value < l)) return m_okay;
     // improve bound
-    entry->get_data().m_value = l;
+    value = l;
     return m_okay;
 }
 
@@ -534,10 +534,10 @@ bool bv_bounds::bound_up(app * v, const numeral& u) {
     SASSERT(in_range(v, u));
     TRACE("bv_bounds", tout << "upper " << mk_ismt2_pp(v, m_m) << ":" << u << std::endl;);
     // v <= u
-    bound_map::obj_map_entry * const entry = m_unsigned_uppers.insert_if_not_there2(v, u);
-    if (!(u < entry->get_data().m_value)) return m_okay;
+    auto& value = m_unsigned_uppers.insert_if_not_there(v, u);
+    if (!(u < value)) return m_okay;
     // improve bound
-    entry->get_data().m_value = u;
+    value = u;
     return m_okay;
 }
 
@@ -590,7 +590,7 @@ bool bv_bounds::is_sat() {
 }
 
 struct interval_comp_t {
-    bool operator() (bv_bounds::interval i, bv_bounds::interval j) {
+    bool operator() (bv_bounds::interval const& i, bv_bounds::interval const& j) {
         return (i.first < j.first);
     }
 } interval_comp;
@@ -628,7 +628,7 @@ bool bv_bounds::is_sat_core(app * v) {
     numeral new_hi = lower - one;
     numeral ptr = lower;
     if (has_neg_intervals) {
-        SASSERT(negative_intervals != NULL);
+        SASSERT(negative_intervals != nullptr);
         std::sort(negative_intervals->begin(), negative_intervals->end(), interval_comp);
         intervals::const_iterator e = negative_intervals->end();
         for (intervals::const_iterator i = negative_intervals->begin(); i != e; ++i) {

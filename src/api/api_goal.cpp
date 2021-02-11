@@ -25,7 +25,7 @@ Revision History:
 
 extern "C" {
 
-    Z3_goal Z3_API Z3_mk_goal(Z3_context c, Z3_bool models, Z3_bool unsat_cores, Z3_bool proofs) {
+    Z3_goal Z3_API Z3_mk_goal(Z3_context c, bool models, bool unsat_cores, bool proofs) {
         Z3_TRY;
         LOG_Z3_mk_goal(c, models, unsat_cores, proofs);
         RESET_ERROR_CODE();
@@ -82,12 +82,12 @@ extern "C" {
         Z3_CATCH;
     }
 
-    Z3_bool Z3_API Z3_goal_inconsistent(Z3_context c, Z3_goal g) {
+    bool Z3_API Z3_goal_inconsistent(Z3_context c, Z3_goal g) {
         Z3_TRY;
         LOG_Z3_goal_inconsistent(c, g);
         RESET_ERROR_CODE();
         return to_goal_ref(g)->inconsistent();
-        Z3_CATCH_RETURN(Z3_FALSE);
+        Z3_CATCH_RETURN(false);
     }
 
     unsigned Z3_API Z3_goal_depth(Z3_context c, Z3_goal g) {
@@ -136,20 +136,20 @@ extern "C" {
         Z3_CATCH_RETURN(0);
     }
     
-    Z3_bool Z3_API Z3_goal_is_decided_sat(Z3_context c, Z3_goal g) {
+    bool Z3_API Z3_goal_is_decided_sat(Z3_context c, Z3_goal g) {
         Z3_TRY;
         LOG_Z3_goal_is_decided_sat(c, g);
         RESET_ERROR_CODE();
         return to_goal_ref(g)->is_decided_sat();
-        Z3_CATCH_RETURN(Z3_FALSE);
+        Z3_CATCH_RETURN(false);
     }
     
-    Z3_bool Z3_API Z3_goal_is_decided_unsat(Z3_context c, Z3_goal g) {
+    bool Z3_API Z3_goal_is_decided_unsat(Z3_context c, Z3_goal g) {
         Z3_TRY;
         LOG_Z3_goal_is_decided_unsat(c, g);
         RESET_ERROR_CODE();
         return to_goal_ref(g)->is_decided_unsat();
-        Z3_CATCH_RETURN(Z3_FALSE);
+        Z3_CATCH_RETURN(false);
     }
 
     Z3_model Z3_API Z3_goal_convert_model(Z3_context c, Z3_goal g, Z3_model m) {
@@ -163,7 +163,7 @@ extern "C" {
         if (to_goal_ref(g)->mc()) 
             (*to_goal_ref(g)->mc())(m_ref->m_model);
         RETURN_Z3(of_model(m_ref));
-        Z3_CATCH_RETURN(0);
+        Z3_CATCH_RETURN(nullptr);
     }    
 
     Z3_goal Z3_API Z3_goal_translate(Z3_context c, Z3_goal g, Z3_context target) {
@@ -189,25 +189,25 @@ extern "C" {
         std::string result = buffer.str();
         SASSERT(result.size() > 0);
         result.resize(result.size()-1);
-        return mk_c(c)->mk_external_string(result);
+        return mk_c(c)->mk_external_string(std::move(result));
         Z3_CATCH_RETURN("");
     }
 
-    Z3_string Z3_API Z3_goal_to_dimacs_string(Z3_context c, Z3_goal g) {
+    Z3_string Z3_API Z3_goal_to_dimacs_string(Z3_context c, Z3_goal g, bool include_names) {
         Z3_TRY;
-        LOG_Z3_goal_to_dimacs_string(c, g);
+        LOG_Z3_goal_to_dimacs_string(c, g, include_names);
         RESET_ERROR_CODE();
         std::ostringstream buffer;
         if (!to_goal_ref(g)->is_cnf()) { 
             SET_ERROR_CODE(Z3_INVALID_ARG, "If this is not what you want, then preprocess by optional bit-blasting and applying tseitin-cnf");
             RETURN_Z3(nullptr);
         }
-        to_goal_ref(g)->display_dimacs(buffer);
+        to_goal_ref(g)->display_dimacs(buffer, include_names);
         // Hack for removing the trailing '\n'
         std::string result = buffer.str();
         SASSERT(result.size() > 0);
         result.resize(result.size()-1);
-        return mk_c(c)->mk_external_string(result);
+        return mk_c(c)->mk_external_string(std::move(result));
         Z3_CATCH_RETURN("");
     }
 

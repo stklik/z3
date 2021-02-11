@@ -18,8 +18,7 @@ Revision History:
     Extracted from dl_context
 
 --*/
-#ifndef REL_CONTEXT_H_
-#define REL_CONTEXT_H_
+#pragma once
 #include "ast/ast.h"
 #include "muz/rel/dl_relation_manager.h"
 #include "muz/rel/dl_instruction.h"
@@ -85,11 +84,13 @@ namespace datalog {
         /**
            \brief Restrict the set of used predicates to \c res.
 
-           The function deallocates unsused relations, it does not deal with rules.
+           The function deallocates unused relations, it does not deal with rules.
          */
         void restrict_predicates(func_decl_set const& predicates) override;
 
         void transform_rules() override;
+
+        model_ref get_model() override;
 
         bool try_get_size(func_decl* pred, unsigned& rel_size) const override;
         /**
@@ -126,4 +127,3 @@ namespace datalog {
     };
 };
 
-#endif /* REL_CONTEXT_H_ */

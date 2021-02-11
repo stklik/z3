@@ -28,8 +28,8 @@ static void __declspec(noinline) U(uint64_t u)   { *g_z3_log << "U " << u << "\n
 static void __declspec(noinline) D(double d)   { *g_z3_log << "D " << d << "\n"; g_z3_log->flush(); }
 static void __declspec(noinline) S(Z3_string str) { *g_z3_log << "S \"" << ll_escaped(str) << "\"\n"; g_z3_log->flush(); }
 static void __declspec(noinline) Sy(Z3_symbol sym) { 
-    symbol s = symbol::mk_symbol_from_c_ptr(reinterpret_cast<void *>(sym));
-    if (s == symbol::null) {
+    symbol s = symbol::c_api_ext2symbol(sym);
+    if (s.is_null()) {
         *g_z3_log << "N\n";
     }
     else if (s.is_numerical()) {
@@ -42,6 +42,7 @@ static void __declspec(noinline) Sy(Z3_symbol sym) {
 }
 static void __declspec(noinline) Ap(unsigned sz) { *g_z3_log << "p " << sz << "\n"; g_z3_log->flush(); }
 static void __declspec(noinline) Au(unsigned sz) { *g_z3_log << "u " << sz << "\n"; g_z3_log->flush(); }
+static void __declspec(noinline) Ai(unsigned sz) { *g_z3_log << "i " << sz << "\n"; g_z3_log->flush(); }
 static void __declspec(noinline) Asy(unsigned sz) { *g_z3_log << "s " << sz << "\n"; g_z3_log->flush(); }
 static void __declspec(noinline) C(unsigned id)   { *g_z3_log << "C " << id << "\n"; g_z3_log->flush(); }
 void __declspec(noinline) _Z3_append_log(char const * msg) { *g_z3_log << "M \"" << ll_escaped(msg) << "\"\n"; g_z3_log->flush(); }

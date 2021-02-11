@@ -2,13 +2,13 @@
 # Example C++ project
 ################################################################################
 project(Z3_C_EXAMPLE CXX)
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.4)
 find_package(Z3
   REQUIRED
   CONFIG
   # `NO_DEFAULT_PATH` is set so that -DZ3_DIR has to be passed to find Z3.
-  # This should prevent us from accidently picking up an installed
-  # copy of Z3. This is here to benefit Z3's build sytem when building
+  # This should prevent us from accidentally picking up an installed
+  # copy of Z3. This is here to benefit Z3's build system when building
   # this project. When making your own project you probably shouldn't
   # use this option.
   NO_DEFAULT_PATH
@@ -17,17 +17,8 @@ find_package(Z3
 ################################################################################
 # Z3 C++ API bindings require C++11
 ################################################################################
-if ("${CMAKE_VERSION}" VERSION_LESS "3.1")
-  # Legacy CMake support
-  if (("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"))
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-  else()
-    message(FATAL_ERROR "Setting C++ version to C++11 not supported for \"${CMAKE_CXX_COMPILER_ID}\"")
-  endif()
-else ()
-  set(CMAKE_CXX_STANDARD 11)
-  set(CMAKE_CXX_STANDARD_REQUIRED ON)
-endif ()
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 message(STATUS "Z3_FOUND: ${Z3_FOUND}")
 message(STATUS "Found Z3 ${Z3_VERSION_STRING}")

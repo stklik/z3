@@ -17,8 +17,7 @@ Author:
 Notes:
 
 --*/
-#ifndef GENERIC_MODEL_CONVERTER_H_
-#define GENERIC_MODEL_CONVERTER_H_
+#pragma once
 
 #include "tactic/model_converter.h"
 
@@ -41,11 +40,11 @@ class generic_model_converter : public model_converter {
 public:
     generic_model_converter(ast_manager & m, char const* orig) : m(m), m_orig(orig) {}
     
-    virtual ~generic_model_converter();
+    ~generic_model_converter() override;
     
     void hide(expr* e) { SASSERT(is_app(e) && to_app(e)->get_num_args() == 0); hide(to_app(e)->get_decl()); }
 
-    void hide(func_decl * f) { m_entries.push_back(entry(f, 0, m, HIDE)); }
+    void hide(func_decl * f) { m_entries.push_back(entry(f, nullptr, m, HIDE)); }
 
     void add(func_decl * d, expr* e);
 
@@ -59,7 +58,9 @@ public:
 
     void display(std::ostream & out) override;
 
-    model_converter * translate(ast_translation & translator) override;
+    model_converter * translate(ast_translation & translator) override { return copy(translator); }
+
+    generic_model_converter* copy(ast_translation & translator);
 
     void set_env(ast_pp_util* visitor) override;
 
@@ -70,4 +71,3 @@ public:
 
 typedef ref<generic_model_converter> generic_model_converter_ref;
 
-#endif

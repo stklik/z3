@@ -1,4 +1,3 @@
-
 /*++
 Copyright (c) 2015 Microsoft Corporation
 
@@ -11,6 +10,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include "util/timeout.h"
 #include "util/cancel_eh.h"
 #include "util/scoped_timer.h"
+#include "util/mutex.h"
 #include "ast/ast_util.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/ast_pp.h"
@@ -21,35 +21,44 @@ Copyright (c) 2015 Microsoft Corporation
 #include "opt/opt_parse.h"
 
 extern bool g_display_statistics;
+extern bool g_display_model;
 static bool g_first_interrupt = true;
 static opt::context* g_opt = nullptr;
 static double g_start_time = 0;
 static unsigned_vector g_handles;
+static mutex *display_stats_mux = new mutex;
 
+static void display_model(std::ostream& out) {
+    if (!g_opt)
+        return;
+    model_ref mdl;
+    g_opt->get_model(mdl);
+    if (mdl) {
+        model_smt2_pp(out, g_opt->get_manager(), *mdl, 0); 
+    }
+    for (unsigned h : g_handles) {
+        expr_ref lo = g_opt->get_lower(h);
+        expr_ref hi = g_opt->get_upper(h);
+        if (lo == hi) {
+            out << "   " << lo << "\n";
+        }
+        else {
+            out << "  [" << lo << ":" << hi << "]\n";
+        }
+    }
+}
 
+static void display_model() {
+    if (g_display_model)
+        display_model(std::cout);
+}
 
 static void display_results() {
-    IF_VERBOSE(1, 
-               if (g_opt) {
-                   model_ref mdl;
-                   g_opt->get_model(mdl);
-                   if (mdl) {
-                       model_smt2_pp(verbose_stream(), g_opt->get_manager(), *mdl, 0); 
-                   }
-                   for (unsigned h : g_handles) {
-                       expr_ref lo = g_opt->get_lower(h);
-                       expr_ref hi = g_opt->get_upper(h);
-                       if (lo == hi) {
-                           std::cout << "   " << lo << "\n";
-                       }
-                       else {
-                           std::cout << "  [" << lo << ":" << hi << "]\n";
-                       }
-                   }
-               });
+    IF_VERBOSE(1, display_model(verbose_stream()));
 }
 
 static void display_statistics() {
+    lock_guard lock(*display_stats_mux);
     if (g_display_statistics && g_opt) {
         ::statistics stats;
         g_opt->collect_statistics(stats);
@@ -68,20 +77,14 @@ static void STD_CALL on_ctrl_c(int) {
     }
     else {
         signal (SIGINT, SIG_DFL);
-        #pragma omp critical (g_display_stats) 
-        {
-            display_statistics();
-        }
+        display_statistics();
         raise(SIGINT);
     }
 }
 
 static void on_timeout() {
-    #pragma omp critical (g_display_stats) 
-    {
-        display_statistics();
-        exit(0);
-    }
+    display_statistics();
+    exit(0);
 }
 
 static unsigned parse_opt(std::istream& in, opt_format f) {
@@ -108,7 +111,8 @@ static unsigned parse_opt(std::istream& in, opt_format f) {
         unsigned rlimit = std::stoi(gparams::get_value("rlimit"));
         scoped_timer timer(timeout, &eh);
         scoped_rlimit _rlimit(m.limit(), rlimit);
-        lbool r = opt.optimize();
+        expr_ref_vector asms(m);
+        lbool r = opt.optimize(asms);
         switch (r) {
         case l_true:  std::cout << "sat\n"; break;
         case l_false: std::cout << "unsat\n"; break;
@@ -130,12 +134,9 @@ static unsigned parse_opt(std::istream& in, opt_format f) {
     catch (z3_exception & ex) {
         std::cerr << ex.msg() << "\n";
     }
-    #pragma omp critical (g_display_stats) 
-    {
-        display_statistics();
-        register_on_timeout_proc(nullptr);
-        g_opt = nullptr;
-    }    
+    display_statistics();
+    display_model();
+    g_opt = nullptr;
     return 0;
 }
 

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_FAILURE_H_
-#define SMT_FAILURE_H_
+#pragma once
 
 namespace smt {
 
@@ -27,7 +26,6 @@ namespace smt {
     enum failure {
         OK,
         UNKNOWN,
-        TIMEOUT,    
         MEMOUT,     
         CANCELED,      //!< External cancel flag was set
         NUM_CONFLICTS, //!< Maximum number of conflicts was reached
@@ -38,4 +36,3 @@ namespace smt {
 
 };
 
-#endif

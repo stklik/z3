@@ -25,8 +25,7 @@ Notes:
     A naive approach is to run an algorithm on max flow in order to get a spanning tree.
    
 --*/
-#ifndef NETWORK_FLOW_H_
-#define NETWORK_FLOW_H_
+#pragma once
 
 #include "util/inf_rational.h"
 #include "smt/diff_logic.h"
@@ -148,7 +147,7 @@ namespace smt {
         vector<numeral>      m_potentials;   // nodes + 1 |-> initial: +/- 1  
                                              // Duals of flows which are convenient to compute dual solutions 
                                              // become solutions to Dual simplex.
-        vector<numeral>      m_flows;        // edges + nodes |-> assignemnt Basic feasible flows
+        vector<numeral>      m_flows;        // edges + nodes |-> assignment Basic feasible flows
         svector<edge_state>  m_states;
         unsigned             m_step;
         edge_id              m_enter_id;
@@ -197,4 +196,3 @@ namespace smt {
     };
 }
 
-#endif

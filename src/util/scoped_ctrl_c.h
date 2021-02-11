@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_CTRL_C_H_
-#define SCOPED_CTRL_C_H_
+#pragma once
 
 #include "util/event_handler.h"
 #include "util/util.h"
@@ -29,8 +28,6 @@ struct scoped_ctrl_c {
     bool m_enabled;
     void  (STD_CALL *m_old_handler)(int);
     scoped_ctrl_c * m_old_scoped_ctrl_c;
-    static scoped_ctrl_c * g_obj;
-    static void STD_CALL on_ctrl_c(int);
 public:
     // If once == true, then the cancel_eh is invoked only at the first Ctrl-C.
     // The next time, the old signal handler will take over.
@@ -40,4 +37,3 @@ public:
     void reset() { m_first = true; }
 };
 
-#endif

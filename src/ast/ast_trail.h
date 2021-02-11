@@ -19,8 +19,7 @@ Revision History:
     nbjorner 2014-9-28
 
 --*/
-#ifndef AST_TRAIL_H_
-#define AST_TRAIL_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/trail.h"
@@ -57,8 +56,8 @@ public:
     }
 };
 
-template<typename Ctx, typename S, typename T>
-class ast2ast_trail : public trail<Ctx> {
+template<typename S, typename T>
+class ast2ast_trail : public trail {
     ast2ast_trailmap<S,T>& m_map;
 public:
     ast2ast_trail(ast2ast_trailmap<S,T>& m, S* s, T* t) : 
@@ -66,11 +65,10 @@ public:
         m.insert(s,t);
     }
 
-    void undo(Ctx& ctx) override {
+    void undo() override {
         m_map.pop();
     }    
 };
 
 
-#endif /* AST_TRAIL_H_ */
 

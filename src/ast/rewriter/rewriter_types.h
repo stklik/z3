@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef REWRITER_TYPES_H_
-#define REWRITER_TYPES_H_
+#pragma once
 
 #include "util/z3_exception.h"
 #include "util/common_msgs.h"
@@ -46,7 +45,6 @@ inline br_status unsigned2br_status(unsigned u) {
 
 class rewriter_exception : public default_exception {
 public:                                                
-    rewriter_exception(char const * msg):default_exception(msg) {}
+    rewriter_exception(std::string && msg) : default_exception(std::move(msg)) {}
 };
 
-#endif

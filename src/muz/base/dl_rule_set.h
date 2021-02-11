@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_RULE_SET_H_
-#define DL_RULE_SET_H_
+#pragma once
 
 #include "util/obj_hashtable.h"
 #include "muz/base/dl_rule.h"
@@ -63,7 +62,7 @@ namespace datalog {
 
         void populate(const rule_set & rules);
         void populate(unsigned n, rule * const * rules);
-        void restrict(const item_set & allowed);
+        void restrict_dependencies(const item_set & allowed);
         void remove(func_decl * itm);
         void remove(const item_set & to_remove);
 
@@ -77,7 +76,7 @@ namespace datalog {
            \brief Number of predicates that depend on \c f.
          */
         unsigned out_degree(func_decl * f) const;
-        
+
         /**
            \brief If the rependency graph is acyclic, put all elements into \c res
              ordered so that elements can depend only on elements that are before them.
@@ -131,7 +130,7 @@ namespace datalog {
             it must exist for the whole lifetime of the \c stratifier object.
         */
         rule_stratifier(const rule_dependencies & deps)
-            : m_deps(deps), m_next_preorder(0) 
+            : m_deps(deps), m_next_preorder(0)
         {
             process();
         }
@@ -145,7 +144,7 @@ namespace datalog {
         const comp_vector & get_strats() const { return m_strats; }
 
         unsigned get_predicate_strat(func_decl * pred) const;
-        
+
         void display( std::ostream & out ) const;
     };
 
@@ -203,6 +202,10 @@ namespace datalog {
            \brief Remove rule \c r from the rule set.
         */
         void del_rule(rule * r);
+        /**
+           \brief Replace a rule \c r with the rule \c other
+        */
+        void replace_rule(rule * r, rule * other);
 
         /**
            \brief Add all rules from a different rule_set.
@@ -226,7 +229,7 @@ namespace datalog {
         bool is_closed() const { return m_stratifier != 0; }
 
         unsigned get_num_rules() const { return m_rules.size(); }
-        bool empty() const { return m_rules.size() == 0; }
+        bool empty() const { return m_rules.empty(); }
 
         rule * get_rule(unsigned i) const { return m_rules[i]; }
         rule * last() const { return m_rules[m_rules.size()-1]; }
@@ -250,9 +253,11 @@ namespace datalog {
 
         void set_output_predicate(func_decl * pred) { m_refs.push_back(pred); m_output_preds.insert(pred); }
         bool is_output_predicate(func_decl * pred) const { return m_output_preds.contains(pred); }
+        void inherit_output_predicate(rule_set const& src, func_decl* pred) { if (src.is_output_predicate(pred) && !is_output_predicate(pred)) set_output_predicate(pred); }
         const func_decl_set & get_output_predicates() const { return m_output_preds; }
         func_decl* get_output_predicate() const { SASSERT(m_output_preds.size() == 1); return *m_output_preds.begin(); }
 
+        bool is_finite_domain() const;
 
         void display(std::ostream & out) const;
 
@@ -275,8 +280,6 @@ namespace datalog {
     inline std::ostream& operator<<(std::ostream& out, rule_set const& r) { r.display(out); return out; }
 
 
-    
-};
 
-#endif /* DL_RULE_SET_H_ */
+};
 

@@ -8,13 +8,13 @@
 # FIXME: All the commented out defines should be removed once
 # we are confident it is correct to not set them.
 set(Z3_MSVC_LEGACY_DEFINES
-  # Don't set `_DEBUG`. The old build sytem sets this but this
+  # Don't set `_DEBUG`. The old build system sets this but this
   # is wrong. MSVC will set this depending on which runtime is being used.
   # See https://msdn.microsoft.com/en-us/library/b0084kay.aspx
   # _DEBUG
 
   # The old build system only set `UNICODE` and `_UNICODE` for x86_64 release.
-  # That seems completly wrong so set it for all configurations.
+  # That seems completely wrong so set it for all configurations.
   # According to https://blogs.msdn.microsoft.com/oldnewthing/20040212-00/?p=40643/
   # `UNICODE` affects Windows headers and `_UNICODE` affects C runtime header files.
   # There is some discussion of this define at https://msdn.microsoft.com/en-us/library/dybsewaf.aspx
@@ -57,10 +57,10 @@ endif()
 # Note we don't set WIN32 or _WINDOWS because
 # CMake provides that for us. As a sanity check make sure the option
 # is present.
-if (NOT "${CMAKE_CXX_FLAGS}" MATCHES "/D[ ]*WIN32")
+if (NOT "${CMAKE_CXX_FLAGS}" MATCHES "[-/]D[ ]*WIN32")
   message(FATAL_ERROR "\"/D WIN32\" is missing")
 endif()
-if (NOT "${CMAKE_CXX_FLAGS}" MATCHES "/D[ ]*_WINDOWS")
+if (NOT "${CMAKE_CXX_FLAGS}" MATCHES "[-/]D[ ]*_WINDOWS")
   message(FATAL_ERROR "\"/D _WINDOWS\" is missing")
 endif()
 
@@ -69,14 +69,6 @@ list(APPEND Z3_COMPONENT_CXX_DEFINES ${Z3_MSVC_LEGACY_DEFINES})
 ################################################################################
 # Compiler flags
 ################################################################################
-# By default in MSVC this is on but the old build system set this explicitly so
-# for completeness set it too.
-# See https://msdn.microsoft.com/en-us/library/dh8che7s.aspx
-z3_add_cxx_flag("/Zc:wchar_t" REQUIRED)
-# By default in MSVC this on but the old build system set this explicitly so
-# for completeness set it too.
-z3_add_cxx_flag("/Zc:forScope" REQUIRED)
-
 # FIXME: We might want to move this out somewhere else if we decide
 # we want to set `-fno-omit-frame-pointer` for gcc/clang.
 # No omit frame pointer
@@ -106,17 +98,14 @@ if (("${TARGET_ARCHITECTURE}" STREQUAL "x86_64") OR ("${TARGET_ARCHITECTURE}" ST
   z3_add_cxx_flag("/Gd" REQUIRED)
 endif()
 
-# FIXME: The old build system explicitly disables code analysis.
-# I don't know why. Duplicate this behaviour for now.
-# See https://msdn.microsoft.com/en-us/library/ms173498.aspx
-z3_add_cxx_flag("/analyze-" REQUIRED)
+z3_add_cxx_flag("/EHsc" REQUIRED)
 
 ################################################################################
 # Linker flags
 ################################################################################
 
 # By default CMake enables incremental linking for Debug and RelWithDebInfo
-# builds. The old build sytem disables it for all builds so try to do the same
+# builds. The old build system disables it for all builds so try to do the same
 # by changing all configurations if necessary
 string(TOUPPER "${available_build_types}" _build_types_as_upper)
 foreach (_build_type ${_build_types_as_upper})
@@ -181,19 +170,9 @@ foreach (_build_type ${_build_types_as_upper})
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_${_build_type} " /TLBID:1")
 
     # FIXME: This is not necessary. This is MSVC's default.
-    # Address space layout randomization
-    # See https://msdn.microsoft.com/en-us/library/bb384887.aspx
-    string(APPEND CMAKE_EXE_LINKER_FLAGS_${_build_type} " /DYNAMICBASE")
-    if(ENABLE_CFI)
-      # CFI requires /DYNAMICBASE to be enabled.
-      string(APPEND CMAKE_SHARED_LINKER_FLAGS_${_build_type} " /DYNAMICBASE")
-    else()
-      string(APPEND CMAKE_SHARED_LINKER_FLAGS_${_build_type} " /DYNAMICBASE:NO")
-    endif()
-
-    # FIXME: This is not necessary. This is MSVC's default.
     # Indicate that the executable is compatible with DEP
     # See https://msdn.microsoft.com/en-us/library/ms235442.aspx
     string(APPEND CMAKE_EXE_LINKER_FLAGS_${_build_type} " /NXCOMPAT")
+
   endif()
 endforeach()

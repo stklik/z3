@@ -326,9 +326,21 @@ sig
 
   (** Creates a new function declaration. *)
   val mk_func_decl_s : context -> string -> Sort.sort list -> Sort.sort -> func_decl
-  (** Creates a fresh function declaration with a name prefixed with a prefix string. *)
 
+  (** Creates a function declaration that can be used in a recursive function definition.
+      {!add_rec_def} *)
+  val mk_rec_func_decl : context -> Symbol.symbol -> Sort.sort list -> Sort.sort -> func_decl
+
+  (** Creates a function declaration that can be used in a recursive function definition.
+      {!add_rec_def} *)
+  val mk_rec_func_decl_s : context -> string -> Sort.sort list -> Sort.sort -> func_decl
+
+  (** Registers a recursive function definition *)
+  val add_rec_def : context -> func_decl -> Expr.expr list -> Expr.expr -> unit
+
+  (** Creates a fresh function declaration with a name prefixed with a prefix string. *)
   val mk_fresh_func_decl : context -> string -> Sort.sort list -> Sort.sort -> func_decl
+
 
   (** Creates a new constant function declaration. *)
   val mk_const_decl : context -> Symbol.symbol -> Sort.sort -> func_decl
@@ -724,6 +736,7 @@ sig
   (** Create a quantifier pattern. *)
   val mk_pattern : context -> Expr.expr list -> Pattern.pattern
 
+
   (** Create a universal Quantifier. *)
   val mk_forall : context -> Sort.sort list -> Symbol.symbol list -> Expr.expr -> int option -> Pattern.pattern list -> Expr.expr list -> Symbol.symbol option -> Symbol.symbol option -> quantifier
 
@@ -736,11 +749,17 @@ sig
   (** Create an existential Quantifier. *)
   val mk_exists_const : context -> Expr.expr list -> Expr.expr -> int option -> Pattern.pattern list -> Expr.expr list -> Symbol.symbol option -> Symbol.symbol option -> quantifier
 
-  (** Create a Quantifier. *)
-  val mk_quantifier : context -> Sort.sort list -> Symbol.symbol list -> Expr.expr -> int option -> Pattern.pattern list -> Expr.expr list -> Symbol.symbol option -> Symbol.symbol option -> quantifier
+  (** Create a lambda binding. *)
+  val mk_lambda_const : context -> Expr.expr list -> Expr.expr -> quantifier
+
+  (** Create a lambda binding where bound variables are given by symbols and sorts *)
+  val mk_lambda : context -> (Symbol.symbol * Sort.sort) list -> Expr.expr -> quantifier
 
   (** Create a Quantifier. *)
-  val mk_quantifier : context -> bool -> Expr.expr list -> Expr.expr -> int option -> Pattern.pattern list -> Expr.expr list -> Symbol.symbol option -> Symbol.symbol option -> quantifier
+  val mk_quantifier : context -> bool -> Sort.sort list -> Symbol.symbol list -> Expr.expr -> int option -> Pattern.pattern list -> Expr.expr list -> Symbol.symbol option -> Symbol.symbol option -> quantifier
+
+  (** Create a Quantifier. *)
+  val mk_quantifier_const : context -> bool -> Expr.expr list -> Expr.expr -> int option -> Pattern.pattern list -> Expr.expr list -> Symbol.symbol option -> Symbol.symbol option -> quantifier
 
   (** A string representation of the quantifier. *)
   val to_string : quantifier -> string
@@ -1152,11 +1171,8 @@ sig
     (** Create a new integer sort. *)
     val mk_sort : context -> Sort.sort
 
-    (** Retrieve the int value. *)
-    val get_int : Expr.expr -> int
-
     (** Get a big_int from an integer numeral *)
-    val get_big_int : Expr.expr -> Big_int.big_int
+    val get_big_int : Expr.expr -> Z.t
 
     (** Returns a string representation of a numeral. *)
     val numeral_to_string : Expr.expr -> string
@@ -1214,7 +1230,7 @@ sig
     val get_denominator : Expr.expr -> Expr.expr
 
     (** Get a ratio from a real numeral *)
-    val get_ratio : Expr.expr -> Ratio.ratio
+    val get_ratio : Expr.expr -> Q.t
 
     (** Returns a string representation in decimal notation.
         The result has at most as many decimal places as indicated by the int argument.*)
@@ -1543,9 +1559,6 @@ sig
   (** The size of a bit-vector sort. *)
   val get_size : Sort.sort -> int
 
-  (**  Retrieve the int value. *)
-  val get_int : Expr.expr -> int
-
   (** Returns a string representation of a numeral. *)
   val numeral_to_string : Expr.expr -> string
 
@@ -1611,7 +1624,8 @@ sig
 
       It is defined as the floor of [t1/t2] if \c t2 is
       different from zero. If [t2] is zero, then the result
-      is undefined.
+      is not uniquely specified. It can be set to any value
+      that satisfies the constraints where unsigned division is used.
       The arguments must have the same bit-vector sort. *)
   val mk_udiv : context -> Expr.expr -> Expr.expr -> Expr.expr
 
@@ -1623,14 +1637,18 @@ sig
 
       - The \c ceiling of [t1/t2] if \c t2 is different from zero, and [t1*t2 < 0].
 
-      If [t2] is zero, then the result is undefined.
+      If [t2] is zero, then the result is is not uniquely specified. 
+      It can be set to any value that satisfies the constraints 
+      where signed division is used.
       The arguments must have the same bit-vector sort. *)
   val mk_sdiv : context -> Expr.expr -> Expr.expr -> Expr.expr
 
   (** Unsigned remainder.
 
       It is defined as [t1 - (t1 /u t2) * t2], where [/u] represents unsigned division.
-      If [t2] is zero, then the result is undefined.
+      If [t2] is zero, then the result is not uniquely specified. 
+      It can be set to any value that satisfies the constraints 
+      where unsigned remainder is used.
       The arguments must have the same bit-vector sort. *)
   val mk_urem : context -> Expr.expr -> Expr.expr -> Expr.expr
 
@@ -1639,13 +1657,17 @@ sig
       It is defined as [t1 - (t1 /s t2) * t2], where [/s] represents signed division.
       The most significant bit (sign) of the result is equal to the most significant bit of \c t1.
 
-      If [t2] is zero, then the result is undefined.
+      If [t2] is zero, then the result is not uniquely specified. 
+      It can be set to any value that satisfies the constraints 
+      where signed remainder is used.
       The arguments must have the same bit-vector sort. *)
   val mk_srem : context -> Expr.expr -> Expr.expr -> Expr.expr
 
   (** Two's complement signed remainder (sign follows divisor).
 
-      If [t2] is zero, then the result is undefined.
+      If [t2] is zero, then the result is not uniquely specified. 
+      It can be set to any value that satisfies the constraints 
+      where two's complement signed remainder is used.
       The arguments must have the same bit-vector sort. *)
   val mk_smod : context -> Expr.expr -> Expr.expr -> Expr.expr
 
@@ -2841,6 +2863,9 @@ sig
   val get_decls : model -> FuncDecl.func_decl list
 
   (** Evaluates an expression in the current model.
+      The Boolean argument indicates whether to apply model completion.
+      When model completion is true it will assign an interpretation for
+      constants and functions that do not have an interpretation in the model.
 
       This function may fail if the argument contains quantifiers,
       is partial (MODEL_PARTIAL enabled), or if it is not well-sorted.
@@ -3256,16 +3281,6 @@ sig
       The query is unsatisfiable if there are no derivations satisfying any of the relations. *)
   val query_r : fixedpoint -> FuncDecl.func_decl list -> Solver.status
 
-  (** Creates a backtracking point.
-      {!pop} *)
-  val push : fixedpoint -> unit
-
-  (** Backtrack one backtracking point.
-
-      Note that an exception is thrown if Pop is called without a corresponding [Push]</remarks>
-      {!push} *)
-  val pop : fixedpoint -> unit
-
   (** Update named rule into in the fixedpoint solver. *)
   val update_rule : fixedpoint -> Expr.expr -> Symbol.symbol -> unit
 
@@ -3413,10 +3428,10 @@ sig
   (** Parse the given string using the SMT-LIB2 parser.
 
       @return A conjunction of assertions in the scope (up to push/pop) at the end of the string. *)
-  val parse_smtlib2_string : context -> string -> Symbol.symbol list -> Sort.sort list -> Symbol.symbol list -> FuncDecl.func_decl list -> Expr.expr
+  val parse_smtlib2_string : context -> string -> Symbol.symbol list -> Sort.sort list -> Symbol.symbol list -> FuncDecl.func_decl list -> AST.ASTVector.ast_vector
 
   (** Parse the given file using the SMT-LIB2 parser. *)
-  val parse_smtlib2_file : context -> string -> Symbol.symbol list -> Sort.sort list -> Symbol.symbol list -> FuncDecl.func_decl list -> Expr.expr
+  val parse_smtlib2_file : context -> string -> Symbol.symbol list -> Sort.sort list -> Symbol.symbol list -> FuncDecl.func_decl list -> AST.ASTVector.ast_vector
 end
 
 
@@ -3472,3 +3487,11 @@ val enable_trace : string -> unit
    Remarks: It is a NOOP otherwise.
 *)
 val disable_trace : string -> unit
+
+
+(** Memory management **)
+module Memory :
+sig
+  (** Reset all allocated resources **)
+  val reset : unit -> unit
+end

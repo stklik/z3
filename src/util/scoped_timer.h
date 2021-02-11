@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_TIMER_H_
-#define SCOPED_TIMER_H_
+#pragma once
 
 #include "util/event_handler.h"
 
@@ -27,6 +26,10 @@ class scoped_timer {
 public:
     scoped_timer(unsigned ms, event_handler * eh);
     ~scoped_timer();
+    static void initialize();
+    static void finalize();
 };
 
-#endif
+/*
+    ADD_INITIALIZER('scoped_timer::initialize();')
+*/

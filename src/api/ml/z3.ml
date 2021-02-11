@@ -43,6 +43,14 @@ let mk_list f n =
   in
   mk_list' 0 []
 
+let check_int32 v = v = Int32.to_int (Int32.of_int v)
+
+let mk_int_expr ctx v ty = 
+   if not (check_int32 v) then
+      Z3native.mk_numeral ctx (string_of_int v) ty
+   else
+      Z3native.mk_int ctx v ty
+    
 let mk_context (settings:(string * string) list) =
   let cfg = Z3native.mk_config () in
   let f e = Z3native.set_param_value cfg (fst e) (snd e) in
@@ -255,6 +263,9 @@ sig
   end
   val mk_func_decl : context -> Symbol.symbol -> Sort.sort list -> Sort.sort -> func_decl
   val mk_func_decl_s : context -> string -> Sort.sort list -> Sort.sort -> func_decl
+  val mk_rec_func_decl : context -> Symbol.symbol -> Sort.sort list -> Sort.sort -> func_decl
+  val mk_rec_func_decl_s : context -> string -> Sort.sort list -> Sort.sort -> func_decl
+  val add_rec_def : context -> func_decl -> Expr.expr list -> Expr.expr -> unit
   val mk_fresh_func_decl : context -> string -> Sort.sort list -> Sort.sort -> func_decl
   val mk_const_decl : context -> Symbol.symbol -> Sort.sort -> func_decl
   val mk_const_decl_s : context -> string -> Sort.sort -> func_decl
@@ -329,6 +340,15 @@ end = struct
 
   let mk_func_decl_s (ctx:context) (name:string) (domain:Sort.sort list) (range:Sort.sort) =
     mk_func_decl ctx (Symbol.mk_string ctx name) domain range
+
+  let mk_rec_func_decl (ctx:context) (name:Symbol.symbol) (domain:Sort.sort list) (range:Sort.sort) =
+    Z3native.mk_rec_func_decl ctx name (List.length domain) domain range
+
+  let mk_rec_func_decl_s (ctx:context) (name:string) (domain:Sort.sort list) (range:Sort.sort) =
+    mk_rec_func_decl ctx (Symbol.mk_string ctx name) domain range
+
+  let add_rec_def (ctx:context) (f:func_decl) (args:Expr.expr list) (body:Expr.expr) =
+    Z3native.add_rec_def ctx f (List.length args) args body
 
   let mk_fresh_func_decl (ctx:context) (prefix:string) (domain:Sort.sort list) (range:Sort.sort) =
     Z3native.mk_fresh_func_decl ctx prefix (List.length domain) domain range
@@ -531,7 +551,7 @@ end = struct
   let mk_fresh_const (ctx:context) (prefix:string) (range:Sort.sort) = Z3native.mk_fresh_const ctx prefix range
   let mk_app (ctx:context) (f:FuncDecl.func_decl) (args:expr list) = expr_of_func_app ctx f args
   let mk_numeral_string (ctx:context) (v:string) (ty:Sort.sort) = Z3native.mk_numeral ctx v ty
-  let mk_numeral_int (ctx:context) (v:int) (ty:Sort.sort) = Z3native.mk_int ctx v ty
+  let mk_numeral_int (ctx:context) (v:int) (ty:Sort.sort) = mk_int_expr ctx v ty
   let equal (a:expr) (b:expr) = AST.equal a b
   let compare (a:expr) (b:expr) = AST.compare a b
 end
@@ -697,6 +717,11 @@ struct
   let mk_forall_const = _internal_mk_quantifier_const ~universal:true
   let mk_exists = _internal_mk_quantifier ~universal:false
   let mk_exists_const = _internal_mk_quantifier_const ~universal:false
+  let mk_lambda_const ctx bound body = Z3native.mk_lambda_const ctx (List.length bound) bound body
+  let mk_lambda ctx bound body = 
+      let names = List.map (fun (x,_) -> x) bound in
+      let sorts = List.map (fun (_,y) -> y) bound in
+      Z3native.mk_lambda ctx (List.length bound) sorts names body
 
   let mk_quantifier (ctx:context) (universal:bool) (sorts:Sort.sort list) (names:Symbol.symbol list) (body:expr) (weight:int option) (patterns:Pattern.pattern list) (nopatterns:expr list) (quantifier_id:Symbol.symbol option) (skolem_id:Symbol.symbol option) =
     if universal then
@@ -704,7 +729,7 @@ struct
     else
       mk_exists ctx sorts names body weight patterns nopatterns quantifier_id skolem_id
 
-  let mk_quantifier (ctx:context) (universal:bool) (bound_constants:expr list) (body:expr) (weight:int option) (patterns:Pattern.pattern list) (nopatterns:expr list) (quantifier_id:Symbol.symbol option) (skolem_id:Symbol.symbol option) =
+  let mk_quantifier_const (ctx:context) (universal:bool) (bound_constants:expr list) (body:expr) (weight:int option) (patterns:Pattern.pattern list) (nopatterns:expr list) (quantifier_id:Symbol.symbol option) (skolem_id:Symbol.symbol option) =
     if universal then
       mk_forall_const ctx bound_constants body weight patterns nopatterns quantifier_id skolem_id
     else
@@ -1026,7 +1051,7 @@ struct
     let get_big_int (x:expr) =
       if is_int_numeral x then
         let s = (Z3native.get_numeral_string (Expr.gc x) x) in
-        Big_int.big_int_of_string s
+        Z.of_string s
       else
         raise (Error "Conversion failed.")
 
@@ -1036,7 +1061,7 @@ struct
     let mk_mod = Z3native.mk_mod
     let mk_rem = Z3native.mk_rem
     let mk_numeral_s (ctx:context) (v:string) = Z3native.mk_numeral ctx v (mk_sort ctx)
-    let mk_numeral_i (ctx:context) (v:int) = Z3native.mk_int ctx v (mk_sort ctx)
+    let mk_numeral_i (ctx:context) (v:int) = mk_int_expr ctx v (mk_sort ctx)
     let mk_int2real = Z3native.mk_int2real
     let mk_int2bv = Z3native.mk_int2bv
   end
@@ -1050,7 +1075,7 @@ struct
     let get_ratio x =
       if is_rat_numeral x then
         let s = Z3native.get_numeral_string (Expr.gc x) x in
-        Ratio.ratio_of_string s
+        Q.of_string s
       else
         raise (Error "Conversion failed.")
 
@@ -1061,11 +1086,13 @@ struct
     let mk_numeral_nd (ctx:context) (num:int) (den:int) =
       if den = 0 then
         raise (Error "Denominator is zero")
+      else if not (check_int32 num) || not (check_int32 den) then
+        raise (Error "numerals don't fit in 32 bits")
       else
         Z3native.mk_real ctx num den
 
     let mk_numeral_s (ctx:context) (v:string) = Z3native.mk_numeral ctx v (mk_sort ctx)
-    let mk_numeral_i (ctx:context) (v:int) = Z3native.mk_int ctx v (mk_sort ctx)
+    let mk_numeral_i (ctx:context) (v:int) = mk_int_expr ctx v (mk_sort ctx)
     let mk_is_integer = Z3native.mk_is_int
     let mk_real2int = Z3native.mk_real2int
 
@@ -1154,11 +1181,6 @@ struct
   let is_bv_carry (x:expr) = (AST.is_app x) && (FuncDecl.get_decl_kind (Expr.get_func_decl x) = OP_CARRY)
   let is_bv_xor3 (x:expr) = (AST.is_app x) && (FuncDecl.get_decl_kind (Expr.get_func_decl x) = OP_XOR3)
   let get_size (x:Sort.sort) = Z3native.get_bv_sort_size (Sort.gc x) x
-
-  let get_int (x:expr) =
-    match Z3native.get_numeral_int (Expr.gc x) x with
-    | true, v -> v
-    | false, _ -> raise (Error "Conversion failed.")
 
   let numeral_to_string (x:expr) = Z3native.get_numeral_string (Expr.gc x) x
   let mk_const (ctx:context) (name:Symbol.symbol) (size:int) =
@@ -1536,9 +1558,8 @@ struct
   end
 
   let get_const_interp (x:model) (f:func_decl) =
-    if FuncDecl.get_arity f <> 0 ||
-       (sort_kind_of_int (Z3native.get_sort_kind (FuncDecl.gc f) (Z3native.get_range (FuncDecl.gc f) f))) = ARRAY_SORT then
-      raise (Error "Non-zero arity functions and arrays have FunctionInterpretations as a model. Use FuncInterp.")
+    if FuncDecl.get_arity f <> 0 then
+      raise (Error "Non-zero arity functions have FunctionInterpretations as a model. Use FuncInterp.")
     else
       let np = Z3native.model_get_const_interp (gc x) x f  in
       if Z3native.is_null_ast np then
@@ -1810,8 +1831,10 @@ struct
     | _ -> UNKNOWN
 
   let get_model x =
-    let q = Z3native.solver_get_model (gc x) x in
-    if Z3native.is_null_model q then None else Some q
+    try 
+       let q = Z3native.solver_get_model (gc x) x in
+       if Z3native.is_null_model q then None else Some q 
+    with | _ -> None
 
   let get_proof x =
     let q = Z3native.solver_get_proof (gc x) x in
@@ -1871,8 +1894,6 @@ struct
     | L_FALSE -> Solver.UNSATISFIABLE
     | _ -> Solver.UNKNOWN
 
-  let push x = Z3native.fixedpoint_push (gc x) x
-  let pop x = Z3native.fixedpoint_pop (gc x) x
   let update_rule x = Z3native.fixedpoint_update_rule (gc x) x
 
   let get_answer x =
@@ -1940,15 +1961,17 @@ struct
   let minimize (x:optimize) (e:Expr.expr) = mk_handle x (Z3native.optimize_minimize (gc x) x e)
 
   let check (x:optimize) =
-    let r = lbool_of_int (Z3native.optimize_check (gc x) x) in
+    let r = lbool_of_int (Z3native.optimize_check (gc x) x 0 []) in
     match r with
     | L_TRUE -> Solver.SATISFIABLE
     | L_FALSE -> Solver.UNSATISFIABLE
     | _ -> Solver.UNKNOWN
 
   let get_model (x:optimize) =
-    let q = Z3native.optimize_get_model (gc x) x in
-    if Z3native.is_null_model q then None else Some q
+    try
+      let q = Z3native.optimize_get_model (gc x) x in
+      if Z3native.is_null_model q then None else Some q
+    with | _ -> None
 
   let get_lower (x:handle) = Z3native.optimize_get_lower (gc x.opt) x.opt x.h
   let get_upper (x:handle) = Z3native.optimize_get_upper (gc x.opt) x.opt x.h
@@ -2009,3 +2032,7 @@ let toggle_warning_messages = Z3native.toggle_warning_messages
 let enable_trace = Z3native.enable_trace
 
 let disable_trace = Z3native.enable_trace
+
+module Memory = struct
+  let reset = Z3native.reset_memory
+end

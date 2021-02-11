@@ -47,20 +47,23 @@ namespace sat {
         stopwatch m_watch;
         unsigned  m_num_elim;
         unsigned  m_num_elim_bin;
+        unsigned  m_trail_size;
         report(scc & c):
             m_scc(c),
             m_num_elim(c.m_num_elim),
-            m_num_elim_bin(c.m_num_elim_bin) {
+            m_num_elim_bin(c.m_num_elim_bin),
+            m_trail_size(c.m_solver.init_trail_size()) {
             m_watch.start();
         }
         ~report() {
             m_watch.stop();
             unsigned elim_bin = m_scc.m_num_elim_bin - m_num_elim_bin;
-            IF_VERBOSE(SAT_VB_LVL, 
+            unsigned num_units = m_scc.m_solver.init_trail_size() - m_trail_size;
+            IF_VERBOSE(2, 
                        verbose_stream() << " (sat-scc :elim-vars " << (m_scc.m_num_elim - m_num_elim);
                        if (elim_bin > 0) verbose_stream() << " :elim-bin " << elim_bin;
-                       verbose_stream() << mk_stat(m_scc.m_solver)
-                       << " :time " << std::fixed << std::setprecision(2) << m_watch.get_seconds() << ")\n";);
+                       if (num_units > 0) verbose_stream() << " :units " << num_units;
+                       verbose_stream() << m_watch << ")\n";);
         }
     };
 
@@ -178,7 +181,7 @@ namespace sat {
                             l2_idx = s[j];
                             j--;
                             if (to_literal(l2_idx) == ~l) {
-                                m_solver.set_conflict(justification());
+                                m_solver.set_conflict();
                                 return 0;
                             }
                             if (m_solver.is_external(to_literal(l2_idx).var())) {
@@ -200,6 +203,7 @@ namespace sat {
                             in_s[l2_idx] = false;
                             literal  l2 = to_literal(l2_idx);
                             bool_var v2 = l2.var();
+
                             if (roots[v2] == null_literal) {
                                 if (l2.sign()) {
                                     roots[v2] = ~r;
@@ -216,6 +220,7 @@ namespace sat {
                 frames.pop_back();
             }
         }
+
         for (unsigned i = 0; i < m_solver.num_vars(); ++i) {
             if (roots[i] == null_literal) {
                 roots[i] = literal(i, false);
@@ -244,15 +249,15 @@ namespace sat {
     }
 
     void scc::reduce_tr() {
-        unsigned quota = 0, num_reduced = 0;
-        while ((num_reduced = reduce_tr(false)) > quota) { quota = std::max(100u, num_reduced / 2); }
-        quota = 0;
-        while ((num_reduced = reduce_tr(true))  > quota) { quota = std::max(100u, num_reduced / 2); }
+        unsigned quota = 0, num_reduced = 0, count = 0;
+        while ((num_reduced = reduce_tr(false)) > quota && count++ < 10) { quota = std::max(100u, num_reduced / 2); }
+        quota = 0; count = 0;
+        while ((num_reduced = reduce_tr(true))  > quota && count++ < 10) { quota = std::max(100u, num_reduced / 2); }
     }
 
     void scc::collect_statistics(statistics & st) const {
-        st.update("elim bool vars scc", m_num_elim);
-        st.update("elim binary", m_num_elim_bin);
+        st.update("sat scc elim vars", m_num_elim);
+        st.update("sat scc elim binary", m_num_elim_bin);
     }
     
     void scc::reset_statistics() {

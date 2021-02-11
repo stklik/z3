@@ -23,6 +23,7 @@ Notes:
 #include "ast/ast_pp.h"
 #include "solver/solver.h"
 #include "solver/combined_solver_params.hpp"
+#include <atomic>
 #define PS_VB_LVL 15
 
 /**
@@ -39,7 +40,7 @@ Notes:
 
    The object switches to incremental when:
        - push is used
-       - assertions are peformed after a check_sat
+       - assertions are performed after a check_sat
        - parameter ignore_solver1==false
 */
 class combined_solver : public solver {
@@ -61,30 +62,17 @@ private:
     // This is relevant for big benchmarks that are meant to be solved
     // by a non-incremental solver.                                                 );
 
-    bool                 m_solver2_initialized;
-
     bool                 m_ignore_solver1;
     inc_unknown_behavior m_inc_unknown_behavior;
     unsigned             m_inc_timeout;
     
-    void init_solver2_assertions() {
-        if (m_solver2_initialized)
-            return;
-        unsigned sz = m_solver1->get_num_assertions();
-        for (unsigned i = 0; i < sz; i++) {
-            m_solver2->assert_expr(m_solver1->get_assertion(i));
-        }
-        m_solver2_initialized = true;
-    }
-
     void switch_inc_mode() {
         m_inc_mode = true;
-        init_solver2_assertions();
     }
 
     struct aux_timeout_eh : public event_handler {
         solver *        m_solver;
-        volatile bool   m_canceled;
+        std::atomic<bool> m_canceled;
         aux_timeout_eh(solver * s):m_solver(s), m_canceled(false) {}
         ~aux_timeout_eh() override {
             if (m_canceled) {                
@@ -131,7 +119,6 @@ public:
         m_solver1 = s1;
         m_solver2 = s2;
         updt_local_params(p);
-        m_solver2_initialized = false;
         m_inc_mode            = false;
         m_check_sat_executed  = false;
         m_use_solver1_results = true;
@@ -142,12 +129,16 @@ public:
         solver* s1 = m_solver1->translate(m, p);
         solver* s2 = m_solver2->translate(m, p);
         combined_solver* r = alloc(combined_solver, s1, s2, p);
-        r->m_solver2_initialized = m_solver2_initialized;
         r->m_inc_mode = m_inc_mode;
         r->m_check_sat_executed = m_check_sat_executed;
         r->m_use_solver1_results = m_use_solver1_results;
         return r;
     }
+
+    void set_phase(expr* e) override { m_solver1->set_phase(e); m_solver2->set_phase(e); }
+    solver::phase* get_phase() override { auto* p = m_solver1->get_phase(); if (!p) p = m_solver2->get_phase(); return p; }
+    void set_phase(solver::phase* p) override { m_solver1->set_phase(p); m_solver2->set_phase(p); }
+    void move_to_front(expr* e) override { m_solver1->move_to_front(e); m_solver2->move_to_front(e); }
 
     void updt_params(params_ref const & p) override {
         solver::updt_params(p);
@@ -171,25 +162,25 @@ public:
         if (m_check_sat_executed)
             switch_inc_mode();
         m_solver1->assert_expr(t);
-        if (m_solver2_initialized)
-            m_solver2->assert_expr(t);
+        m_solver2->assert_expr(t);
     }
 
     void assert_expr_core2(expr * t, expr * a) override {
         if (m_check_sat_executed)
             switch_inc_mode();
         m_solver1->assert_expr(t, a);
-        init_solver2_assertions();
         m_solver2->assert_expr(t, a);
     }
 
     void push() override {
         switch_inc_mode();
         m_solver1->push();
-        m_solver2->push();
+        m_solver2->push();        
+        TRACE("pop", tout << "push\n";);
     }
     
     void pop(unsigned n) override {
+        TRACE("pop", tout << n << "\n";);
         switch_inc_mode();
         m_solver1->pop(n);
         m_solver2->pop(n);
@@ -206,7 +197,7 @@ public:
             return m_solver2->get_consequences(asms, vars, consequences);
         }
         catch (z3_exception& ex) {
-            if (get_manager().canceled()) {
+            if (!get_manager().inc()) {
                 throw;
             }
             else {
@@ -216,7 +207,7 @@ public:
         return l_undef;
     }
 
-    lbool check_sat(unsigned num_assumptions, expr * const * assumptions) override {
+    lbool check_sat_core(unsigned num_assumptions, expr * const * assumptions) override {
         m_check_sat_executed  = true;        
         m_use_solver1_results = false;
 
@@ -225,14 +216,14 @@ public:
             m_ignore_solver1)  {
             // must use incremental solver
             switch_inc_mode();
-            return m_solver2->check_sat(num_assumptions, assumptions);
+            return m_solver2->check_sat_core(num_assumptions, assumptions);
         }
         
         if (m_inc_mode) {
             if (m_inc_timeout == UINT_MAX) {
                 IF_VERBOSE(PS_VB_LVL, verbose_stream() << "(combined-solver \"using solver 2 (without a timeout)\")\n";);            
-                lbool r = m_solver2->check_sat(num_assumptions, assumptions);
-                if (r != l_undef || !use_solver1_when_undef() || get_manager().canceled()) {
+                lbool r = m_solver2->check_sat_core(num_assumptions, assumptions);
+                if (r != l_undef || !use_solver1_when_undef() || !get_manager().inc()) {
                     return r;
                 }
             }
@@ -242,7 +233,7 @@ public:
                 lbool r = l_undef;
                 try {
                     scoped_timer timer(m_inc_timeout, &eh);
-                    r = m_solver2->check_sat(num_assumptions, assumptions);
+                    r = m_solver2->check_sat_core(num_assumptions, assumptions);
                 }
                 catch (z3_exception&) {
                     if (!eh.m_canceled) {
@@ -258,7 +249,7 @@ public:
         
         IF_VERBOSE(PS_VB_LVL, verbose_stream() << "(combined-solver \"using solver 1\")\n";);
         m_use_solver1_results = true;
-        return m_solver1->check_sat(num_assumptions, assumptions);
+        return m_solver1->check_sat_core(num_assumptions, assumptions);
     }
     
     void set_progress_callback(progress_callback * callback) override {
@@ -279,7 +270,8 @@ public:
     }
 
     expr_ref_vector cube(expr_ref_vector& vars, unsigned backtrack_level) override {
-        return m_solver1->cube(vars, backtrack_level);
+        switch_inc_mode();
+        return m_solver2->cube(vars, backtrack_level);
     }
 
     expr * get_assumption(unsigned idx) const override {
@@ -310,6 +302,20 @@ public:
             m_solver1->get_model(m);
         else
             m_solver2->get_model(m);
+    }
+
+    void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth) override {
+        if (m_use_solver1_results)
+            m_solver1->get_levels(vars, depth);
+        else
+            m_solver2->get_levels(vars, depth);
+    }
+
+    expr_ref_vector get_trail() override {
+        if (m_use_solver1_results)
+            return m_solver1->get_trail();
+        else
+            return m_solver2->get_trail();
     }
 
     proof * get_proof() override {

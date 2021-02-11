@@ -30,7 +30,7 @@ Revision History:
 #include "model/model.h"
 #include "solver/solver.h"
 
-namespace smt {
+namespace {
 
     class get_implied_equalities_impl {
         
@@ -57,8 +57,8 @@ namespace smt {
         
         void partition_terms(unsigned num_terms, expr* const* terms, sort2term_ids& termids) {
             for (unsigned i = 0; i < num_terms; ++i) {
-                sort* s = m.get_sort(terms[i]);
-                term_ids& vec = termids.insert_if_not_there2(s, term_ids())->get_data().m_value;
+                sort* s = terms[i]->get_sort();
+                term_ids& vec = termids.insert_if_not_there(s, term_ids());
                 vec.push_back(term_id(expr_ref(terms[i],m), i));
             }
         }
@@ -92,7 +92,7 @@ namespace smt {
                     if (j < i && non_values.contains(j)) continue;
                     if (found_root_value && !non_values.contains(j)) continue;
                     expr* s = terms[j].term;
-                    SASSERT(m.get_sort(t) == m.get_sort(s));
+                    SASSERT(t->get_sort() == s->get_sort());
                     ++m_stats_calls;
                     m_solver.push();
                     m_solver.assert_expr(m.mk_not(m.mk_eq(s, t)));
@@ -118,7 +118,7 @@ namespace smt {
                 expr* t = terms[i].term;
                 for (unsigned j = 0; j < i; ++j) {
                     expr* s = terms[j].term;
-                    SASSERT(m.get_sort(t) == m.get_sort(s));
+                    SASSERT(t->get_sort() == s->get_sort());
                     ++m_stats_calls;
                     m_stats_timer.start();
                     m_solver.push();
@@ -148,7 +148,7 @@ namespace smt {
             
             SASSERT(!terms.empty());
 
-            sort* srt = m.get_sort(terms[0].term);
+            sort* srt = terms[0].term->get_sort();
                        
             if (m_array_util.is_array(srt)) {
 
@@ -177,7 +177,7 @@ namespace smt {
 
             uint_set non_values;
             
-            if (!is_value_sort(m, srt)) {
+            if (!smt::is_value_sort(m, srt)) {
                 for (unsigned i = 0; i < terms.size(); ++i) {
                     non_values.insert(i);
                 }
@@ -208,7 +208,7 @@ namespace smt {
                     continue;
                 }
                 vals.push_back(vl);
-                unsigned_vector& vec = vals_map.insert_if_not_there2(vl, unsigned_vector())->get_data().m_value;
+                unsigned_vector& vec = vals_map.insert_if_not_there(vl, unsigned_vector());
                 bool found = false;
 
                 for (unsigned j = 0; !found && j < vec.size(); ++j) {
@@ -249,7 +249,7 @@ namespace smt {
 
         void assert_relevant(unsigned num_terms, expr* const* terms) {
             for (unsigned i = 0; i < num_terms; ++i) {                
-                sort* srt = m.get_sort(terms[i]);
+                sort* srt = terms[i]->get_sort();
                 if (!m_array_util.is_array(srt)) {
                     m_solver.assert_expr(m.mk_app(m.mk_func_decl(symbol("Relevant!"), 1, &srt, m.mk_bool_sort()), terms[i]));
                 }
@@ -259,7 +259,7 @@ namespace smt {
         void assert_relevant(term_ids& terms) {
             for (unsigned i = 0; i < terms.size(); ++i) {
                 expr* t = terms[i].term;
-                sort* srt = m.get_sort(t);
+                sort* srt = t->get_sort();
                 if (!m_array_util.is_array(srt)) {
                     m_solver.assert_expr(m.mk_app(m.mk_func_decl(symbol("Relevant!"), 1, &srt, m.mk_bool_sort()), t));
                 }
@@ -370,12 +370,14 @@ namespace smt {
 
     stopwatch get_implied_equalities_impl::s_timer;
     stopwatch get_implied_equalities_impl::s_stats_val_eq_timer;
+}
 
+namespace smt {
     lbool implied_equalities(ast_manager& m, solver& solver, unsigned num_terms, expr* const* terms, unsigned* class_ids) {        
         get_implied_equalities_impl gi(m, solver);
         return gi(num_terms, terms, class_ids);
     }
-};
+}
 
 
 

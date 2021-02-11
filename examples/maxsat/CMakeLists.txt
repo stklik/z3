@@ -6,13 +6,13 @@
 # C++ we will use the C linker rather than the C++ linker and will not link
 # the C++ standard library in resulting in a link failure.
 project(Z3_C_MAXSAT_EXAMPLE C CXX)
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.4)
 find_package(Z3
   REQUIRED
   CONFIG
   # `NO_DEFAULT_PATH` is set so that -DZ3_DIR has to be passed to find Z3.
-  # This should prevent us from accidently picking up an installed
-  # copy of Z3. This is here to benefit Z3's build sytem when building
+  # This should prevent us from accidentally picking up an installed
+  # copy of Z3. This is here to benefit Z3's build system when building
   # this project. When making your own project you probably shouldn't
   # use this option.
   NO_DEFAULT_PATH

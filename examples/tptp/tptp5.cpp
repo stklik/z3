@@ -233,7 +233,7 @@ class env {
 
     void check_arity(unsigned num_args, unsigned arity) {
         if (num_args != arity) {
-            throw failure_ex("arity missmatch");
+            throw failure_ex("arity mismatch");
         }
     }
 
@@ -1337,10 +1337,11 @@ public:
             }
         }
         else if (e.is_quantifier()) {
-            Z3_bool is_forall = Z3_is_quantifier_forall(ctx, e);
+            bool is_forall = Z3_is_quantifier_forall(ctx, e);
+            bool is_lambda = Z3_is_lambda(ctx, e);
             unsigned nb = Z3_get_quantifier_num_bound(ctx, e);
 
-            out << (is_forall?"!":"?") << "[";
+            out << (is_lambda?"^":(is_forall?"!":"?")) << "[";
             for (unsigned i = 0; i < nb; ++i) {
                 Z3_symbol n = Z3_get_quantifier_bound_name(ctx, e, i);
                 names.push_back(upper_case_var(z3::symbol(ctx, n)));
@@ -1679,6 +1680,9 @@ public:
                 break;
             case Z3_OP_PR_HYPER_RESOLVE:
                 display_inference(out, "hyper_resolve", "thm", p); 
+                break;
+            case Z3_OP_PR_BIND:
+                display_inference(out, "bind", "th", p);
                 break;
             default:
                 out << "TBD: " << m_node_number << "\n" << p << "\n";
@@ -2192,13 +2196,6 @@ static bool is_smt2_file(char const* filename) {
     return (len > 4 && !strcmp(filename + len - 5,".smt2"));    
 }
 
-static void check_error(z3::context& ctx) {
-    Z3_error_code e = Z3_get_error_code(ctx);
-    if (e != Z3_OK) {
-        std::cout << Z3_get_error_msg(ctx, e) << "\n";
-        exit(1);
-    }
-}
 
 static void display_tptp(std::ostream& out) {
     // run SMT2 parser, pretty print TFA format.

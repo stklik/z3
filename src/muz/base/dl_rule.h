@@ -17,8 +17,7 @@ Revision History:
 
 --*/
 
-#ifndef DL_RULE_H_
-#define DL_RULE_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "muz/base/dl_costs.h"
@@ -63,7 +62,7 @@ namespace datalog {
                 m_func = n->get_decl();
             }
             else if (m_dt.is_accessor(n)) {
-                sort* s = m.get_sort(n->get_arg(0));
+                sort* s = n->get_arg(0)->get_sort();
                 SASSERT(m_dt.is_datatype(s));
                 if (m_dt.get_datatype_constructors(s)->size() > 1) {
                     m_found = true;
@@ -79,24 +78,39 @@ namespace datalog {
     struct quantifier_finder_proc {
         bool m_exist;
         bool m_univ;
-        quantifier_finder_proc() : m_exist(false), m_univ(false) {}
+        bool m_lambda;
+        quantifier_finder_proc() : m_exist(false), m_univ(false), m_lambda(false) {}
         void operator()(var * n) { }
         void operator()(quantifier * n) {
             switch (n->get_kind()) {
             case forall_k: m_univ = true; break;
             case exists_k: m_exist = true; break;
-            case lambda_k: UNREACHABLE();
+            case lambda_k: m_lambda = true; break;
             }
         }
         void operator()(app * n) { }
-        void reset() { m_exist = m_univ = false; }
+        void reset() { m_exist = m_univ = m_lambda = false; }
+    };
+
+    struct fd_finder_proc {
+        ast_manager& m;
+        bv_util      m_bv;
+        bool         m_is_fd;
+        fd_finder_proc(ast_manager& m): m(m), m_bv(m), m_is_fd(true) {}
+
+        bool is_fd() const { return m_is_fd; }
+        bool is_fd(sort* s) { return m.is_bool(s) || m_bv.is_bv_sort(s); }
+        void operator()(var* n) { m_is_fd &= is_fd(n->get_sort()); }
+        void operator()(quantifier* ) { m_is_fd = false; }
+        void operator()(app* n) { m_is_fd &= is_fd(n->get_decl()->get_range()); }
+        void reset() { m_is_fd = true; }
     };
 
 
     /**
        \brief Manager for the \c rule class
 
-       \remark \c rule_manager objects are interchangable as long as they
+       \remark \c rule_manager objects are interchangeable as long as they
          contain the same \c ast_manager object.
     */
     class rule_manager
@@ -110,13 +124,14 @@ namespace datalog {
         app_ref_vector       m_body;
         app_ref              m_head;
         expr_ref_vector      m_args;
-        svector<bool>        m_neg;
+        bool_vector        m_neg;
         hnf                  m_hnf;
         qe_lite              m_qe;
         label_rewriter       m_rwr;
         mutable uninterpreted_function_finder_proc m_ufproc;
         mutable quantifier_finder_proc m_qproc;
         mutable expr_sparse_mark       m_visited;
+        mutable fd_finder_proc         m_fd_proc;
 
 
         // only the context can create a rule_manager
@@ -135,15 +150,13 @@ namespace datalog {
 
         void remove_labels(expr_ref& fml, proof_ref& pr);
 
-        app_ref ensure_app(expr* e);
-
         void check_app(expr* e);
 
         bool contains_predicate(expr* fml) const;
 
         void bind_variables(expr* fml, bool is_forall, expr_ref& result);
 
-        void mk_negations(app_ref_vector& body, svector<bool>& is_negated);
+        void mk_negations(app_ref_vector& body, bool_vector& is_negated);
 
         void mk_rule_core(expr* fml, proof* p, rule_set& rules, symbol const& name);
 
@@ -258,26 +271,29 @@ namespace datalog {
 
         rule_counter& get_counter() { return m_counter; }
 
+        app_ref ensure_app(expr* e);
+
         void to_formula(rule const& r, expr_ref& result);
 
         std::ostream& display_smt2(rule const& r, std::ostream & out);
 
         bool has_uninterpreted_non_predicates(rule const& r, func_decl*& f) const;
-        void has_quantifiers(rule const& r, bool& existential, bool& universal) const;
+        void has_quantifiers(rule const& r, bool& existential, bool& universal, bool& lam) const;
         bool has_quantifiers(rule const& r) const;
+        bool is_finite_domain(rule const& r) const;
 
     };
 
     class rule : public accounted_object {
         friend class rule_manager;
 
-        app *    m_head;
-        proof*   m_proof;
+        app*     m_head{ nullptr };
+        proof*   m_proof{ nullptr };
         unsigned m_tail_size:20;
         // unsigned m_reserve:12;
-        unsigned m_ref_cnt;
-        unsigned m_positive_cnt;
-        unsigned m_uninterp_cnt;
+        unsigned m_ref_cnt{ 0 };
+        unsigned m_positive_cnt{ 0 };
+        unsigned m_uninterp_cnt{ 0 };
         symbol   m_name;
         /**
            The following field is an array of tagged pointers. 
@@ -373,5 +389,4 @@ namespace datalog {
 
 };
 
-#endif /* DL_RULE_H_ */
 

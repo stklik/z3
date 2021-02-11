@@ -76,10 +76,11 @@ public class Goal extends Z3Object {
      * 
      * @throws Z3Exception
      **/
-    public void add(BoolExpr ... constraints)
+    @SafeVarargs
+    public final void add(Expr<BoolSort>... constraints)
     {
         getContext().checkContextMatch(constraints);
-        for (BoolExpr c : constraints)
+        for (Expr<BoolSort> c : constraints)
         {
             Native.goalAssert(getContext().nCtx(), getNativeObject(),
                     c.getNativeObject());
@@ -130,8 +131,7 @@ public class Goal extends Z3Object {
         int n = size();
         BoolExpr[] res = new BoolExpr[n];
         for (int i = 0; i < n; i++)
-            res[i] = new BoolExpr(getContext(), Native.goalFormula(getContext()
-                    .nCtx(), getNativeObject(), i));
+            res[i] = (BoolExpr) Expr.create(getContext(), Native.goalFormula(getContext().nCtx(), getNativeObject(), i));
         return res;
     }
 

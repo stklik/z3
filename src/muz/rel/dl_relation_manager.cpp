@@ -105,14 +105,22 @@ namespace datalog {
 
     void relation_manager::store_relation(func_decl * pred, relation_base * rel) {
         SASSERT(rel);
-        relation_map::obj_map_entry * e = m_relations.insert_if_not_there2(pred, 0);
-        if (e->get_data().m_value) {
-            e->get_data().m_value->deallocate();
+        auto& value = m_relations.insert_if_not_there(pred, 0);
+        if (value) {
+            value->deallocate();
         }
         else {
             get_context().get_manager().inc_ref(pred); //dec_ref in reset
         }
-        e->get_data().m_value = rel;
+        value = rel;
+    }
+
+    decl_set relation_manager::collect_predicates() const {
+        decl_set res;
+        for (auto const& kv : m_relations) {
+            res.insert(kv.m_key);
+        }
+        return res;
     }
 
     void relation_manager::collect_non_empty_predicates(decl_set & res) const {
@@ -1367,7 +1375,7 @@ namespace datalog {
         th_rewriter & m_simp;
         app_ref m_condition;
         expr_free_vars m_free_vars;
-        expr_ref_vector m_args;
+        mutable expr_ref_vector m_args;
     public:
         default_table_filter_interpreted_fn(context & ctx, unsigned col_cnt,  app* condition) 
                 : m_ast_manager(ctx.get_manager()),
@@ -1380,13 +1388,13 @@ namespace datalog {
         }
 
         bool should_remove(const table_fact & f) const override {
-            expr_ref_vector& args = const_cast<expr_ref_vector&>(m_args);
+            expr_ref_vector& args = m_args;
 
             args.reset();
             //arguments need to be in reverse order for the substitution
             unsigned col_cnt = f.size();
-            for(int i=col_cnt-1;i>=0;i--) {
-                if(!m_free_vars.contains(i)) {
+            for(int i = col_cnt; i-- > 0;) {
+                if (!m_free_vars.contains(i)) {
                     args.push_back(nullptr);
                     continue; //this variable does not occur in the condition;
                 }
@@ -1395,7 +1403,7 @@ namespace datalog {
                 args.push_back(m_decl_util.mk_numeral(el, m_free_vars[i]));
             }
 
-            expr_ref ground = m_vs(m_condition.get(), args.size(), args.c_ptr());
+            expr_ref ground = m_vs(m_condition.get(), args);
             m_simp(ground);
 
             return m_ast_manager.is_false(ground);

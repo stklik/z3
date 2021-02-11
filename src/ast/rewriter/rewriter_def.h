@@ -19,13 +19,14 @@ Notes:
 #include "ast/rewriter/rewriter.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/ast_ll_pp.h"
+#include "ast/ast_pp.h"
 
 template<typename Config>
 template<bool ProofGen>
 void rewriter_tpl<Config>::process_var(var * v) {
     if (m_cfg.reduce_var(v, m_r, m_pr)) {
         result_stack().push_back(m_r);
-        SASSERT(v->get_sort() == m().get_sort(m_r));
+        SASSERT(v->get_sort() == m_r->get_sort());
         if (ProofGen) {
             result_pr_stack().push_back(m_pr);
             m_pr = nullptr;
@@ -35,64 +36,95 @@ void rewriter_tpl<Config>::process_var(var * v) {
         m_r = nullptr;
         return;
     }
-    if (!ProofGen) {
-        // bindings are only used when Proof Generation is not enabled.
-        unsigned idx = v->get_idx();
-        if (idx < m_bindings.size()) {
-            unsigned index = m_bindings.size() - idx - 1;
-            var * r = (var*)(m_bindings[index]);
-            if (r != nullptr) {
-                CTRACE("rewriter", v->get_sort() != m().get_sort(r),
-                       tout << expr_ref(v, m()) << ":" << sort_ref(v->get_sort(), m()) << " != " << expr_ref(r, m()) << ":" << sort_ref(m().get_sort(r), m());
-                       tout << "index " << index << " bindings " << m_bindings.size() << "\n";
-                       display_bindings(tout););
-                SASSERT(v->get_sort() == m().get_sort(r));
-                if (!is_ground(r) && m_shifts[index] != m_bindings.size()) {
-
-                    unsigned shift_amount = m_bindings.size() - m_shifts[index];
-                    expr_ref tmp(m());
-                    m_shifter(r, shift_amount, tmp);
-                    result_stack().push_back(tmp);
-                    TRACE("rewriter", tout << "shift: " << shift_amount << " idx: " << idx << " --> " << tmp << "\n";
-                          display_bindings(tout););
-                }
-                else {
-                    result_stack().push_back(r);
-                    TRACE("rewriter", tout << idx << " " << mk_ismt2_pp(r, m()) << "\n";);
-                }
-                set_new_child_flag(v);
-                return;
+    unsigned idx = v->get_idx();
+    if (ProofGen) {
+        result_pr_stack().push_back(nullptr); // implicit reflexivity
+    }
+    unsigned index = 0;
+    expr * r;
+    if (idx < m_bindings.size() && (index = m_bindings.size() - idx - 1, r = m_bindings[index])) {
+        CTRACE("rewriter", v->get_sort() != r->get_sort(),
+               tout << expr_ref(v, m()) << ":" << sort_ref(v->get_sort(), m()) << " != " << expr_ref(r, m()) << ":" << sort_ref(r->get_sort(), m());
+               tout << "index " << index << " bindings " << m_bindings.size() << "\n";
+               display_bindings(tout););
+        SASSERT(v->get_sort() == r->get_sort());
+        if (!is_ground(r) && m_shifts[index] != m_bindings.size()) {            
+            unsigned shift_amount = m_bindings.size() - m_shifts[index];
+            expr* c = get_cached(r, shift_amount);
+            if (c) {
+                result_stack().push_back(c);
+            }
+            else {
+                expr_ref tmp(m());
+                m_shifter(r, shift_amount, tmp);
+                result_stack().push_back(tmp);
+                TRACE("rewriter", display_bindings(tout << "shift: " << shift_amount << " idx: " << idx << " --> " << tmp << "\n"););
+                cache_shifted_result(r, shift_amount, tmp);                    
             }
         }
+        else {
+            result_stack().push_back(r);
+            TRACE("rewriter", tout << idx << " " << mk_ismt2_pp(r, m()) << "\n";);
+        }
+        set_new_child_flag(v);
     }
-    result_stack().push_back(v);
-    if (ProofGen)
-        result_pr_stack().push_back(nullptr); // implicit reflexivity
+    else {
+        result_stack().push_back(v);
+    }
 }
 
 template<typename Config>
 template<bool ProofGen>
-void rewriter_tpl<Config>::process_const(app * t) {
+bool rewriter_tpl<Config>::process_const(app * t0) {
+    app_ref t(t0, m());
+    bool retried = false;
+ retry:
     SASSERT(t->get_num_args() == 0);
     br_status st = m_cfg.reduce_app(t->get_decl(), 0, nullptr, m_r, m_pr);
-    SASSERT(st != BR_DONE || m().get_sort(m_r) == m().get_sort(t));
-    SASSERT(st == BR_FAILED || st == BR_DONE);
-    if (st == BR_DONE) {
+    TRACE("reduce_app",
+          tout << "t0:" << mk_bounded_pp(t0, m()) << "\n";
+          if (t != t0) tout << "t: " << mk_bounded_pp(t, m()) << "\n";
+          tout << "st: " << st;
+          if (m_r) tout << " --->\n" << mk_bounded_pp(m_r, m());
+          tout << "\n";
+          if (m_pr) tout << mk_bounded_pp(m_pr, m()) << "\n";
+          );
+    CTRACE("reduce_app", 
+           st != BR_FAILED && m_r->get_sort() != t->get_sort(),
+           tout << mk_pp(t->get_sort(), m()) << ": " << mk_pp(t, m()) << "\n";
+           tout << m_r->get_id() << " " << mk_pp(m_r->get_sort(), m()) << ": " << m_r << "\n";);
+    SASSERT(st != BR_DONE || m_r->get_sort() == t->get_sort());
+    switch (st) {
+    case BR_FAILED:
+        if (!retried) {
+            result_stack().push_back(t);
+            if (ProofGen)
+                result_pr_stack().push_back(nullptr); // implicit reflexivity
+            return true;
+        }
+        m_r = t;
+        // fall through
+    case BR_DONE:
         result_stack().push_back(m_r.get());
         if (ProofGen) {
+            SASSERT(rewrites_from(t0, m_pr));
+            SASSERT(rewrites_to(m_r, m_pr));
             if (m_pr)
                 result_pr_stack().push_back(m_pr);
             else
-                result_pr_stack().push_back(m().mk_rewrite(t, m_r));
+                result_pr_stack().push_back(m().mk_rewrite(t0, m_r));
             m_pr = nullptr;
         }
         m_r = nullptr;
-        set_new_child_flag(t);
-    }
-    else {
-        result_stack().push_back(t);
-        if (ProofGen)
-            result_pr_stack().push_back(nullptr); // implicit reflexivity
+        set_new_child_flag(t0);
+        return true;
+    default: 
+        if (is_app(m_r) && to_app(m_r)->get_num_args() == 0) {
+            t = to_app(m_r);
+            retried = true;
+            goto retry;
+        }
+        return false;
     }
 }
 
@@ -112,9 +144,11 @@ bool rewriter_tpl<Config>::visit(expr * t, unsigned max_depth) {
     proof * new_t_pr = nullptr;
     if (m_cfg.get_subst(t, new_t, new_t_pr)) {
         TRACE("rewriter_subst", tout << "subst\n" << mk_ismt2_pp(t, m()) << "\n---->\n" << mk_ismt2_pp(new_t, m()) << "\n";);
-        SASSERT(m().get_sort(t) == m().get_sort(new_t));
+        SASSERT(t->get_sort() == new_t->get_sort());
         result_stack().push_back(new_t);
         set_new_child_flag(t, new_t);
+        SASSERT(rewrites_from(t, new_t_pr));
+        SASSERT(rewrites_to(new_t, new_t_pr));
         if (ProofGen)
             result_pr_stack().push_back(new_t_pr);
         return true;
@@ -137,12 +171,14 @@ bool rewriter_tpl<Config>::visit(expr * t, unsigned max_depth) {
 #endif
         expr * r = get_cached(t);
         if (r) {
-            SASSERT(m().get_sort(r) == m().get_sort(t));
+            SASSERT(r->get_sort() == t->get_sort());
             result_stack().push_back(r);
             set_new_child_flag(t, r);
             if (ProofGen) {
                 proof * pr = get_cached_pr(t);
                 result_pr_stack().push_back(pr);
+                SASSERT(rewrites_from(t, pr));
+                SASSERT(rewrites_to(r, pr));
             }
             return true;
         }
@@ -156,15 +192,15 @@ bool rewriter_tpl<Config>::visit(expr * t, unsigned max_depth) {
     switch (t->get_kind()) {
     case AST_APP:
         if (to_app(t)->get_num_args() == 0) {
-            process_const<ProofGen>(to_app(t));
-            return true;
+            if (process_const<ProofGen>(to_app(t))) 
+                return true; 
+            TRACE("rewriter", tout << "process const: " << mk_bounded_pp(t, m()) << " -> " << mk_bounded_pp(m_r,m()) << "\n";);
+            t = m_r;
         }
-        else {
-            if (max_depth != RW_UNBOUNDED_DEPTH)
-                max_depth--;
-            push_frame(t, c, max_depth);
-            return false;
-        }
+        if (max_depth != RW_UNBOUNDED_DEPTH)
+            max_depth--;
+        push_frame(t, c, max_depth);
+        return false;        
     case AST_VAR:
         process_var<ProofGen>(to_var(t));
         return true;
@@ -212,10 +248,10 @@ bool rewriter_tpl<Config>::constant_fold(app * t, frame & fr) {
     return false;
 }
 
+
 template<typename Config>
 template<bool ProofGen>
 void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
-    SASSERT(t->get_num_args() > 0);
     SASSERT(!frame_stack().empty());
     switch (fr.m_state) {
     case PROCESS_CHILDREN: {
@@ -228,8 +264,6 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
             fr.m_i++;
             if (!visit<ProofGen>(arg, fr.m_max_depth))
                 return;
-
-
         }
         func_decl * f = t->get_decl();
 
@@ -251,7 +285,7 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
 
         unsigned new_num_args   = result_stack().size() - fr.m_spos;
         expr * const * new_args = result_stack().c_ptr() + fr.m_spos;
-        app * new_t;
+        app_ref new_t(m());
         if (ProofGen) {
             elim_reflex_prs(fr.m_spos);
             unsigned num_prs    = result_pr_stack().size() - fr.m_spos;
@@ -262,26 +296,37 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
             else {
                 new_t = m().mk_app(f, new_num_args, new_args);
                 m_pr  = m().mk_congruence(t, new_t, num_prs, result_pr_stack().c_ptr() + fr.m_spos);
+                SASSERT(rewrites_from(t, m_pr));
+                SASSERT(rewrites_to(new_t, m_pr));
             }
         }
-        br_status st = m_cfg.reduce_app(f, new_num_args, new_args, m_r, m_pr2);
-        SASSERT(st != BR_DONE || m().get_sort(m_r) == m().get_sort(t));
-        CTRACE("reduce_app", st != BR_FAILED,
-              tout << mk_bounded_pp(t, m()) << "\n";
-              tout << "st: " << st;
-              if (m_r) tout << " --->\n" << mk_bounded_pp(m_r, m());
-              tout << "\n";);
+        br_status st = m_cfg.reduce_app(f, new_num_args, new_args, m_r, m_pr2);       
+        
+        CTRACE("reduce_app", true || st != BR_FAILED || new_t,
+               tout << mk_bounded_pp(t, m()) << "\n";
+               tout << "st: " << st;
+               if (m_r) tout << " --->\n" << mk_bounded_pp(m_r, m());
+               tout << "\n";
+               if (m_pr2) tout << mk_bounded_pp(m_pr2, m()) << "\n";
+               if (new_t) tout << new_t << "\n";
+              );
+        SASSERT(st == BR_FAILED || rewrites_to(m_r, m_pr2));
+        SASSERT(st == BR_FAILED || rewrites_from(new_t, m_pr2));
+        SASSERT(st != BR_DONE || m_r->get_sort() == t->get_sort());
         if (st != BR_FAILED) {
             result_stack().shrink(fr.m_spos);
-            SASSERT(m().get_sort(m_r) == m().get_sort(t));
+            SASSERT(m_r->get_sort() == t->get_sort());
             result_stack().push_back(m_r);
             if (ProofGen) {
                 result_pr_stack().shrink(fr.m_spos);
-                if (!m_pr2)
+                if (!m_pr2) {
                     m_pr2 = m().mk_rewrite(new_t, m_r);
+                }
                 m_pr  = m().mk_transitivity(m_pr, m_pr2);
-                m_pr2 = nullptr;
                 result_pr_stack().push_back(m_pr);
+                SASSERT(rewrites_to(m_r, m_pr));
+                SASSERT(rewrites_from(t, m_pr));
+                m_pr2 = nullptr;
             }
             if (st == BR_DONE) {
                 cache_result<ProofGen>(t, m_r, m_pr, fr.m_cache_result);
@@ -310,10 +355,12 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
                         result_pr_stack().pop_back();
                         pr1 = result_pr_stack().back();
                         result_pr_stack().pop_back();
+                        SASSERT(rewrites_from(t, pr1));
+                        SASSERT(rewrites_to(result_stack().back(), pr2));
                         m_pr = m().mk_transitivity(pr1, pr2);
                         result_pr_stack().push_back(m_pr);
                     }
-                    m_r = result_stack().back();
+                    m_r = result_stack().back();                    
                     result_stack().pop_back();
                     result_stack().pop_back();
                     result_stack().push_back(m_r);
@@ -338,19 +385,16 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
         // TODO: add rewrite rules support
         expr * def = nullptr;
         proof * def_pr = nullptr;
-        quantifier * def_q = nullptr;
         // When get_macro succeeds, then
         // we know that:
         // forall X. f(X) = def[X]
         // and def_pr is a proof for this quantifier.
         //
-        // Remark: def_q is only used for proof generation.
-        // It is the quantifier forall X. f(X) = def[X]
-        if (get_macro(f, def, def_q, def_pr)) {
+        if (get_macro(f, def, def_pr)) {
             SASSERT(!f->is_associative() || !flat_assoc(f));
             SASSERT(new_num_args == t->get_num_args());
-            SASSERT(m().get_sort(def) == m().get_sort(t));
-            if (is_ground(def)) {
+            SASSERT(def->get_sort() == t->get_sort());
+            if (is_ground(def) && !m_cfg.reduce_macro()) {
                 m_r = def;
                 if (ProofGen) {
                     m_pr = m().mk_transitivity(m_pr, def_pr);
@@ -382,7 +426,6 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
                     TRACE("get_macro", display_bindings(tout););
                     begin_scope();
                     m_num_qvars += num_args;
-                    //m_num_qvars = 0;
                     m_root      = def;
                     push_frame(def, false, RW_UNBOUNDED_DEPTH);
                     return;
@@ -390,17 +433,15 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
             }
         }
         else {
-            if (ProofGen) {
-                m_r = new_t;
+            if (fr.m_new_child) {
+                m_r = m().mk_app(f, new_num_args, new_args);
+                if (ProofGen) {
+                    m_pr = m().mk_rewrite(t, m_r);
+                }
             }
             else {
-                if (fr.m_new_child) {
-                    m_r = m().mk_app(f, new_num_args, new_args);
-                }
-                else {
-                    TRACE("rewriter_reuse", tout << "reusing:\n" << mk_ismt2_pp(t, m()) << "\n";);
-                    m_r = t;
-                }
+                TRACE("rewriter_reuse", tout << "reusing:\n" << mk_ismt2_pp(t, m()) << "\n";);
+                m_r = t;
             }
         }
         result_stack().shrink(fr.m_spos);
@@ -471,20 +512,19 @@ void rewriter_tpl<Config>::process_app(app * t, frame & fr) {
     }
 }
 
+
 template<typename Config>
 template<bool ProofGen>
 void rewriter_tpl<Config>::process_quantifier(quantifier * q, frame & fr) {
     SASSERT(fr.m_state == PROCESS_CHILDREN);
     unsigned num_decls = q->get_num_decls();
     if (fr.m_i == 0) {
-        if (!ProofGen) {
-            begin_scope();
-            m_root       = q->get_expr();
-            unsigned sz = m_bindings.size();
-            for (unsigned i = 0; i < num_decls; i++) {
-                m_bindings.push_back(0);
-                m_shifts.push_back(sz);
-            }
+        begin_scope();
+        m_root       = q->get_expr();
+        unsigned sz = m_bindings.size();
+        for (unsigned i = 0; i < num_decls; i++) {
+            m_bindings.push_back(nullptr);
+            m_shifts.push_back(sz);
         }
         m_num_qvars += num_decls;
     }
@@ -507,23 +547,38 @@ void rewriter_tpl<Config>::process_quantifier(quantifier * q, frame & fr) {
         TRACE("reduce_quantifier_bug", tout << "rewrite patterns\n";);
         expr * const * np  = it + 1;
         expr * const * nnp = np + num_pats;
+        unsigned j = 0;
         for (unsigned i = 0; i < num_pats; i++)
             if (m_manager.is_pattern(np[i]))
-                new_pats[i] = np[i];
+                new_pats[j++] = np[i];
+        new_pats.shrink(j);
+        num_pats = j;
+        j = 0;
         for (unsigned i = 0; i < num_no_pats; i++)
             if (m_manager.is_pattern(nnp[i]))
-                new_no_pats[i] = nnp[i];
+                new_no_pats[j++] = nnp[i];
+        new_no_pats.shrink(j);
+        num_no_pats = j;
     }
     if (ProofGen) {
         quantifier_ref new_q(m().update_quantifier(q, num_pats, new_pats.c_ptr(), num_no_pats, new_no_pats.c_ptr(), new_body), m());
-        m_pr = q == new_q ? nullptr : m().mk_quant_intro(q, new_q, result_pr_stack().get(fr.m_spos));
+        m_pr = nullptr;
+        if (q != new_q) {
+            m_pr = result_pr_stack().get(fr.m_spos);
+            if (m_pr) {
+                m_pr = m().mk_bind_proof(q, m_pr);
+                m_pr = m().mk_quant_intro(q, new_q, m_pr);
+            }
+            else {
+                m_pr = m().mk_rewrite(q, new_q);
+            }
+        }
         m_r = new_q;
         proof_ref pr2(m());
         if (m_cfg.reduce_quantifier(new_q, new_body, new_pats.c_ptr(), new_no_pats.c_ptr(), m_r, pr2)) {
             m_pr = m().mk_transitivity(m_pr, pr2);
         }
-        TRACE("reduce_quantifier_bug", tout << "m_pr is_null: " << (m_pr.get() == 0) << "\n";
-              if (m_pr) tout << mk_ismt2_pp(m_pr, m()) << "\n";);
+        TRACE("reduce_quantifier_bug",if (m_pr) tout << mk_ismt2_pp(m_pr, m()) << "\n"; else tout << "m_pr is_null\n";);
         result_pr_stack().shrink(fr.m_spos);
         result_pr_stack().push_back(m_pr);
     }
@@ -542,19 +597,14 @@ void rewriter_tpl<Config>::process_quantifier(quantifier * q, frame & fr) {
     }
     result_stack().shrink(fr.m_spos);
     result_stack().push_back(m_r.get());
-    SASSERT(m().get_sort(q) == m().get_sort(m_r));
-    if (!ProofGen) {
-        SASSERT(num_decls <= m_bindings.size());
-        m_bindings.shrink(m_bindings.size() - num_decls);
-        m_shifts.shrink(m_shifts.size() - num_decls);
-        end_scope();
-        cache_result<ProofGen>(q, m_r, m_pr, fr.m_cache_result);
-    }
-    else {
-        cache_result<ProofGen>(q, m_r, m_pr, fr.m_cache_result);
-        m_pr = nullptr;
-    }
+    SASSERT(q->get_sort() == m_r->get_sort());
+    SASSERT(num_decls <= m_bindings.size());
+    m_bindings.shrink(m_bindings.size() - num_decls);
+    m_shifts.shrink(m_shifts.size() - num_decls);
+    end_scope();
+    cache_result<ProofGen>(q, m_r, m_pr, fr.m_cache_result);
     m_r = nullptr;
+    m_pr = nullptr;
     frame_stack().pop_back();
     set_new_child_flag(q, m_r);
 }
@@ -604,10 +654,9 @@ void rewriter_tpl<Config>::cleanup() {
 
 template<typename Config>
 void rewriter_tpl<Config>::display_bindings(std::ostream& out) {
-    out << "bindings:\n";
     for (unsigned i = 0; i < m_bindings.size(); i++) {
         if (m_bindings[i])
-            out << i << ": " << mk_ismt2_pp(m_bindings[i], m()) << "\n";
+            out << i << ": " << mk_ismt2_pp(m_bindings[i], m()) << ";\n";
     }
 }
 
@@ -624,6 +673,7 @@ void rewriter_tpl<Config>::set_bindings(unsigned num_bindings, expr * const * bi
         m_shifts.push_back(num_bindings);
     }
     TRACE("rewriter", display_bindings(tout););
+    SCTRACE("bindings", is_trace_enabled("coming_from_quant"), display_bindings(tout););
 }
 
 template<typename Config>
@@ -637,6 +687,7 @@ void rewriter_tpl<Config>::set_inv_bindings(unsigned num_bindings, expr * const 
         m_shifts.push_back(num_bindings);
     }
     TRACE("rewriter", display_bindings(tout););
+    SCTRACE("bindings", is_trace_enabled("coming_from_quant"), display_bindings(tout););
 }
 
 template<typename Config>
@@ -653,15 +704,20 @@ void rewriter_tpl<Config>::update_binding_at(unsigned i, expr* binding) {
 template<typename Config>
 template<bool ProofGen>
 void rewriter_tpl<Config>::main_loop(expr * t, expr_ref & result, proof_ref & result_pr) {
-    if (m_cancel_check && m().canceled()) {
-        reset();
-        throw rewriter_exception(m().limit().get_cancel_msg());
+    result_pr = nullptr;
+    if (!m().inc()) {
+        if (m_cancel_check) {
+            reset();
+            throw rewriter_exception(m().limit().get_cancel_msg());
+        }
+        result = t;
+        return;
     }
     SASSERT(!ProofGen || result_stack().size() == result_pr_stack().size());
     SASSERT(not_rewriting());
     m_root      = t;
     m_num_qvars = 0;
-    m_num_steps = 0;
+    m_num_steps = 0;    
     if (visit<ProofGen>(t, RW_UNBOUNDED_DEPTH)) {
         result = result_stack().back();
         result_stack().pop_back();
@@ -688,9 +744,11 @@ template<bool ProofGen>
 void rewriter_tpl<Config>::resume_core(expr_ref & result, proof_ref & result_pr) {
     SASSERT(!frame_stack().empty());
     while (!frame_stack().empty()) {
-        if (m_cancel_check && m().canceled()) {
-            reset();
-            throw rewriter_exception(m().limit().get_cancel_msg());
+        if (!m().inc()) {
+            if (m_cancel_check) {
+                reset();
+                throw rewriter_exception(m().limit().get_cancel_msg());
+            }
         }
         SASSERT(!ProofGen || result_stack().size() == result_pr_stack().size());
         frame & fr = frame_stack().back();
@@ -701,7 +759,7 @@ void rewriter_tpl<Config>::resume_core(expr_ref & result, proof_ref & result_pr)
         if (first_visit(fr) && fr.m_cache_result) {
             expr * r = get_cached(t);
             if (r) {
-                SASSERT(m().get_sort(r) == m().get_sort(t));
+                SASSERT(r->get_sort() == t->get_sort());
                 result_stack().push_back(r);
                 if (ProofGen) {
                     proof * pr = get_cached_pr(t);
@@ -742,6 +800,14 @@ void rewriter_tpl<Config>::resume_core(expr_ref & result, proof_ref & result_pr)
 
 template<typename Config>
 void rewriter_tpl<Config>::operator()(expr * t, expr_ref & result, proof_ref & result_pr) {
+    if (!frame_stack().empty() || m_cache != m_cache_stack[0]) {
+        frame_stack().reset();
+        result_stack().reset();
+        result_pr_stack().reset();
+        m_scopes.reset();
+        reset_cache();
+    }
+
     if (m_proof_gen)
         main_loop<true>(t, result, result_pr);
     else

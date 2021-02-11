@@ -1,6 +1,7 @@
 z3_add_component(solver
   SOURCES
     check_sat_result.cpp
+    check_logic.cpp
     combined_solver.cpp
     mus.cpp
     parallel_tactic.cpp
@@ -16,5 +17,7 @@ z3_add_component(solver
   PYG_FILES
     combined_solver_params.pyg
     parallel_params.pyg
+  PYG_FILES
+    solver_params.pyg
 
 )

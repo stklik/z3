@@ -18,8 +18,7 @@ Author:
 Notes:
 
 --*/
-#ifndef TACTIC_H_
-#define TACTIC_H_
+#pragma once
 
 #include "tactic/goal.h"
 #include "util/params.h"
@@ -63,7 +62,7 @@ public:
     */
     virtual void operator()(goal_ref const & in, goal_ref_buffer& result) = 0;
 
-    virtual void collect_statistics(statistics & st) const {}
+    virtual void collect_statistics(statistics & st) const { }
     virtual void reset_statistics() {}
     virtual void cleanup() = 0;
     virtual void reset() { cleanup(); }
@@ -74,11 +73,13 @@ public:
 
     // translate tactic to the given manager
     virtual tactic * translate(ast_manager & m) = 0;
+
+    static void checkpoint(ast_manager& m);
+
 protected:
     friend class nary_tactical;
     friend class binary_tactical;
     friend class unary_tactical;
-    friend class nl_purify_tactic;
 
 };
 
@@ -126,5 +127,5 @@ lbool check_sat(tactic & t, goal_ref & g, model_ref & md, labels_vec & labels, p
 void fail_if_proof_generation(char const * tactic_name, goal_ref const & in);
 void fail_if_unsat_core_generation(char const * tactic_name, goal_ref const & in);
 void fail_if_model_generation(char const * tactic_name, goal_ref const & in);
+void fail_if_has_quantifiers(char const* tactic_name, goal_ref const& in);
 
-#endif

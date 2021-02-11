@@ -67,7 +67,7 @@ namespace nlarith {
             ast_manager& m = m_lits.get_manager();
             std::string name = m_x->get_decl()->get_name().str();
             name += suffix;
-            sort* r = m.get_sort(m_x);
+            sort* r = m_x->get_sort();
             v= m.mk_const(symbol(name.c_str()), r);
         }
     };
@@ -546,7 +546,7 @@ namespace nlarith {
                 sqrt_form e0(*this, mk_uminus(c), 0,   z(), b);
                 // a_i = 0 /\ b_i != 0 /\ phi[e_i/x]
                 TRACE("nlarith", display(tout << "a_i != 0 & b_i != 0 & hi[e_i / x]", p);tout<<"\n";);
-                scoped_ptr<expr_replacer> rp = mk_default_expr_replacer(m());
+                scoped_ptr<expr_replacer> rp = mk_default_expr_replacer(m(), false);
                 expr_substitution sub(m());
                 sub.insert(a, z());
                 rp->set_substitution(&sub);
@@ -610,7 +610,7 @@ namespace nlarith {
                 sqrt_form e0(*this, mk_uminus(c), 0,     z(), b);
                 es.reset();
                 subst.reset();
-                scoped_ptr<expr_replacer> rp = mk_default_expr_replacer(m());
+                scoped_ptr<expr_replacer> rp = mk_default_expr_replacer(m(), false);
                 expr_substitution sub(m());
                 sub.insert(a, z());
                 rp->set_substitution(&sub);
@@ -684,7 +684,7 @@ namespace nlarith {
 
         void get_coefficients(poly const& p, app*& a, app*& b, app*& c) {
             a = b = c = z();
-            if (p.size() > 0) c = p[0];
+            if (!p.empty()) c = p[0];
             if (p.size() > 1) b = p[1];
             if (p.size() > 2) a = p[2];
             SASSERT(p.size() <= 3);
@@ -1359,7 +1359,7 @@ namespace nlarith {
         void quot_rem(poly const& u, poly const& v, poly& q, poly& r, app_ref& lc, unsigned& power) {
             lc = v.empty()?num(0):v[v.size()-1];
             power = 0;
-            if (u.size() < v.size() || v.size() == 0) {
+            if (u.size() < v.size() || v.empty()) {
                 q.reset();
                 r.reset();
                 r.append(u);

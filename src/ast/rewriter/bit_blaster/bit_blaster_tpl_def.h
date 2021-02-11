@@ -16,11 +16,10 @@ Author:
 Revision History:
 
 --*/
-#include "ast/rewriter/bit_blaster/bit_blaster_tpl.h"
 #include "util/rational.h"
-#include "ast/ast_pp.h"
-#include "util/cooperate.h"
 #include "util/common_msgs.h"
+#include "ast/rewriter/bit_blaster/bit_blaster_tpl.h"
+#include "ast/ast_pp.h"
 #include "ast/rewriter/rewriter_types.h"
 
 
@@ -28,9 +27,8 @@ template<typename Cfg>
 void bit_blaster_tpl<Cfg>::checkpoint() {
     if (memory::get_allocation_size() > m_max_memory)
         throw rewriter_exception(Z3_MAX_MEMORY_MSG);
-    if (m().canceled())
+    if (!m().inc())
         throw rewriter_exception(m().limit().get_cancel_msg());
-    cooperate("bit-blaster");
 }
 
 /**
@@ -75,9 +73,23 @@ bool bit_blaster_tpl<Cfg>::is_minus_one(unsigned sz, expr * const * bits) const 
 static void _num2bits(ast_manager & m, rational const & v, unsigned sz, expr_ref_vector & out_bits) {
     SASSERT(v.is_nonneg());
     rational aux = v;
-    rational two(2);
+    rational two(2), base32(1ull << 32ull, rational::ui64());
     for (unsigned i = 0; i < sz; i++) {
-        if ((aux % two).is_zero())
+        if (i + 32 < sz) {
+            unsigned u = (aux % base32).get_unsigned();
+            for (unsigned j = 0; j < 32; ++j) {
+                if (0 != (u & (1 << j))) {
+                    out_bits.push_back(m.mk_true());
+                }
+                else {
+                    out_bits.push_back(m.mk_false());
+                }
+            }
+            aux = div(aux, base32);
+            i += 31;
+            continue;
+        }
+        else if ((aux % two).is_zero())
             out_bits.push_back(m.mk_false());
         else
             out_bits.push_back(m.mk_true());
@@ -153,6 +165,14 @@ void bit_blaster_tpl<Cfg>::mk_subtracter(unsigned sz, expr * const * a_bits, exp
         out_bits.push_back(out);
         cin = cout;
     }
+#if 0
+    for (unsigned j = 0; j < sz; ++j) {
+        std::cout << j << "\n";
+        std::cout << mk_pp(a_bits[j], m()) << "\n";
+        std::cout << mk_pp(b_bits[j], m()) << "\n";
+        std::cout << mk_pp(out_bits.get(j), m()) << "\n";
+    }
+#endif
     SASSERT(out_bits.size() == sz);
 }
 
@@ -1089,23 +1109,17 @@ template<typename Cfg>
 template<bool Signed>
 void bit_blaster_tpl<Cfg>::mk_le(unsigned sz, expr * const * a_bits, expr * const * b_bits, expr_ref & out) {
     SASSERT(sz > 0);
-    expr_ref i1(m()), i2(m()), i3(m()), not_a(m());
+    expr_ref not_a(m());
     mk_not(a_bits[0], not_a);
     mk_or(not_a, b_bits[0], out);
     for (unsigned idx = 1; idx < (Signed ? sz - 1 : sz); idx++) {
         mk_not(a_bits[idx], not_a);
-        mk_and(not_a,       b_bits[idx], i1);
-        mk_and(not_a,       out,         i2);
-        mk_and(b_bits[idx], out,         i3);
-        mk_or(i1, i2, i3, out);
+        mk_ge2(not_a, b_bits[idx], out, out);
     }
     if (Signed) {
         expr_ref not_b(m());
         mk_not(b_bits[sz-1], not_b);
-        mk_and(not_b,        a_bits[sz-1], i1);
-        mk_and(not_b,        out,          i2);
-        mk_and(a_bits[sz-1], out,          i3);
-        mk_or(i1, i2, i3, out);
+        mk_ge2(not_b, a_bits[sz-1], out, out);
     }
 }
 

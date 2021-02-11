@@ -18,8 +18,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_MODEL_CHECKER_H_
-#define SMT_MODEL_CHECKER_H_
+#pragma once
 
 #include "util/obj_hashtable.h"
 #include "ast/ast.h"
@@ -53,18 +52,20 @@ namespace smt {
         unsigned                                    m_iteration_idx;
         proto_model *                               m_curr_model;
         obj_map<expr, expr *>                       m_value2expr;
-        friend class instantiation_set;
+        expr_ref_vector                             m_fresh_exprs;
+
+        friend class model_instantiation_set;
 
         void init_aux_context();
         void init_value2expr();
         expr * get_term_from_ctx(expr * val);
+        expr * get_type_compatible_term(expr * val);
         expr_ref replace_value_from_ctx(expr * e);
         void restrict_to_universe(expr * sk, obj_hashtable<expr> const & universe);
         void assert_neg_q_m(quantifier * q, expr_ref_vector & sks);
         bool add_blocking_clause(model * cex, expr_ref_vector & sks);
         bool check(quantifier * q);
-        bool check_rec_fun(quantifier* q, bool strict_rec_fun);
-        void check_quantifiers(bool strict_rec_fun, bool& found_relevant, unsigned& num_failures);
+        void check_quantifiers(bool& found_relevant, unsigned& num_failures);
 
         struct instance {
             quantifier * m_q;
@@ -106,4 +107,3 @@ namespace smt {
     };
 };
 
-#endif // _SMT_MODEL_CHECKER_H_

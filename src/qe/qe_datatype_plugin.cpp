@@ -46,7 +46,7 @@ Copyright (c) 2015 Microsoft Corporation
 //   -> \/_i R_C(t_i) & phi[t_i/x]  \/ phi[false, true]
 // 
 //  Justification: 
-//  - We will asume that each of t_i, s_j are constructor terms.
+//  - We will assume that each of t_i, s_j are constructor terms.
 //  - We can assume that x \notin t_i, x \notin s_j, or otherwise use simplification.
 //  - We can assume that x occurs only in equalities or disequalities, or the recognizer, since 
 //    otherwise, we could simplify equalities, or QE does not apply.
@@ -650,13 +650,13 @@ namespace qe {
             SASSERT(idx <= eqs.num_eqs());
             
             if (idx < eqs.num_eqs()) {
-                expr* t = eqs.eq(idx);
-                m_ctx.add_constraint(true, m.mk_eq(x, t));
+                expr_ref eq(m.mk_eq(x, eqs.eq(idx)), m);
+                m_ctx.add_constraint(true, eq);
             }
             else {
                 for (unsigned i = 0; i < eqs.num_eqs(); ++i) {
-                    expr* t = eqs.eq(i);
-                    m_ctx.add_constraint(true, m.mk_not(m.mk_eq(x, t)));
+                    expr_ref ne(m.mk_not(m.mk_eq(x, eqs.eq(i))), m);
+                    m_ctx.add_constraint(true, ne);
                 }
             }
         }
@@ -732,7 +732,7 @@ namespace qe {
                     m_replace.apply_substitution(eqs.neq_atom(i), m.mk_false(), fml);
                 }
                 if (def) {
-                    sort* s = m.get_sort(x);
+                    sort* s = x->get_sort();
                     ptr_vector<sort> sorts;
                     sorts.resize(eqs.num_neq_terms(), s);
                     func_decl* diag = m.mk_func_decl(symbol("diag"), sorts.size(), sorts.c_ptr(), s);

@@ -30,7 +30,7 @@ Revision History:
 #include "ast/substitution/matcher.h"
 #include "ast/expr_functors.h"
 #include "smt/smt_solver.h"
-#include "qe/qe_term_graph.h"
+#include "qe/mbp/mbp_term_graph.h"
 
 namespace spacer {
 void lemma_sanity_checker::operator()(lemma_ref &lemma) {
@@ -50,7 +50,7 @@ namespace{
         contains_array_op_proc(ast_manager &manager) :
             m(manager), m_array_fid(m.mk_family_id("array"))
             {}
-        virtual bool operator()(expr *e) {
+        bool operator()(expr *e) override {
             return is_app(e) && to_app(e)->get_family_id() == m_array_fid;
         }
     };
@@ -107,8 +107,7 @@ void lemma_bool_inductive_generalizer::operator()(lemma_ref &lemma) {
             expand_literals(m, extra_lits);
             SASSERT(extra_lits.size() > 0);
             bool found = false;
-            if (extra_lits.get(0) != lit) {
-                SASSERT(extra_lits.size() > 1);
+            if (extra_lits.get(0) != lit && extra_lits.size() > 1) {
                 for (unsigned j = 0, sz = extra_lits.size(); !found && j < sz; ++j) {
                     cube[i] = extra_lits.get(j);
                     if (pt.check_inductive(lemma->level(), cube, uses_level, weakness)) {
@@ -196,8 +195,8 @@ public:
     void operator()(app* a)
     {
         if (a->get_family_id() == null_family_id && m_au.is_array(a)) {
-            if (m_sort && m_sort != get_sort(a)) { return; }
-            if (!m_sort) { m_sort = get_sort(a); }
+            if (m_sort && m_sort != a->get_sort()) { return; }
+            if (!m_sort) { m_sort = a->get_sort(); }
             m_symbs.insert(a->get_decl());
         }
     }
@@ -310,14 +309,13 @@ void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
     {TRACE("core_array_eq", tout << "Not-Inductive!\n";);}
 }
 
-void lemma_eq_generalizer::operator() (lemma_ref &lemma)
-{
+void lemma_eq_generalizer::operator() (lemma_ref &lemma) {
     TRACE("core_eq", tout << "Transforming equivalence classes\n";);
 
     if (lemma->get_cube().empty()) return;
 
     ast_manager &m = m_ctx.get_ast_manager();
-    qe::term_graph egraph(m);
+    mbp::term_graph egraph(m);
     egraph.add_lits(lemma->get_cube());
 
     // -- expand the cube with all derived equalities

@@ -84,7 +84,7 @@ class normalize_bounds_tactic : public tactic {
             bool produce_proofs = in->proofs_enabled();
             tactic_report report("normalize-bounds", *in);
             
-            m_bm(*in);
+            m_bm(*in);            
             
             if (!has_lowers()) {
                 result.push_back(in.get());
@@ -104,7 +104,7 @@ class normalize_bounds_tactic : public tactic {
             for (expr * x : m_bm) {
                 if (is_target(x, val)) {
                     num_norm_bounds++;
-                    sort * s = m.get_sort(x);
+                    sort * s = x->get_sort();
                     app * x_prime = m.mk_fresh_const(nullptr, s);
                     expr * def = m_util.mk_add(x_prime, m_util.mk_numeral(val, s));
                     subst.insert(x, def);
@@ -119,10 +119,10 @@ class normalize_bounds_tactic : public tactic {
             
             m_rw.set_substitution(&subst);
             expr_ref   new_curr(m);
-            proof_ref  new_pr(m);
-            unsigned size = in->size();
-            for (unsigned idx = 0; idx < size; idx++) {
+            
+            for (unsigned idx = 0; !in->inconsistent() && idx < in->size(); idx++) {
                 expr * curr = in->form(idx);
+                proof_ref  new_pr(m);
                 m_rw(curr, new_curr, new_pr);
                 if (produce_proofs) {
                     proof * pr = in->pr(idx);

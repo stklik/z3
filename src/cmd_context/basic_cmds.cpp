@@ -17,7 +17,7 @@ Notes:
 --*/
 #include "util/gparams.h"
 #include "util/env_params.h"
-#include "util/version.h"
+#include "util/z3_version.h"
 #include "ast/ast_smt_pp.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/ast_pp_dot.h"
@@ -137,7 +137,7 @@ ATOMIC_CMD(get_assignment_cmd, "get-assignment", "retrieve assignment", {
         symbol const & name = kv.m_key;
         macro_decls const & _m    = kv.m_value;
         for (auto md : _m) {
-            if (md.m_domain.size() == 0 && ctx.m().is_bool(md.m_body)) {
+            if (md.m_domain.empty() && ctx.m().is_bool(md.m_body)) {
                 model::scoped_model_completion _scm(*m, true);
                 expr_ref val = (*m)(md.m_body);
                 if (ctx.m().is_true(val) || ctx.m().is_false(val)) {
@@ -174,14 +174,19 @@ public:
 };
 
 ATOMIC_CMD(get_proof_cmd, "get-proof", "retrieve proof", {
-    if (!ctx.produce_proofs())
-        throw cmd_exception("proof construction is not enabled, use command (set-option :produce-proofs true)");
-    if (!ctx.has_manager() ||
-        ctx.cs_state() != cmd_context::css_unsat)
+    if (!ctx.has_manager())
         throw cmd_exception("proof is not available");
+
+    if (ctx.ignore_check())
+        return;
     expr_ref pr(ctx.m());
-    pr = ctx.get_check_sat_result()->get_proof();
-    if (pr == 0)
+    auto* chsr = ctx.get_check_sat_result();
+    if (!chsr)
+        throw cmd_exception("proof is not available");
+    pr = chsr->get_proof();
+    if (!pr && !ctx.produce_proofs())
+        throw cmd_exception("proof construction is not enabled, use command (set-option :produce-proofs true)");
+    if (!pr) 
         throw cmd_exception("proof is not available");
     if (ctx.well_sorted_check_enabled() && !is_well_sorted(ctx.m(), pr)) {
         throw cmd_exception("proof is not well sorted");
@@ -209,6 +214,8 @@ ATOMIC_CMD(get_proof_graph_cmd, "get-proof-graph", "retrieve proof and print it 
         ctx.cs_state() != cmd_context::css_unsat)
         throw cmd_exception("proof is not available");
     proof_ref pr(ctx.m());
+    if (ctx.ignore_check())
+        return;
     pr = ctx.get_check_sat_result()->get_proof();
     if (pr == 0)
         throw cmd_exception("proof is not available");
@@ -238,6 +245,8 @@ static void print_core(cmd_context& ctx) {
 }
 
 ATOMIC_CMD(get_unsat_core_cmd, "get-unsat-core", "retrieve unsat core", {
+        if (ctx.ignore_check())
+            return;
         if (!ctx.produce_unsat_cores())
             throw cmd_exception("unsat core construction is not enabled, use command (set-option :produce-unsat-cores true)");
         if (!ctx.has_manager() ||
@@ -247,6 +256,8 @@ ATOMIC_CMD(get_unsat_core_cmd, "get-unsat-core", "retrieve unsat core", {
     });
 
 ATOMIC_CMD(get_unsat_assumptions_cmd, "get-unsat-assumptions", "retrieve subset of assumptions sufficient for unsatisfiability", {
+        if (ctx.ignore_check())
+            return;
         if (!ctx.produce_unsat_assumptions())
             throw cmd_exception("unsat assumptions construction is not enabled, use command (set-option :produce-unsat-assumptions true)");
         if (!ctx.has_manager() || ctx.cs_state() != cmd_context::css_unsat) {
@@ -281,7 +292,7 @@ UNARY_CMD(set_logic_cmd, "set-logic", "<symbol>", "set the background logic.", C
               ctx.print_success();
           else {
               std::string msg = "ignoring unsupported logic " + arg.str();
-              ctx.print_unsupported(symbol(msg.c_str()), m_line, m_pos);
+              ctx.print_unsupported(symbol(msg), m_line, m_pos);
           }
           );
 
@@ -309,7 +320,6 @@ protected:
     symbol      m_produce_unsat_assumptions;
     symbol      m_produce_models;
     symbol      m_produce_assignments;
-    symbol      m_produce_interpolants;
     symbol      m_produce_assertions;
     symbol      m_regular_output_channel;
     symbol      m_diagnostic_output_channel;
@@ -326,7 +336,7 @@ protected:
         return
             s == m_print_success || s == m_print_warning || s == m_expand_definitions ||
             s == m_interactive_mode || s == m_produce_proofs || s == m_produce_unsat_cores || s == m_produce_unsat_assumptions ||
-            s == m_produce_models || s == m_produce_assignments || s == m_produce_interpolants ||
+            s == m_produce_models || s == m_produce_assignments ||
             s == m_regular_output_channel || s == m_diagnostic_output_channel ||
             s == m_random_seed || s == m_verbosity || s == m_global_decls || s == m_global_declarations ||
             s == m_produce_assertions || s == m_reproducible_resource_limit;
@@ -346,7 +356,6 @@ public:
         m_produce_unsat_assumptions(":produce-unsat-assumptions"),
         m_produce_models(":produce-models"),
         m_produce_assignments(":produce-assignments"),
-        m_produce_interpolants(":produce-interpolants"),
         m_produce_assertions(":produce-assertions"),
         m_regular_output_channel(":regular-output-channel"),
         m_diagnostic_output_channel(":diagnostic-output-channel"),
@@ -417,10 +426,6 @@ class set_option_cmd : public set_get_option_cmd {
         else if (m_option == m_produce_proofs) {
             check_not_initialized(ctx, m_produce_proofs);
             ctx.set_produce_proofs(to_bool(value));
-        }
-        else if (m_option == m_produce_interpolants) {
-            check_not_initialized(ctx, m_produce_interpolants);
-            ctx.set_produce_interpolants(to_bool(value));
         }
         else if (m_option == m_produce_unsat_cores) {
             check_not_initialized(ctx, m_produce_unsat_cores);
@@ -577,9 +582,6 @@ public:
         else if (opt == m_produce_proofs) {
             print_bool(ctx, ctx.produce_proofs());
         }
-        else if (opt == m_produce_interpolants) {
-            print_bool(ctx, ctx.produce_interpolants());
-        }
         else if (opt == m_produce_unsat_cores) {
             print_bool(ctx, ctx.produce_unsat_cores());
         }
@@ -638,6 +640,7 @@ class get_info_cmd : public cmd {
     symbol   m_reason_unknown;
     symbol   m_all_statistics;
     symbol   m_assertion_stack_levels;
+    symbol   m_rlimit;
 public:
     get_info_cmd():
         cmd("get-info"),
@@ -648,7 +651,8 @@ public:
         m_status(":status"),
         m_reason_unknown(":reason-unknown"),
         m_all_statistics(":all-statistics"),
-        m_assertion_stack_levels(":assertion-stack-levels") {
+        m_assertion_stack_levels(":assertion-stack-levels"),
+        m_rlimit(":rlimit") {
     }
     char const * get_usage() const override { return "<keyword>"; }
     char const * get_descr(cmd_context & ctx) const override { return "get information."; }
@@ -678,7 +682,10 @@ public:
             ctx.regular_stream() << "(:status " << ctx.get_status() << ")" << std::endl;
         }
         else if (opt == m_reason_unknown) {
-            ctx.regular_stream() << "(:reason-unknown \"" << escaped(ctx.reason_unknown().c_str()) << "\")" << std::endl;
+            ctx.regular_stream() << "(:reason-unknown \"" << escaped(ctx.reason_unknown()) << "\")" << std::endl;
+        }
+        else if (opt == m_rlimit) {
+            ctx.regular_stream() << "(:rlimit " << ctx.m().limit().count() << ")" << std::endl;
         }
         else if (opt == m_all_statistics) {
             ctx.display_statistics();
@@ -760,7 +767,7 @@ public:
         return m_array_fid;
     }
     char const * get_usage() const override { return "<symbol> (<sort>+) <func-decl-ref>"; }
-    char const * get_descr(cmd_context & ctx) const override { return "declare a new array map operator with name <symbol> using the given function declaration.\n<func-decl-ref> ::= <symbol>\n                  | (<symbol> (<sort>*) <sort>)\n                  | ((_ <symbol> <numeral>+) (<sort>*) <sort>)\nThe last two cases are used to disumbiguate between declarations with the same name and/or select (indexed) builtin declarations.\nFor more details about the array map operator, see 'Generalized and Efficient Array Decision Procedures' (FMCAD 2009).\nExample: (declare-map set-union (Int) (or (Bool Bool) Bool))\nDeclares a new function (declare-fun set-union ((Array Int Bool) (Array Int Bool)) (Array Int Bool)).\nThe instance of the map axiom for this new declaration is:\n(forall ((a1 (Array Int Bool)) (a2 (Array Int Bool)) (i Int)) (= (select (set-union a1 a2) i) (or (select a1 i) (select a2 i))))"; }
+    char const * get_descr(cmd_context & ctx) const override { return "declare a new array map operator with name <symbol> using the given function declaration.\n<func-decl-ref> ::= <symbol>\n                  | (<symbol> (<sort>*) <sort>)\n                  | ((_ <symbol> <numeral>+) (<sort>*) <sort>)\nThe last two cases are used to disambiguate between declarations with the same name and/or select (indexed) builtin declarations.\nFor more details about the array map operator, see 'Generalized and Efficient Array Decision Procedures' (FMCAD 2009).\nExample: (declare-map set-union (Int) (or (Bool Bool) Bool))\nDeclares a new function (declare-fun set-union ((Array Int Bool) (Array Int Bool)) (Array Int Bool)).\nThe instance of the map axiom for this new declaration is:\n(forall ((a1 (Array Int Bool)) (a2 (Array Int Bool)) (i Int)) (= (select (set-union a1 a2) i) (or (select a1 i) (select a2 i))))"; }
     unsigned get_arity() const override { return 3; }
     void prepare(cmd_context & ctx) override { m_name = symbol::null; m_domain.reset(); }
     cmd_arg_kind next_arg_kind(cmd_context & ctx) const override {
@@ -841,6 +848,7 @@ public:
     }
     void finalize(cmd_context & ctx) override {}
 };
+
 
 // provides "help" for builtin cmds
 class builtin_cmd : public cmd {

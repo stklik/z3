@@ -19,8 +19,7 @@ Revision History:
 
 
 --*/
-#ifndef AST_SMT2_PP_H_
-#define AST_SMT2_PP_H_
+#pragma once
 
 #include "ast/format.h"
 #include "util/params.h"
@@ -33,6 +32,8 @@ Revision History:
 #include "ast/datatype_decl_plugin.h"
 #include "ast/ast_smt_pp.h"
 #include "util/smt2_util.h"
+
+std::string ensure_quote(symbol const& s);
 
 class smt2_pp_environment {
 protected:
@@ -105,6 +106,8 @@ std::ostream & ast_smt2_pp(std::ostream & out, sort * s, smt2_pp_environment & e
 std::ostream & ast_smt2_pp(std::ostream & out, func_decl * f, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0, char const* cmd = "declare-fun");
 std::ostream & ast_smt2_pp(std::ostream & out, func_decl * f, expr* e, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0, char const* cmd = "define-fun");
 std::ostream & ast_smt2_pp(std::ostream & out, symbol const& s, bool is_skolem, smt2_pp_environment & env, params_ref const& p = params_ref());
+std::ostream & ast_smt2_pp_recdefs(std::ostream & out, vector<std::pair<func_decl*, expr*>> const& funs, smt2_pp_environment & env, params_ref const & p = params_ref());
+
 
 /**
    \brief Internal wrapper (for debugging purposes only)
@@ -121,6 +124,7 @@ struct mk_ismt2_pp {
     mk_ismt2_pp(ast * t, ast_manager & m, unsigned indent = 0, unsigned num_vars = 0, char const * var_prefix = nullptr);
 };
 
+
 std::ostream& operator<<(std::ostream& out, mk_ismt2_pp const & p);
 
 std::ostream& operator<<(std::ostream& out, expr_ref const& e);
@@ -131,7 +135,14 @@ std::ostream& operator<<(std::ostream& out, sort_ref const& e);
 
 std::ostream& operator<<(std::ostream& out, expr_ref_vector const& e);
 std::ostream& operator<<(std::ostream& out, app_ref_vector const& e);
+std::ostream& operator<<(std::ostream& out, var_ref_vector const& e);
 std::ostream& operator<<(std::ostream& out, func_decl_ref_vector const& e);
 std::ostream& operator<<(std::ostream& out, sort_ref_vector const& e);
 
-#endif
+struct mk_ismt2_func {
+    func_decl* m_fn;
+    ast_manager &m;
+    mk_ismt2_func(func_decl* f, ast_manager& m): m_fn(f), m(m) {}
+};
+
+std::ostream& operator<<(std::ostream& out, mk_ismt2_func const& f);

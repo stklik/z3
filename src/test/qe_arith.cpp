@@ -4,7 +4,7 @@ Copyright (c) 2015 Microsoft Corporation
 
 --*/
 
-#include "qe/qe_arith.h"
+#include "qe/mbp/mbp_arith.h"
 #include "qe/qe.h"
 #include "ast/rewriter/th_rewriter.h"
 #include "parsers/smt2/smt2parser.h"
@@ -37,8 +37,7 @@ static expr_ref parse_fml(ast_manager& m, char const* str) {
            << "(assert " << str << ")\n";
     std::istringstream is(buffer.str());
     VERIFY(parse_smt2_commands(ctx, is));
-    ENSURE(ctx.begin_assertions() != ctx.end_assertions());
-    result = *ctx.begin_assertions();
+    result = ctx.assertions().get(0);
     return result;
 }
 
@@ -67,7 +66,7 @@ static void test(app* var, expr_ref& fml) {
     params.m_model = true;
 
     symbol x_name(var->get_decl()->get_name());   
-    sort* x_sort = m.get_sort(var);
+    sort* x_sort = var->get_sort();
 
     expr_ref pr(m);
     expr_ref_vector lits(m);
@@ -81,7 +80,7 @@ static void test(app* var, expr_ref& fml) {
         if (result != l_true) return;
         ctx.get_model(md);
     }    
-    VERIFY(qe::arith_project(*md, var, lits));
+    VERIFY(mbp::arith_project(*md, var, lits));
     pr = mk_and(lits);
    
     std::cout << "original:  " << mk_pp(fml, m) << "\n";
@@ -260,13 +259,13 @@ static void test2(char const *ex) {
     for (unsigned i = 0; i < vars.size(); ++i) {
         bound.push_back(vars[i].get());
         names.push_back(vars[i]->get_decl()->get_name());
-        sorts.push_back(m.get_sort(vars[i].get()));
+        sorts.push_back(vars[i]->get_sort());
     }
     expr_abstract(m, 0, bound.size(), bound.c_ptr(), fml, fml2);
     fml2 = m.mk_exists(bound.size(), sorts.c_ptr(), names.c_ptr(), fml2);
     qe::expr_quant_elim qe(m, params);
     for (unsigned i = 0; i < vars.size(); ++i) {
-        VERIFY(qe::arith_project(*md, vars[i].get(), lits));
+        VERIFY(mbp::arith_project(*md, vars[i].get(), lits));
     }
     pr1 = mk_and(lits);
     qe(m.mk_true(), fml2, pr2);
@@ -289,7 +288,7 @@ static void mk_var(unsigned x, app_ref& v) {
     arith_util a(m);
     std::ostringstream strm;
     strm << "v" << x;
-    v = m.mk_const(symbol(strm.str().c_str()), a.mk_real());
+    v = m.mk_const(symbol(strm.str()), a.mk_real());
 }
 
 static void mk_term(vector<var_t> const& vars, rational const& coeff, app_ref& term) {
@@ -383,7 +382,7 @@ static void add_random_ineq(
 }
 
 static void test_maximize(opt::model_based_opt& mbo, ast_manager& m, unsigned num_vars, expr_ref_vector const& fmls, app* t) {
-    qe::arith_project_plugin plugin(m);
+    mbp::arith_project_plugin plugin(m);
     model mdl(m);    
     arith_util a(m);
     for (unsigned i = 0; i < num_vars; ++i) {
@@ -443,7 +442,7 @@ static void check_random_ineqs() {
 static void test_project() {
     ast_manager m;
     reg_decl_plugins(m);    
-    qe::arith_project_plugin plugin(m);    
+    mbp::arith_project_plugin plugin(m);    
     arith_util a(m);
     app_ref_vector vars(m);
     expr_ref_vector lits(m), ds(m);

@@ -20,8 +20,7 @@ Notes:
 
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/fpa/fpa2bv_rewriter.h"
-#include "util/cooperate.h"
-#include "ast/fpa/fpa2bv_rewriter_params.hpp"
+#include "params/fpa2bv_rewriter_params.hpp"
 
 
 fpa2bv_rewriter_cfg::fpa2bv_rewriter_cfg(ast_manager & m, fpa2bv_converter & c, params_ref const & p) :
@@ -31,7 +30,7 @@ fpa2bv_rewriter_cfg::fpa2bv_rewriter_cfg(ast_manager & m, fpa2bv_converter & c, 
     m_bindings(m)
 {
     updt_params(p);
-    // We need to make sure that the mananger has the BV plugin loaded.
+    // We need to make sure that the manager has the BV plugin loaded.
     symbol s_bv("bv");
     if (!m_manager.has_plugin(s_bv))
         m_manager.register_plugin(s_bv, alloc(bv_decl_plugin));
@@ -50,7 +49,6 @@ void fpa2bv_rewriter_cfg::updt_params(params_ref const & p) {
 }
 
 bool fpa2bv_rewriter_cfg::max_steps_exceeded(unsigned num_steps) const {
-    cooperate("fpa2bv");
     return num_steps > m_max_steps;
 }
 
@@ -75,7 +73,7 @@ br_status fpa2bv_rewriter_cfg::reduce_app(func_decl * f, unsigned num, expr * co
         SASSERT(num == 2);
         TRACE("fpa2bv_rw", tout << "(= " << mk_ismt2_pp(args[0], m()) << " " <<
             mk_ismt2_pp(args[1], m()) << ")" << std::endl;);
-        SASSERT(m().get_sort(args[0]) == m().get_sort(args[1]));
+        SASSERT(args[0]->get_sort() == args[1]->get_sort());
         sort * ds = f->get_domain()[0];
         if (m_conv.is_float(ds)) {
             m_conv.mk_eq(args[0], args[1], result);
@@ -188,12 +186,13 @@ bool fpa2bv_rewriter_cfg::pre_visit(expr * t)
 }
 
 
-bool fpa2bv_rewriter_cfg::reduce_quantifier(quantifier * old_q,
-                           expr * new_body,
-                           expr * const * new_patterns,
-                           expr * const * new_no_patterns,
-                           expr_ref & result,
-                           proof_ref & result_pr) {
+bool fpa2bv_rewriter_cfg::reduce_quantifier(
+    quantifier * old_q,
+    expr * new_body,
+    expr * const * new_patterns,
+    expr * const * new_no_patterns,
+    expr_ref & result,
+    proof_ref & result_pr) {
     if (is_lambda(old_q)) {
         return false;
     }
@@ -215,6 +214,12 @@ bool fpa2bv_rewriter_cfg::reduce_quantifier(quantifier * old_q,
             new_decl_names.push_back(symbol(name_buffer.c_str()));
             new_decl_sorts.push_back(m_conv.bu().mk_sort(sbits+ebits));
         }
+        else if (m_conv.is_rm(s)) {
+            name_buffer.reset();
+            name_buffer << n << ".bv";
+            new_decl_names.push_back(symbol(name_buffer.c_str()));
+            new_decl_sorts.push_back(m_conv.bu().mk_sort(3));
+        }
         else {
             new_decl_sorts.push_back(s);
             new_decl_names.push_back(n);
@@ -224,6 +229,9 @@ bool fpa2bv_rewriter_cfg::reduce_quantifier(quantifier * old_q,
                                new_body, old_q->get_weight(), old_q->get_qid(), old_q->get_skid(),
                                old_q->get_num_patterns(), new_patterns, old_q->get_num_no_patterns(), new_no_patterns);
     result_pr = nullptr;
+    if (m().proofs_enabled()) {
+        result_pr = m().mk_rewrite(old_q, result);
+    }
     m_bindings.shrink(old_sz);
     TRACE("fpa2bv", tout << "reduce_quantifier[" << old_q->get_depth() << "]: " <<
           mk_ismt2_pp(old_q->get_expr(), m()) << std::endl <<
@@ -248,6 +256,11 @@ bool fpa2bv_rewriter_cfg::reduce_var(var * t, expr_ref & result, proof_ref & res
                                     m_conv.bu().mk_extract(ebits - 1, 0, new_var),
                                     m_conv.bu().mk_extract(sbits+ebits-2, ebits, new_var));
     }
+    else if (m_conv.is_rm(s)) {
+        expr_ref new_var(m());
+        new_var = m().mk_var(t->get_idx(), m_conv.bu().mk_sort(3));
+        new_exp = m_conv.fu().mk_bv2rm(new_var);
+    }
     else
         new_exp = m().mk_var(t->get_idx(), s);
 
@@ -258,3 +271,77 @@ bool fpa2bv_rewriter_cfg::reduce_var(var * t, expr_ref & result, proof_ref & res
 }
 
 template class rewriter_tpl<fpa2bv_rewriter_cfg>;
+
+expr_ref fpa2bv_rewriter::convert_atom(th_rewriter& rw, expr * e) {
+    TRACE("t_fpa_detail", tout << "converting atom: " << mk_ismt2_pp(e, m_cfg.m()) << std::endl;);
+    expr_ref res(m_cfg.m());
+    proof_ref pr(m_cfg.m());
+    (*this)(e, res);
+    rw(res, res);
+    SASSERT(is_app(res));
+    SASSERT(m_cfg.m().is_bool(res));
+    return res;
+}
+
+expr_ref fpa2bv_rewriter::convert_term(th_rewriter& rw, expr * e) {
+    SASSERT(fu().is_rm(e) || fu().is_float(e));
+    ast_manager& m = m_cfg.m();
+    
+    expr_ref e_conv(m), res(m);
+    proof_ref pr(m);
+    
+    (*this)(e, e_conv);
+    
+    TRACE("t_fpa_detail", tout << "term: " << mk_ismt2_pp(e, m) << std::endl;
+          tout << "converted term: " << mk_ismt2_pp(e_conv, m) << std::endl;);
+    
+    if (fu().is_rm(e)) {
+        SASSERT(fu().is_bv2rm(e_conv));
+        expr_ref bv_rm(m);
+        rw(to_app(e_conv)->get_arg(0), bv_rm);
+        res = fu().mk_bv2rm(bv_rm);
+    }
+    else if (fu().is_float(e)) {
+        SASSERT(fu().is_fp(e_conv));
+        expr_ref sgn(m), sig(m), exp(m);
+        m_cfg.m_conv.split_fp(e_conv, sgn, exp, sig);
+        rw(sgn);
+        rw(exp);
+        rw(sig);
+        res = fu().mk_fp(sgn, exp, sig);
+    }
+    else
+        UNREACHABLE();
+    
+    return res;
+}
+
+expr_ref fpa2bv_rewriter::convert_conversion_term(th_rewriter& rw, expr * e) {
+    SASSERT(to_app(e)->get_family_id() == fu().get_family_id());
+    /* This is for the conversion functions fp.to_* */
+    expr_ref res(m_cfg.m());
+    (*this)(e, res);
+    rw(res, res);
+    return res;
+}
+
+expr_ref fpa2bv_rewriter::convert(th_rewriter& rw, expr * e) {
+    ast_manager& m = m_cfg.m();
+    expr_ref res(m);
+    TRACE("t_fpa", tout << "converting " << mk_ismt2_pp(e, m) << std::endl;);
+    
+    if (fu().is_fp(e))
+        res = e;
+    else if (m.is_bool(e))
+        res = convert_atom(rw, e);
+    else if (fu().is_float(e) || fu().is_rm(e))
+        res = convert_term(rw, e);
+    else
+        res = convert_conversion_term(rw, e);
+    
+    TRACE("t_fpa_detail", tout << "converted; caching:" << std::endl;
+          tout << mk_ismt2_pp(e, m) << std::endl << " -> " << std::endl <<
+          mk_ismt2_pp(res, m) << std::endl;);
+    
+    return res;
+}

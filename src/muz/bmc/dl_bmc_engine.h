@@ -17,15 +17,12 @@ Revision History:
 
 --*/
 
-#ifndef DL_BMC_ENGINE_H_
-#define DL_BMC_ENGINE_H_
+#pragma once
 
 #include "util/params.h"
 #include "util/statistics.h"
-#include "smt/smt_kernel.h"
 #include "ast/bv_decl_plugin.h"
-#include "smt/params/smt_params.h"
-
+#include "solver/solver.h"
 
 namespace datalog {
     class context;
@@ -33,8 +30,7 @@ namespace datalog {
     class bmc : public engine_base {
         context&         m_ctx;
         ast_manager&     m;
-        smt_params       m_fparams;
-        smt::kernel      m_solver;
+        solver_ref       m_solver;
         rule_set         m_rules;
         func_decl_ref    m_query_pred;
         expr_ref         m_answer;
@@ -66,7 +62,8 @@ namespace datalog {
         void reset_statistics() override;
         void get_rules_along_trace(datalog::rule_ref_vector& rules) override;
 
-        expr_ref get_answer() override;
+        expr_ref get_answer()  override;
+        proof_ref get_proof() override; 
 
         // direct access to (new) non-linear compiler.
         void compile(rule_set const& rules, expr_ref_vector& fmls, unsigned level);
@@ -76,4 +73,3 @@ namespace datalog {
 
 
 
-#endif

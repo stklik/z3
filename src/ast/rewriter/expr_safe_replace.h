@@ -19,19 +19,18 @@ Revision History:
 
 --*/
 
-#ifndef EXPR_SAFE_REPLACE_H_
-#define EXPR_SAFE_REPLACE_H_
+#pragma once
 
 #include "ast/ast.h"
+#include <unordered_map>
 
 class expr_safe_replace {
     ast_manager& m;
     expr_ref_vector m_src;
     expr_ref_vector m_dst;
-    obj_map<expr, expr*> m_subst;
-    obj_map<expr,expr*> m_cache;
     ptr_vector<expr> m_todo, m_args;
     expr_ref_vector m_refs;
+    std::unordered_map<expr*,expr*> m_cache;
 
 public:
     expr_safe_replace(ast_manager& m): m(m), m_src(m), m_dst(m), m_refs(m) {}
@@ -48,7 +47,6 @@ public:
 
     void reset();
 
-    bool empty() const { return m_subst.empty(); }
+    bool empty() const { return m_src.empty(); }
 };
 
-#endif /* EXPR_SAFE_REPLACE_H_ */

@@ -16,17 +16,15 @@ Author:
 Revision History:
 
 --*/
-#ifndef MPZ_H_
-#define MPZ_H_
+#pragma once
 
-#include<limits.h>
 #include<string>
+#include "util/mutex.h"
 #include "util/util.h"
 #include "util/small_object_allocator.h"
 #include "util/trace.h"
 #include "util/scoped_numeral.h"
 #include "util/scoped_numeral_vector.h"
-#include "util/z3_omp.h"
 #include "util/mpn.h"
 
 unsigned u_gcd(unsigned u, unsigned v);
@@ -100,16 +98,20 @@ class mpz {
     friend class mpbq;
     friend class mpbq_manager;
     friend class mpz_stack;
-    mpz & operator=(mpz const & other) { UNREACHABLE(); return *this; }
 public:
     mpz(int v):m_val(v), m_kind(mpz_small), m_owner(mpz_self), m_ptr(nullptr) {}
     mpz():m_val(0), m_kind(mpz_small), m_owner(mpz_self), m_ptr(nullptr) {}
     mpz(mpz_type* ptr): m_val(0), m_kind(mpz_small), m_owner(mpz_ext), m_ptr(ptr) { SASSERT(ptr);}
-    mpz(mpz && other) : m_val(other.m_val), m_kind(mpz_small), m_owner(mpz_self), m_ptr(nullptr) {
+    mpz(mpz && other) noexcept : m_val(other.m_val), m_kind(other.m_kind), m_owner(other.m_owner), m_ptr(nullptr) {
         std::swap(m_ptr, other.m_ptr);
-        unsigned o = m_owner; m_owner = other.m_owner; other.m_owner = o;
-        unsigned k = m_kind; m_kind = other.m_kind; other.m_kind = k;
     }
+
+    mpz& operator=(mpz const& other) = delete;
+    mpz& operator=(mpz &&other) noexcept {
+        swap(other);
+        return *this;
+    }
+
     void swap(mpz & other) { 
         std::swap(m_val, other.m_val);
         std::swap(m_ptr, other.m_ptr);
@@ -136,9 +138,14 @@ inline void swap(mpz & m1, mpz & m2) { m1.swap(m2); }
 template<bool SYNCH = true>
 class mpz_manager {
     mutable small_object_allocator  m_allocator;
-    mutable omp_nest_lock_t         m_lock;
-#define MPZ_BEGIN_CRITICAL() if (SYNCH) omp_set_nest_lock(&m_lock);
-#define MPZ_END_CRITICAL()   if (SYNCH) omp_unset_nest_lock(&m_lock);
+#ifndef SINGLE_THREAD
+    mutable std::recursive_mutex    m_lock;
+#define MPZ_BEGIN_CRITICAL() if (SYNCH) m_lock.lock()
+#define MPZ_END_CRITICAL()   if (SYNCH) m_lock.unlock()
+#else
+#define MPZ_BEGIN_CRITICAL() {}
+#define MPZ_END_CRITICAL()   {}
+#endif
     mutable mpn_manager             m_mpn_manager;
 
 #ifndef _MP_GMP
@@ -153,7 +160,7 @@ class mpz_manager {
     
     // make sure that n is a big number and has capacity equal to at least c.
     void allocate_if_needed(mpz & n, unsigned c) {
-        c = std::max(c, m_init_cell_capacity);
+        if (m_init_cell_capacity > c) c = m_init_cell_capacity;
         if (n.m_ptr == nullptr || capacity(n) < c) {
             deallocate(n);
             n.m_val             = 1;
@@ -192,9 +199,17 @@ class mpz_manager {
     mutable mpz_t     m_int64_min;
 
     mpz_t * allocate() {        
-        MPZ_BEGIN_CRITICAL();
-        mpz_t * cell = reinterpret_cast<mpz_t*>(m_allocator.allocate(sizeof(mpz_t)));
-        MPZ_END_CRITICAL();
+        mpz_t * cell;
+#ifdef SINGLE_THREAD
+        cell = reinterpret_cast<mpz_t*>(m_allocator.allocate(sizeof(mpz_t)));        
+#else
+        if (SYNCH) {
+            cell = reinterpret_cast<mpz_t*>(memory::allocate(sizeof(mpz_t)));
+        }
+        else {
+            cell = reinterpret_cast<mpz_t*>(m_allocator.allocate(sizeof(mpz_t)));        
+        }
+#endif
         mpz_init(*cell);
         return cell;
     }
@@ -202,9 +217,16 @@ class mpz_manager {
     void deallocate(bool is_heap, mpz_t * ptr) { 
         mpz_clear(*ptr); 
         if (is_heap) {
-            MPZ_BEGIN_CRITICAL();
+#ifdef SINGLE_THREAD
             m_allocator.deallocate(sizeof(mpz_t), ptr); 
-            MPZ_END_CRITICAL();
+#else
+            if (SYNCH) {
+                memory::deallocate(ptr);
+            }
+            else {
+                m_allocator.deallocate(sizeof(mpz_t), ptr); 
+            }
+#endif
         }
     }
 
@@ -382,7 +404,9 @@ public:
 
     static mpz mk_z(int val) { return mpz(val); }
     
-    void del(mpz & a);
+    void del(mpz & a) { del(this, a); }
+
+    static void del(mpz_manager* m, mpz & a);
     
     void add(mpz const & a, mpz const & b, mpz & c);
 
@@ -512,13 +536,6 @@ public:
         }
     }
 
-    void set(mpz & target, mpz && source) {
-        target.m_val = source.m_val;
-        std::swap(target.m_ptr, source.m_ptr);
-        auto o = target.m_owner; target.m_owner = source.m_owner; source.m_owner = o;
-        auto k = target.m_kind; target.m_kind = source.m_kind; source.m_kind = k;
-    }
-
     void set(mpz & a, int val) {
         a.m_val = val;
         a.m_kind = mpz_small;
@@ -592,6 +609,17 @@ public:
        If decimal == true, then ".0" is appended.
     */
     void display_smt2(std::ostream & out, mpz const & a, bool decimal) const;
+
+    /**
+       \brief Displays the num_bits least significant bits of a mpz number in hexadecimal format.
+       num_bits must be divisible by 4.
+    */
+    void display_hex(std::ostream & out, mpz const & a, unsigned num_bits) const;
+
+    /**
+       \brief Displays the num_bits least significant bits of a mpz number in binary format.
+    */
+    void display_bin(std::ostream & out, mpz const & a, unsigned num_bits) const;
 
     static unsigned hash(mpz const & a);
 
@@ -690,9 +718,10 @@ public:
     
     // Store the digits of n into digits, and return the sign.
     bool decompose(mpz const & n, svector<digit_t> & digits);
+
 };
 
-#ifndef _NO_OMP_
+#ifndef SINGLE_THREAD
 typedef mpz_manager<true> synch_mpz_manager;
 #else
 typedef mpz_manager<false> synch_mpz_manager;
@@ -702,6 +731,3 @@ typedef mpz_manager<false> unsynch_mpz_manager;
 typedef _scoped_numeral<unsynch_mpz_manager> scoped_mpz;
 typedef _scoped_numeral<synch_mpz_manager> scoped_synch_mpz;
 typedef _scoped_numeral_vector<unsynch_mpz_manager> scoped_mpz_vector;
-
-#endif /* MPZ_H_ */
-

@@ -65,17 +65,15 @@ struct bit_blaster_model_converter : public model_converter {
             for (unsigned j = 0; j < num_args; j++) {
                 expr * bit = to_app(bs)->get_arg(j);
                 SASSERT(!TO_BOOL || m().is_bool(bit)); 
-                SASSERT(TO_BOOL ||  is_sort_of(m().get_sort(bit), m().get_family_id("bv"), BV_SORT));
+                SASSERT(TO_BOOL ||  is_sort_of(bit->get_sort(), m().get_family_id("bv"), BV_SORT));
                 SASSERT(is_uninterp_const(bit));
                 bits.insert(to_app(bit)->get_decl());
             }
         }
         TRACE("blaster_mc",
               tout << "bits that should not be included in the model:\n";
-              obj_hashtable<func_decl>::iterator it  = bits.begin();
-              obj_hashtable<func_decl>::iterator end = bits.end();
-              for (; it != end; ++it) {
-                  tout << (*it)->get_name() << " ";
+              for (func_decl* f : bits) {
+                  tout << f->get_name() << " ";
               }
               tout << "\n";);
 

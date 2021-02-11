@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_WATCHED_H_
-#define SAT_WATCHED_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "util/vector.h"
@@ -35,6 +34,9 @@ namespace sat {
        
        Remark: there are no clause objects for binary clauses.
     */
+
+    class extension;
+
     class watched {
     public:
         enum kind {
@@ -138,9 +140,8 @@ namespace sat {
     void set_ternary_learned(watch_list& wlist, literal l1, literal l2, bool learned);
 
     class clause_allocator;
-    std::ostream& display_watch_list(std::ostream & out, clause_allocator const & ca, watch_list const & wlist);
+    std::ostream& display_watch_list(std::ostream & out, clause_allocator const & ca, watch_list const & wlist, extension* ext);
 
     void conflict_cleanup(watch_list::iterator it, watch_list::iterator it2, watch_list& wlist);
 };
 
-#endif

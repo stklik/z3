@@ -60,7 +60,7 @@ br_status factor_rewriter::mk_eq(expr * arg1, expr * arg2, expr_ref & result) {
     expr_ref_vector eqs(m());
     for(; it != end; ++it) {
         expr* e = it->m_key;
-        eqs.push_back(m().mk_eq(e, a().mk_numeral(rational(0), m().get_sort(e))));  
+        eqs.push_back(m().mk_eq(e, a().mk_numeral(rational(0), e->get_sort())));  
     }
     result = m().mk_or(eqs.size(), eqs.c_ptr());    
     return BR_DONE;
@@ -126,7 +126,7 @@ void factor_rewriter::mk_is_negative(expr_ref& result, expr_ref_vector& eqs) {
     SASSERT(it != end);
     expr_ref neg0(m()), neg(m()), pos0(m()), pos(m()), tmp(m());
     expr* e = it->m_key;
-    expr_ref zero(a().mk_numeral(rational(0), m().get_sort(e)), m());
+    expr_ref zero(a().mk_numeral(rational(0), e->get_sort()), m());
     expr_ref_vector conjs(m());
     pos0 = m().mk_true();
     neg0 = m().mk_false();
@@ -257,7 +257,7 @@ bool factor_rewriter::extract_factors() {
             m_factors.append(m_muls[0].size(), m_muls[0].c_ptr());
             if (!m_adds[0].second) {
                 bool found_numeral = false;
-                sort* s = m().get_sort(m_muls[0][0]);
+                sort* s = m_muls[0][0]->get_sort();
                 rational v;
                 for (unsigned i = 0; !found_numeral && i < m_factors.size(); ++i) {
                     if (a().is_numeral(m_factors[i].get(), v)) {
@@ -301,7 +301,7 @@ bool factor_rewriter::extract_factors() {
     }
     SASSERT(m_muls.size() == m_adds.size());
     expr_ref_vector trail(m());
-    sort* s = m().get_sort(m_factors[0].get());
+    sort* s = m_factors[0]->get_sort();
     for (unsigned i = 0; i < m_adds.size(); ++i) {
         switch(m_muls[i].size()) {
         case 0: 
@@ -341,11 +341,8 @@ bool factor_rewriter::extract_factors() {
 
 void factor_rewriter::collect_powers() {
     m_powers.reset();
-    for (unsigned i = 0; i < m_factors.size(); ++i) {
-        obj_map<expr,unsigned>::obj_map_entry* entry = m_powers.insert_if_not_there2(m_factors[i].get(), 0);
-        if (entry) {
-            ++(entry->get_data().m_value);
-        }
+    for (expr* f : m_factors) {
+        m_powers.insert_if_not_there(f, 0)++;
     }
 }
 

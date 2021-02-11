@@ -41,7 +41,7 @@ class dt2bv_tactic : public tactic {
     obj_hashtable<sort> m_non_fd_sorts;
     
 
-    bool is_fd(expr* a) { return is_fd(get_sort(a)); }
+    bool is_fd(expr* a) { return is_fd(a->get_sort()); }
     bool is_fd(sort* a) { return m_dt.is_enum_sort(a); }
 
     struct check_fd {        
@@ -59,14 +59,14 @@ class dt2bv_tactic : public tactic {
             }
             else if (m_t.m_dt.is_recognizer(a->get_decl()) &&
                 m_t.is_fd(a->get_arg(0))) {
-                m_t.m_fd_sorts.insert(get_sort(a->get_arg(0)));
+                m_t.m_fd_sorts.insert(a->get_arg(0)->get_sort());
             }
             else if (m_t.is_fd(a) && a->get_num_args() > 0) {
-                m_t.m_non_fd_sorts.insert(get_sort(a));
+                m_t.m_non_fd_sorts.insert(a->get_sort());
                 args_cannot_be_fd(a);
             }
             else if (m_t.is_fd(a)) {
-                m_t.m_fd_sorts.insert(get_sort(a));
+                m_t.m_fd_sorts.insert(a->get_sort());
             }
             else {
                 args_cannot_be_fd(a);
@@ -76,14 +76,14 @@ class dt2bv_tactic : public tactic {
         void args_cannot_be_fd(app* a) {
             for (expr* arg : *a) {
                 if (m_t.is_fd(arg)) {
-                    m_t.m_non_fd_sorts.insert(get_sort(arg));
+                    m_t.m_non_fd_sorts.insert(arg->get_sort());
                 }                    
             }
         }
 
         void operator()(var * v) {
             if (m_t.is_fd(v)) {
-                m_t.m_fd_sorts.insert(get_sort(v));
+                m_t.m_fd_sorts.insert(v->get_sort());
             }
         }
 
@@ -154,8 +154,6 @@ public:
         }
         g->inc_depth();
         result.push_back(g.get());
-        TRACE("dt2bv", g->display(tout););
-        SASSERT(g->is_well_sorted());
     }
     
     void cleanup() override {

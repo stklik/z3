@@ -16,8 +16,7 @@ Author:
 
 Revision History:
 --*/
-#ifndef SHARED_OCCS_H_
-#define SHARED_OCCS_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -53,7 +52,7 @@ class shared_occs {
     bool                m_track_atomic;
     bool                m_visit_quantifiers;
     bool                m_visit_patterns;
-    obj_hashtable<expr> m_shared;
+    expr_ref_vector     m_shared;
     typedef std::pair<expr*, unsigned> frame;
     svector<frame>      m_stack;
     bool process(expr * t, shared_occs_mark & visited);
@@ -64,18 +63,16 @@ public:
         m(_m),
         m_track_atomic(track_atomic),
         m_visit_quantifiers(visit_quantifiers),
-        m_visit_patterns(visit_patterns) {
+        m_visit_patterns(visit_patterns),
+        m_shared(m) {
     }
     ~shared_occs();
     void operator()(expr * t);
     void operator()(expr * t, shared_occs_mark & visited);
-    bool is_shared(expr * t) const { return m_shared.contains(t); }
-    unsigned num_shared() const { return m_shared.size(); }
-    iterator begin_shared() const { return m_shared.begin(); }
-    iterator end_shared() const { return m_shared.end(); }
+    bool is_shared(expr * t) const { return m_shared.get(t->get_id(), nullptr) != nullptr; }
+    unsigned num_shared() const;
     void reset();
     void cleanup();
     void display(std::ostream & out, ast_manager & mgr) const;
 };
 
-#endif
