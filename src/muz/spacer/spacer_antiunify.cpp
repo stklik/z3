@@ -91,7 +91,7 @@ struct var_abs_rewriter : public default_rewriter_cfg {
 
     bool get_subst(expr * s, expr * & t, proof * & t_pr) {
         if (m_util.is_numeral(s)) {
-            t = m.mk_var(m_var_index++, m.get_sort(s));
+            t = m.mk_var(m_var_index++, s->get_sort());
             m_substitution.insert(t, s);
             m_pinned.push_back(t);
             m_has_num.mark(s, true);
@@ -132,7 +132,7 @@ void anti_unifier::operator()(expr *e1, expr *e2, expr_ref &res,
         unsigned num_arg2 = n2->get_num_args();
         if (n1->get_decl() != n2->get_decl() || num_arg1 != num_arg2) {
             expr_ref v(m);
-            v = m.mk_var(m_subs.size(), get_sort(n1));
+            v = m.mk_var(m_subs.size(), n1->get_sort());
             m_pinned.push_back(v);
             m_subs.push_back(expr_pair(n1, n2));
             m_cache.insert(n1, n2, v);
@@ -151,13 +151,14 @@ void anti_unifier::operator()(expr *e1, expr *e2, expr_ref &res,
             if (m_todo.size() > todo_sz) {continue;}
 
             expr_ref u(m);
-            u = m.mk_app(n1->get_decl(), kids.size(), kids.c_ptr());
+            u = m.mk_app(n1->get_decl(), kids.size(), kids.data());
             m_pinned.push_back(u);
             m_cache.insert(n1, n2, u);
         }
+        m_todo.pop_back();
     }
 
-    expr *r;
+    expr *r = nullptr;
     VERIFY(m_cache.find(e1, e2, r));
     res = r;
 
@@ -203,6 +204,7 @@ public:
 bool naive_convex_closure::compute_closure(anti_unifier& au, ast_manager& m,
                                            expr_ref& result) {
     NOT_IMPLEMENTED_YET();
+    return false;
 #if 0
     arith_util util(m);
 
@@ -276,9 +278,9 @@ bool naive_convex_closure::compute_closure(anti_unifier& au, ast_manager& m,
     substitute_vars_by_const(m, au.get_generalization(), const_ref, lit3);
 
     expr_ref_vector args(m);
-    args.push_back(lit1);
-    args.push_back(lit2);
-    args.push_back(lit3);
+    args.push_back(std::move(lit1));
+    args.push_back(std::move(lit2));
+    args.push_back(std::move(lit3));
     expr_ref body_with_consts = mk_and(args);
 
     // 3. replace const by var
@@ -395,7 +397,7 @@ struct mk_num_pat_rewriter : public default_rewriter_cfg {
 
     bool get_subst(expr * s, expr * & t, proof * & t_pr) {
         if (m_arith.is_numeral(s)) {
-            t = m.mk_var(m_subs.size(), m.get_sort(s));
+            t = m.mk_var(m_subs.size(), s->get_sort());
             m_pinned.push_back(t);
             m_subs.push_back(to_app(s));
 

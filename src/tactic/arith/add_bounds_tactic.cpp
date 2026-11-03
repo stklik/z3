@@ -19,10 +19,10 @@ Revision History:
 #include "tactic/tactical.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/ast_smt2_pp.h"
-#include "tactic/arith/bound_manager.h"
+#include "ast/simplifiers/bound_manager.h"
 
 struct is_unbounded_proc {
-    struct found {};
+    struct found : public std::exception {};
     arith_util      m_util;
     bound_manager & m_bm;
     
@@ -41,7 +41,8 @@ struct is_unbounded_proc {
 bool is_unbounded(goal const & g) {
     ast_manager & m = g.m();
     bound_manager bm(m);
-    bm(g);
+    for (auto [f, d, p] : g)
+        bm(f, d, p);
     is_unbounded_proc proc(bm);
     return test(g, proc);
 }
@@ -51,7 +52,6 @@ public:
     result operator()(goal const & g) override {
         return is_unbounded(g);
     }
-    ~is_unbounded_probe() override {}
 };
 
 probe * mk_is_unbounded_probe() {
@@ -117,7 +117,7 @@ class add_bounds_tactic : public tactic {
             expr_fast_mark1 visited;
             add_bound_proc proc(bm, *(g.get()), m_lower, m_upper);
             unsigned sz = g->size();
-            for (unsigned i = 0; i < sz; i++)
+            for (unsigned i = 0; i < sz; ++i)
                 quick_for_each_expr(proc, visited, g->form(i));
             visited.reset();
             g->inc_depth();
@@ -125,7 +125,7 @@ class add_bounds_tactic : public tactic {
             if (proc.m_num_bounds > 0) 
                 g->updt_prec(goal::UNDER);
             report_tactic_progress(":added-bounds", proc.m_num_bounds);
-            TRACE("add_bounds", g->display(tout););
+            TRACE(add_bounds, g->display(tout););
         }
     };
 
@@ -145,10 +145,12 @@ public:
     ~add_bounds_tactic() override {
         dealloc(m_imp);
     }
+
+    char const* name() const override { return "add_bounds"; }
     
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {

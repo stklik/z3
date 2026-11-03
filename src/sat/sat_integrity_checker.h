@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_INTEGRITY_CHECKER_H_
-#define SAT_INTEGRITY_CHECKER_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "sat/sat_watched.h"
@@ -26,6 +25,7 @@ Revision History:
 namespace sat {
     class integrity_checker {
         solver const & s;
+        bool contains_watched(watch_list const & wlist, clause const & c, clause_offset cls_off) const;
     public:
         integrity_checker(solver const & s);
         
@@ -42,5 +42,4 @@ namespace sat {
         bool check_disjoint_clauses() const;
         bool operator()() const;
     };
-};
-#endif
+}

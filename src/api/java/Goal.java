@@ -19,6 +19,8 @@ package com.microsoft.z3;
 
 import com.microsoft.z3.enumerations.Z3_goal_prec;
 
+import java.lang.ref.ReferenceQueue;
+
 /**
  * A goal (aka problem). A goal is essentially a set of formulas, that can be
  * solved and/or transformed using tactics and solvers.
@@ -76,10 +78,11 @@ public class Goal extends Z3Object {
      * 
      * @throws Z3Exception
      **/
-    public void add(BoolExpr ... constraints)
+    @SafeVarargs
+    public final void add(Expr<BoolSort>... constraints)
     {
         getContext().checkContextMatch(constraints);
-        for (BoolExpr c : constraints)
+        for (Expr<BoolSort> c : constraints)
         {
             Native.goalAssert(getContext().nCtx(), getNativeObject(),
                     c.getNativeObject());
@@ -130,8 +133,7 @@ public class Goal extends Z3Object {
         int n = size();
         BoolExpr[] res = new BoolExpr[n];
         for (int i = 0; i < n; i++)
-            res[i] = new BoolExpr(getContext(), Native.goalFormula(getContext()
-                    .nCtx(), getNativeObject(), i));
+            res[i] = (BoolExpr) Expr.create(getContext(), Native.goalFormula(getContext().nCtx(), getNativeObject(), i));
         return res;
     }
 
@@ -262,6 +264,18 @@ public class Goal extends Z3Object {
 
     @Override
     void addToReferenceQueue() {
-        getContext().getGoalDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, GoalRef::new);
+    }
+
+    private static class GoalRef extends Z3ReferenceQueue.Reference<Goal> {
+
+        private GoalRef(Goal referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.goalDecRef(ctx.nCtx(), z3Obj);
+        }
     }
 }

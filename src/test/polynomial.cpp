@@ -22,6 +22,7 @@ Notes:
 #include "math/polynomial/polynomial_cache.h"
 #include "math/polynomial/linear_eq_solver.h"
 #include "util/rlimit.h"
+#include <iostream>
 
 static void tst1() {
     std::cout << "\n----- Basic testing -------\n";
@@ -254,9 +255,9 @@ static void tst9() {
     q  = x2 - (((x0^3) - 1)*(x1^2) - 1);
     std::cout << "q: " << q << "\n";
     polynomial_ref r2(m);
-    TRACE("polynomial", tout << "QUASI_RESULTANT: q, sqrt2.....\n";);
+    TRACE(polynomial, tout << "QUASI_RESULTANT: q, sqrt2.....\n";);
     r2  = quasi_resultant(q, sqrt2, 0);
-    // TRACE("polynomial", tout << "QUASI_RESULTANT: sqrt2, q.....\n";);
+    // TRACE(polynomial, tout << "QUASI_RESULTANT: sqrt2, q.....\n";);
     // std::cout << "r2: " << r2 << "\n";
     // r2  = quasi_resultant(sqrt2, q, 0);
     // std::cout << "r2: " << r2 << "\n";
@@ -707,7 +708,7 @@ static void tst_psc(polynomial_ref const & p, polynomial_ref const & q, polynomi
     std::cout << "q: " << q << std::endl;
     m.psc_chain(p, q, x, S);
     unsigned sz = S.size();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         std::cout << "S_" << i << ": " << polynomial_ref(S.get(i), m) << std::endl;
     }
     if (sz > 0) {
@@ -732,7 +733,7 @@ static void tst_psc_perf(polynomial_ref const & p, polynomial_ref const & q, pol
     std::cout << "q: " << q << std::endl;
     m.psc_chain(p, q, x, S);
     unsigned sz = S.size();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         std::cout << "S_" << i << ": " << m.size(S.get(i)) << std::endl; // polynomial_ref(S.get(i), m) << std::endl;
     }
 }
@@ -839,14 +840,14 @@ static void tst_vars(polynomial_ref const & p, unsigned sz, polynomial::var * xs
     p.m().vars(p, r);
     std::cout << "---------------\n";
     std::cout << "p: " << p << "\nvars: ";
-    for (unsigned i = 0; i < r.size(); i++) {
+    for (unsigned i = 0; i < r.size(); ++i) {
         std::cout << r[i] << " ";
     }
     std::cout << std::endl;
     ENSURE(r.size() == sz);
     std::sort(r.begin(), r.end());
     std::sort(xs, xs + sz);
-    for (unsigned i = 0; i < r.size(); i++) {
+    for (unsigned i = 0; i < r.size(); ++i) {
         ENSURE(r[i] == xs[i]);
     }
 }
@@ -928,7 +929,7 @@ static void tst_substitute(polynomial_ref const & p,
     std::cout << "---------------\n";
     std::cout << "p: " << p << std::endl;
     polynomial_ref r(p.m());
-    r = p.m().substitute(p, 2, xs, vs.c_ptr());
+    r = p.m().substitute(p, 2, xs, vs.data());
     std::cout << "r: " << r << std::endl;
     std::cout << "expected: " << expected << std::endl;
     ENSURE(eq(r, expected));
@@ -969,7 +970,7 @@ static void tst_qsubstitute(polynomial_ref const & p,
     std::cout << "---------------\n";
     std::cout << "p: " << p << std::endl;
     polynomial_ref r(p.m());
-    r = p.m().substitute(p, 2, xs, vs.c_ptr());
+    r = p.m().substitute(p, 2, xs, vs.data());
     std::cout << "r: " << r << std::endl;
     std::cout << "expected (modulo a constant): " << expected << std::endl;
     ENSURE(eq(r, normalize(expected)));
@@ -1021,7 +1022,7 @@ void tst_mfact(polynomial_ref const & p, unsigned num_distinct_factors) {
     factor(p, fs);
     std::cout << "factors:\n";
     std::cout << p.m().m().to_string(fs.get_constant()) << "\n";
-    for (unsigned i = 0; i < fs.distinct_factors(); i++) {
+    for (unsigned i = 0; i < fs.distinct_factors(); ++i) {
         std::cout << "*(" << fs[i] << ")^" << fs.get_degree(i) << std::endl;
     }
     ENSURE(fs.distinct_factors() == num_distinct_factors);
@@ -1339,7 +1340,7 @@ static void tst_mm() {
 
 static void tst_eval(polynomial_ref const & p, polynomial::var x0, rational v0, polynomial::var x1, rational v1, polynomial::var x2, rational v2,
                      rational expected) {
-    TRACE("eval_bug", tout << "tst_eval, " << p << "\n";);
+    TRACE(eval_bug, tout << "tst_eval, " << p << "\n";);
     std::cout << "p: " << p << "\nx" << x0 << " -> " << v0 << "\nx" << x1 << " -> " << v1 << "\nx" << x2 << " -> " << v2 << "\n";
     unsynch_mpq_manager qm;
     polynomial::simple_var2value<unsynch_mpq_manager> x2v(qm);
@@ -1570,7 +1571,7 @@ static void tst_gcd2() {
     // polynomial_ref p1(m);
     // p1 = derivative(p, 0);
     // polynomial_ref g(m);
-    // for (unsigned i = 0; i < 50; i++)
+    // for (unsigned i = 0; i < 50; ++i)
     //    g = gcd(p, p1);
     // return;
 
@@ -1598,9 +1599,9 @@ static void tst_gcd2() {
 
 #if 0
 static void tst_gcd3() {
-    enable_trace("polynomial_gcd");
-    enable_trace("polynomial_gcd_detail");
-    enable_trace("mpzzp");
+    // enable_trace("polynomial_gcd");
+    // enable_trace("polynomial_gcd_detail");
+    // enable_trace("mpzzp");
     polynomial::numeral_manager nm;
     reslimit rl; polynomial::manager m(rl, nm);
     polynomial_ref x(m);
@@ -1624,7 +1625,7 @@ static void tst_gcd3() {
 }
 
 static void tst_gcd4() {
-    enable_trace("mgcd");
+    // enable_trace("mgcd");
     // enable_trace("CRA");
     polynomial::numeral_manager nm;
     reslimit rl; polynomial::manager m(rl, nm);
@@ -1666,7 +1667,7 @@ static void tst_newton_interpolation() {
     polynomial_ref r(m);
     {
         polynomial::scoped_set_zp setZ97(m, 97);
-        m.newton_interpolation(0, 2, ins.c_ptr(), outs, r);
+        m.newton_interpolation(0, 2, ins.data(), outs, r);
     }
     std::cout << "interpolation result: " << r << "\n";
     ENSURE(m.eq((x^2)*y + 5*x*y + 41*x - 9*y - 21, r));
@@ -1721,17 +1722,17 @@ void tst_linear_solver() {
 
     as.reset();
     as.push_back(mpq(2));  as.push_back(mpq(1));  as.push_back(mpq(-1)); qm.set(b, 8);
-    solver.add(0, as.c_ptr(), b);
+    solver.add(0, as.data(), b);
 
     as.reset();
     as.push_back(mpq(-3)); as.push_back(mpq(-1)); as.push_back(mpq(2));  qm.set(b, -11);
-    solver.add(1, as.c_ptr(), b);
+    solver.add(1, as.data(), b);
 
     as.reset();
     as.push_back(mpq(-2)); as.push_back(mpq(1));  as.push_back(mpq(2));  qm.set(b, -3);
-    solver.add(2, as.c_ptr(), b);
+    solver.add(2, as.data(), b);
 
-    VERIFY(solver.solve(xs.c_ptr()));
+    VERIFY(solver.solve(xs.data()));
     ENSURE(qm.eq(xs[0], mpq(2)));
     ENSURE(qm.eq(xs[1], mpq(3)));
     ENSURE(qm.eq(xs[2], mpq(-1)));
@@ -1816,9 +1817,9 @@ void tst_polynomial() {
     // enable_trace("factor");
     // enable_trace("poly_bug");
     // enable_trace("factor_bug");
-    disable_trace("polynomial");
-    enable_trace("psc_chain_classic");
-    enable_trace("Lazard");
+    // disable_trace("polynomial");
+    // enable_trace("psc_chain_classic");
+    // enable_trace("Lazard");
     // enable_trace("eval_bug");
     // enable_trace("mgcd");
     tst_psc();
@@ -1852,11 +1853,11 @@ void tst_polynomial() {
     // enable_trace("mpz_gcd");
     tst_vars();
     tst_sqf();
-    enable_trace("resultant");
-    enable_trace("psc");
-    disable_trace("polynomial");
-    enable_trace("pseudo_remainder");
-    enable_trace("resultant_bug");
+    // enable_trace("resultant");
+    // enable_trace("psc");
+    // disable_trace("polynomial");
+    // enable_trace("pseudo_remainder");
+    // enable_trace("resultant_bug");
     tst_sqrt();
     tst_prem();
     tst_compose();

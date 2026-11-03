@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef OBJ_PAIR_HASHTABLE_H_
-#define OBJ_PAIR_HASHTABLE_H_
+#pragma once
 
 #include "util/hash.h"
 #include "util/hashtable.h"
@@ -30,11 +29,10 @@ Revision History:
 template<typename T1, typename T2>
 class obj_pair_hash_entry {
     unsigned            m_hash; // cached hash code
-    std::pair<T1*, T2*> m_data;
+    std::pair<T1*, T2*> m_data { nullptr, nullptr };
     
 public:
     typedef std::pair<T1*, T2*> data;
-    obj_pair_hash_entry():m_data(static_cast<T1*>(nullptr),static_cast<T2*>(nullptr)) {}
     unsigned get_hash() const { return m_hash; }
     bool is_free() const { return m_data.first == 0; }
     bool is_deleted() const { return m_data.first == reinterpret_cast<T1 *>(1); }
@@ -61,17 +59,13 @@ protected:
     class entry;
 public:
     class key_data {
-        Key1 *   m_key1;
-        Key2 *   m_key2;
+        Key1 *   m_key1 = nullptr;
+        Key2 *   m_key2 = nullptr;
         Value    m_value;
-        unsigned m_hash;
+        unsigned m_hash = 0;
         friend class entry;
     public:
-        key_data():
-            m_key1(nullptr),
-            m_key2(nullptr),
-            m_hash(0) {
-        }
+        key_data() = default;
         key_data(Key1 * k1, Key2 * k2):
             m_key1(k1), 
             m_key2(k2) {
@@ -88,13 +82,13 @@ public:
         Key1 * get_key1() const { return m_key1; }
         Key2 * get_key2() const { return m_key2; }
         Value const & get_value() const { return m_value; }
+        Value & get_value() { return m_value; }
     };
 protected:
     class entry {
         key_data m_data;
     public:
         typedef key_data data;
-        entry() {}
         unsigned get_hash() const { return m_data.hash(); }
         bool is_free() const { return m_data.m_key1 == nullptr; }
         bool is_deleted() const { return m_data.m_key1 == reinterpret_cast<Key1 *>(1); }
@@ -149,8 +143,8 @@ public:
         m_table.insert(key_data(k1, k2, v));
     }
     
-    key_data const & insert_if_not_there(Key1 * k1, Key2 * k2, Value const & v) {
-        return m_table.insert_if_not_there(key_data(k1, k2, v));
+    Value& insert_if_not_there(Key1 * k1, Key2 * k2, Value const & v) {
+        return m_table.insert_if_not_there2(key_data(k1, k2, v))->get_data().get_value();
     }
     
     bool find(Key1 * k1, Key2 * k2, Value & v) const {
@@ -183,5 +177,4 @@ public:
     }
 };
 
-#endif /* OBJ_PAIR_HASHTABLE_H_ */
 

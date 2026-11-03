@@ -18,18 +18,22 @@ Revision History:
 --*/
 #include "ast/static_features.h"
 #include "ast/ast_pp.h"
+#include "ast/ast_ll_pp.h"
+#include "ast/for_each_expr.h"
 
 static_features::static_features(ast_manager & m):
-    m_manager(m),
+    m(m),
     m_autil(m),
     m_bvutil(m),
     m_arrayutil(m),
     m_fpautil(m),
     m_sequtil(m),
+    m_ffutil(m),
     m_bfid(m.get_basic_family_id()),
     m_afid(m.mk_family_id("arith")),
     m_lfid(m.mk_family_id("label")),
     m_arrfid(m.mk_family_id("array")),
+    m_srfid(m.mk_family_id("specrels")),
     m_label_sym("label"),
     m_pattern_sym("pattern"),
     m_expr_list_sym("expr-list") {
@@ -37,7 +41,8 @@ static_features::static_features(ast_manager & m):
 }
 
 void static_features::reset() {
-    m_already_visited                      .reset();
+    m_pre_processed                      .reset();
+    m_post_processed.reset();
     m_cnf                                  = true;
     m_num_exprs                            = 0;
     m_num_roots                            = 0;
@@ -52,12 +57,6 @@ void static_features::reset() {
     m_num_nested_formulas                  = 0;
     m_num_bool_exprs                       = 0;
     m_num_bool_constants                   = 0;
-    m_num_formula_trees                    = 0;
-    m_max_formula_depth                    = 0;
-    m_sum_formula_depth                    = 0;
-    m_num_or_and_trees                     = 0;
-    m_max_or_and_tree_depth                = 0;
-    m_sum_or_and_tree_depth                = 0;
     m_num_ite_trees                        = 0;
     m_max_ite_tree_depth                   = 0;
     m_sum_ite_tree_depth                   = 0;
@@ -78,6 +77,8 @@ void static_features::reset() {
     m_has_real                             = false; 
     m_has_bv                               = false;
     m_has_fpa                              = false;
+    m_has_ff                               = false;
+    m_has_sr                               = false;
     m_has_str                              = false;
     m_has_seq_non_str                      = false;
     m_has_arrays                           = false;
@@ -101,7 +102,7 @@ void static_features::reset() {
     m_num_aliens_per_family                .reset();
     m_num_theories                         = 0;
     m_theories                             .reset();
-    m_max_stack_depth                      = 500;
+    m_max_stack_depth                      = 30;
     flush_cache();
 }
 
@@ -121,31 +122,32 @@ bool static_features::is_diff_term(expr const * e, rational & r) const {
     }
     if (is_numeral(e, r))
         return true;
-    return m_autil.is_add(e) && to_app(e)->get_num_args() == 2 && is_numeral(to_app(e)->get_arg(0), r) && !is_arith_expr(to_app(e)->get_arg(1));
+    expr* a1 = nullptr, *a2 = nullptr;
+    return m_autil.is_add(e, a1, a2) && is_numeral(a1, r) && !is_arith_expr(a2) && !m.is_ite(a2);
 }
 
 bool static_features::is_diff_atom(expr const * e) const {
     if (!is_bool(e))
         return false;
-    if (!m_manager.is_eq(e) && !is_arith_expr(e))
+    if (!m.is_eq(e) && !is_arith_expr(e))
         return false;
     SASSERT(to_app(e)->get_num_args() == 2);
     expr * lhs = to_app(e)->get_arg(0);
     expr * rhs = to_app(e)->get_arg(1);
-    if (!is_arith_expr(lhs) && !is_arith_expr(rhs)) 
+    if (!is_arith_expr(lhs) && !is_arith_expr(rhs) && !m.is_ite(lhs) && !m.is_ite(rhs)) 
         return true;    
     if (!is_numeral(rhs)) 
         return false;    
     // lhs can be 'x' or '(+ x (* -1 y))' or '(+ (* -1 x) y)'
-    if (!is_arith_expr(lhs))
+    if (!is_arith_expr(lhs) && !m.is_ite(lhs))
         return true;
     expr* arg1, *arg2;
     if (!m_autil.is_add(lhs, arg1, arg2)) 
         return false;    
     expr* m1, *m2;
-    if (!is_arith_expr(arg1) && m_autil.is_mul(arg2, m1, m2) &&  is_minus_one(m1) && !is_arith_expr(m2))
+    if (!is_arith_expr(arg1) && m_autil.is_mul(arg2, m1, m2) &&  is_minus_one(m1) && !is_arith_expr(m2) && !m.is_ite(m2))
         return true;
-    if (!is_arith_expr(arg2) && m_autil.is_mul(arg1, m1, m2) &&  is_minus_one(m1) && !is_arith_expr(m2))
+    if (!is_arith_expr(arg2) && m_autil.is_mul(arg1, m1, m2) &&  is_minus_one(m1) && !is_arith_expr(m2) && !m.is_ite(m2))
         return true;
     return false;
     
@@ -157,7 +159,7 @@ bool static_features::is_gate(expr const * e) const {
         case OP_ITE: case OP_AND: case OP_OR: case OP_XOR: case OP_IMPLIES:
             return true;
         case OP_EQ:
-            return m_manager.is_bool(e);
+            return m.is_bool(e);
         }
     }
     return false;
@@ -168,12 +170,12 @@ void static_features::update_core(expr * e) {
     
     // even if a benchmark does not contain any theory interpreted function decls, we still have to install
     // the theory if the benchmark contains constants or function applications of an interpreted sort.
-    sort * s      = m_manager.get_sort(e);
-    if (!m_manager.is_uninterp(s))
+    sort * s      = e->get_sort();
+    if (!m.is_uninterp(s))
         mark_theory(s->get_family_id());
     
     bool _is_gate = is_gate(e);
-    bool _is_eq   = m_manager.is_eq(e);
+    bool _is_eq   = m.is_eq(e);
     if (_is_gate) {
         m_cnf = false;
         m_num_nested_formulas++;
@@ -184,17 +186,17 @@ void static_features::update_core(expr * e) {
             else {
                 m_num_ite_terms++;
                 // process then&else nodes
-                for (unsigned i = 1; i < 3; i++) {
+                for (unsigned i = 1; i < 3; ++i) {
                     expr * arg = to_app(e)->get_arg(i);
                     acc_num(arg);
                     // Must check whether arg is diff logic or not.
                     // Otherwise, problem can be incorrectly tagged as diff logic.
-                    sort * arg_s = m_manager.get_sort(arg); 
+                    sort * arg_s = arg->get_sort(); 
                     family_id fid_arg = arg_s->get_family_id();
                     if (fid_arg == m_afid) {
                         m_num_arith_terms++;
                         rational k;
-                        TRACE("diff_term", tout << "diff_term: " << is_diff_term(arg, k) << "\n" << mk_pp(arg, m_manager) << "\n";);
+                        TRACE(diff_term, tout << "diff_term: " << is_diff_term(arg, k) << "\n" << mk_pp(arg, m) << "\n";);
                         if (is_diff_term(arg, k)) {
                             m_num_diff_terms++;
                             acc_num(k);
@@ -224,7 +226,7 @@ void static_features::update_core(expr * e) {
         unsigned num_patterns = to_quantifier(e)->get_num_patterns();
         if (num_patterns > 0) {
             m_num_quantifiers_with_patterns++;
-            for (unsigned i = 0; i < num_patterns; i++) {
+            for (unsigned i = 0; i < num_patterns; ++i) {
                 expr * p = to_quantifier(e)->get_pattern(i);
                 if (is_app(p) && to_app(p)->get_num_args() > 1) {
                     m_num_quantifiers_with_multi_patterns++;
@@ -236,7 +238,7 @@ void static_features::update_core(expr * e) {
     bool _is_le_ge = m_autil.is_le(e) || m_autil.is_ge(e);
     if (_is_le_ge) {
         m_num_arith_ineqs++;
-        TRACE("diff_atom", tout << "diff_atom: " << is_diff_atom(e) << "\n" << mk_pp(e, m_manager) << "\n";);
+        TRACE(diff_atom, tout << "diff_atom: " << is_diff_atom(e) << "\n" << mk_pp(e, m) << "\n";);
         if (is_diff_atom(e))
             m_num_diff_ineqs++;
         if (!is_arith_expr(to_app(e)->get_arg(0)))
@@ -253,14 +255,14 @@ void static_features::update_core(expr * e) {
         if (is_numeral(to_app(e)->get_arg(1))) {
             acc_num(to_app(e)->get_arg(1));
             m_num_arith_eqs++;
-            TRACE("diff_atom", tout << "diff_atom: " << is_diff_atom(e) << "\n" << mk_pp(e, m_manager) << "\n";);
+            TRACE(diff_atom, tout << "diff_atom: " << is_diff_atom(e) << "\n" << mk_pp(e, m) << "\n";);
             if (is_diff_atom(e))
                 m_num_diff_eqs++;
             if (!is_arith_expr(to_app(e)->get_arg(0)))
                 m_num_simple_eqs++;
         }
-        sort * s      = m_manager.get_sort(to_app(e)->get_arg(0));
-        if (!m_manager.is_uninterp(s)) {
+        sort * s      = to_app(e)->get_arg(0)->get_sort();
+        if (!m.is_uninterp(s)) {
             family_id fid = s->get_family_id();
             if (fid != null_family_id && fid != m_bfid)
                 inc_theory_eqs(fid);
@@ -274,16 +276,19 @@ void static_features::update_core(expr * e) {
         m_has_bv = true;
     if (!m_has_fpa && (m_fpautil.is_float(e) || m_fpautil.is_rm(e)))
         m_has_fpa = true;
+    if (!m_has_ff && m_ffutil.is_ff(e))
+        m_has_ff = true;
+    if (is_app(e) && to_app(e)->get_family_id() == m_srfid) 
+        m_has_sr = true;
     if (!m_has_arrays && m_arrayutil.is_array(e)) 
-        m_has_arrays = true;
+        check_array(e->get_sort());
     if (!m_has_ext_arrays && m_arrayutil.is_array(e) && 
         !m_arrayutil.is_select(e) && !m_arrayutil.is_store(e)) 
         m_has_ext_arrays = true;
     if (!m_has_str && m_sequtil.str.is_string_term(e))
         m_has_str = true;
-    if (!m_has_seq_non_str && m_sequtil.str.is_non_string_sequence(e)) {
+    if (!m_has_seq_non_str && m_sequtil.str.is_non_string_sequence(e)) 
         m_has_seq_non_str = true;
-    }
     if (is_app(e)) {
         family_id fid = to_app(e)->get_family_id();
         mark_theory(fid);
@@ -297,7 +302,6 @@ void static_features::update_core(expr * e) {
                 m_num_interpreted_constants++;
         }
         if (fid == m_afid) {
-            // std::cout << mk_pp(e, m_manager) << "\n";
             switch (to_app(e)->get_decl_kind()) {
             case OP_MUL:
                 if (!is_numeral(to_app(e)->get_arg(0)) || to_app(e)->get_num_args() > 2) {
@@ -308,8 +312,10 @@ void static_features::update_core(expr * e) {
             case OP_IDIV:
             case OP_REM:
             case OP_MOD:
-                if (!is_numeral(to_app(e)->get_arg(1)))
+                if (!is_numeral(to_app(e)->get_arg(1), r) || r.is_zero()) {
+                    m_num_uninterpreted_functions++;
                     m_num_non_linear++;
+                }
                 break;
             }
         }
@@ -317,8 +323,8 @@ void static_features::update_core(expr * e) {
             m_num_uninterpreted_exprs++;
             if (to_app(e)->get_num_args() == 0) {
                 m_num_uninterpreted_constants++;
-                sort * s      = m_manager.get_sort(e);
-                if (!m_manager.is_uninterp(s)) {
+                sort * s      = e->get_sort();
+                if (!m.is_uninterp(s)) {
                     family_id fid = s->get_family_id();
                     if (fid != null_family_id && fid != m_bfid)
                         inc_theory_constants(fid);
@@ -326,28 +332,26 @@ void static_features::update_core(expr * e) {
             }
         }
         if (m_arrayutil.is_array(e)) {
-            TRACE("sf_array", tout << mk_ismt2_pp(e, m_manager) << "\n";);
+            TRACE(sf_array, tout << mk_ismt2_pp(e, m) << "\n";);
             sort * ty = to_app(e)->get_decl()->get_range();
             mark_theory(ty->get_family_id());
             unsigned n = ty->get_num_parameters();
-            for (unsigned i = 0; i < n; i++) {
+            for (unsigned i = 0; i < n; ++i) {
                 sort * ds = to_sort(ty->get_parameter(i).get_ast());
                 update_core(ds);
             }
         }
         func_decl * d = to_app(e)->get_decl();
         inc_num_apps(d);
-        if (d->get_arity() > 0 && !is_marked(d)) {
-            mark(d);
+        if (d->get_arity() > 0 && !is_marked_pre(d)) {
+            mark_pre(d);
             if (fid == null_family_id)
                 m_num_uninterpreted_functions++;
         }
         if (!_is_eq && !_is_gate) {
-            unsigned num_args = to_app(e)->get_num_args();
-            for (unsigned i = 0; i < num_args; i++) {
-                expr * arg   = to_app(e)->get_arg(i);
-                sort * arg_s = m_manager.get_sort(arg); 
-                if (!m_manager.is_uninterp(arg_s)) {
+            for (expr * arg : *to_app(e)) {
+                sort * arg_s = arg->get_sort(); 
+                if (!m.is_uninterp(arg_s)) {
                     family_id fid_arg = arg_s->get_family_id();
                     if (fid_arg != fid && fid_arg != null_family_id) {
                         m_num_aliens++;
@@ -356,7 +360,7 @@ void static_features::update_core(expr * e) {
                             SASSERT(!_is_le_ge);
                             m_num_arith_terms++;
                             rational k;
-                            TRACE("diff_term", tout << "diff_term: " << is_diff_term(arg, k) << "\n" << mk_pp(arg, m_manager) << "\n";);
+                            TRACE(diff_term, tout << "diff_term: " << is_diff_term(arg, k) << "\n" << mk_pp(arg, m) << "\n";);
                             if (is_diff_term(arg, k)) {
                                 m_num_diff_terms++;
                                 acc_num(k);
@@ -369,6 +373,16 @@ void static_features::update_core(expr * e) {
     }
 }
 
+void static_features::check_array(sort* s) {
+    if (m_arrayutil.is_array(s)) {
+        m_has_arrays = true;
+        update_core(get_array_range(s));
+        for (unsigned i = get_array_arity(s); i-- > 0; )
+            update_core(get_array_domain(s, i));
+    }
+}
+
+
 void static_features::update_core(sort * s) {
     mark_theory(s->get_family_id());
     if (!m_has_int && m_autil.is_int(s))
@@ -379,32 +393,95 @@ void static_features::update_core(sort * s) {
         m_has_bv = true;
     if (!m_has_fpa && (m_fpautil.is_float(s) || m_fpautil.is_rm(s)))
         m_has_fpa = true;
-    if (!m_has_arrays && m_arrayutil.is_array(s))
-        m_has_arrays = true;
+    if (!m_has_ff && m_ffutil.is_ff(s))
+        m_has_ff = true;
+    check_array(s);
 }
 
-void static_features::process(expr * e, bool form_ctx, bool or_and_ctx, bool ite_ctx, unsigned stack_depth) {
-    TRACE("static_features", tout << "processing\n" << mk_pp(e, m_manager) << "\n";);
-    if (is_var(e))
-        return;
-    if (is_marked(e)) {
-        m_num_sharing++;
-        return;
-    }    
-    if (stack_depth > m_max_stack_depth) {
-        return;
-    }
-    mark(e);
-    update_core(e);
+bool static_features::pre_process(expr * e, bool form_ctx, bool or_and_ctx, bool ite_ctx) {
+    if (is_marked_post(e))
+        return true;
 
+    if (is_marked_pre(e))
+        return true;
+
+    if (is_var(e)) {
+        mark_pre(e);
+        mark_post(e);
+        return true;
+    }
+
+    mark_pre(e);
+
+    update_core(e);
 
     if (is_quantifier(e)) {
         expr * body = to_quantifier(e)->get_expr();
-        process(body, false, false, false, stack_depth+1);
+        if (is_marked_post(body)) 
+            return true;                    
+        add_process(body, false, false, false);
+        return false;
+    }
+
+    auto [form_ctx_new, or_and_ctx_new, ite_ctx_new] = new_ctx(e);
+
+    bool all_processed = true;
+    for (expr* arg : *to_app(e)) {
+        m.is_not(arg, arg);
+        if (is_marked_post(arg))
+            ++m_num_sharing;
+        else {
+            add_process(arg, form_ctx_new, or_and_ctx_new, ite_ctx_new);
+            all_processed = false;
+        }
+    }    
+    return all_processed;    
+}
+
+void static_features::post_process(expr * e, bool form_ctx, bool or_and_ctx, bool ite_ctx) {
+    if (is_marked_post(e))
+        return;
+
+    mark_post(e);
+
+    if (is_quantifier(e)) {
+        expr * body = to_quantifier(e)->get_expr();
         set_depth(e, get_depth(body)+1);
         return;
     }
+
+    unsigned depth = 0;
+    unsigned ite_depth = 0;
+
+    auto [form_ctx_new, or_and_ctx_new, ite_ctx_new] = new_ctx(e);
+
+    for (expr* arg : *to_app(e)) {
+        m.is_not(arg, arg);
+        SASSERT(is_marked_post(arg));
+        depth        = std::max(depth, get_depth(arg));
+        if (ite_ctx_new)
+            ite_depth    = std::max(ite_depth, get_ite_depth(arg));
+    }
+
+    depth++;
+    set_depth(e, depth);
+    if (depth > m_max_depth)
+        m_max_depth = depth;
     
+    if (ite_ctx_new) {
+        ite_depth++;
+        if (!ite_ctx) {
+            m_num_ite_trees++;
+            m_sum_ite_tree_depth += ite_depth;
+            if (ite_depth >= m_max_ite_tree_depth)
+                m_max_ite_tree_depth = ite_depth;
+        }
+        set_ite_depth(e, ite_depth);
+    }
+
+}
+
+std::tuple<bool, bool, bool> static_features::new_ctx(expr* e) {
     bool form_ctx_new   = false;
     bool or_and_ctx_new = false;
     bool ite_ctx_new    = false;
@@ -412,7 +489,7 @@ void static_features::process(expr * e, bool form_ctx, bool or_and_ctx, bool ite
     if (is_basic_expr(e)) {
         switch (to_app(e)->get_decl_kind()) {
         case OP_ITE:
-            form_ctx_new = m_manager.is_bool(e);
+            form_ctx_new = m.is_bool(e);
             ite_ctx_new  = true;
             break;
         case OP_AND: 
@@ -425,72 +502,34 @@ void static_features::process(expr * e, bool form_ctx, bool or_and_ctx, bool ite
             break;
         }
     }
-    
-    unsigned depth = 0;
-    unsigned form_depth = 0;
-    unsigned or_and_depth = 0;
-    unsigned ite_depth = 0;
 
-    unsigned num_args = to_app(e)->get_num_args();
-    for (unsigned i = 0; i < num_args; i++) {
-        expr * arg = to_app(e)->get_arg(i);
-        if (m_manager.is_not(arg))
-            arg = to_app(arg)->get_arg(0);
-        process(arg, form_ctx_new, or_and_ctx_new, ite_ctx_new, stack_depth+1);
-        depth        = std::max(depth, get_depth(arg));
-        if (form_ctx_new)
-            form_depth   = std::max(form_depth, get_form_depth(arg));
-        if (or_and_ctx_new)
-            or_and_depth = std::max(or_and_depth, get_or_and_depth(arg));
-        if (ite_ctx_new)
-            ite_depth    = std::max(ite_depth, get_ite_depth(arg));
-    }
+    return std::tuple(form_ctx_new, or_and_ctx_new, ite_ctx_new);
+}
 
-    depth++;
-    set_depth(e, depth);
-    if (depth > m_max_depth)
-        m_max_depth = depth;
-
-    if (form_ctx_new) {
-        form_depth++;
-        if (!form_ctx) {
-            m_num_formula_trees++;
-            m_sum_formula_depth += form_depth;
-            if (form_depth > m_max_formula_depth)
-                m_max_formula_depth = form_depth;
+void static_features::process_all() {
+    while (!m_to_process.empty()) {
+        auto const& [e, form, or_and, ite] = m_to_process.back();
+        if (is_marked_post(e)) {
+            m_to_process.pop_back();
+            ++m_num_sharing;
+            continue;
         }
-        set_form_depth(e, form_depth);
-    }
-    if (or_and_ctx_new) {
-        or_and_depth++;
-        if (!or_and_ctx) {
-            m_num_or_and_trees++;
-            m_sum_or_and_tree_depth += or_and_depth;
-            if (or_and_depth > m_max_or_and_tree_depth)
-                m_max_or_and_tree_depth = or_and_depth;
-        }
-        set_or_and_depth(e, or_and_depth);
-    }
-    if (ite_ctx_new) {
-        ite_depth++;
-        if (!ite_ctx) {
-            m_num_ite_trees++;
-            m_sum_ite_tree_depth += ite_depth;
-            if (ite_depth >= m_max_ite_tree_depth)
-                m_max_ite_tree_depth = ite_depth;
-        }
-        set_ite_depth(e, ite_depth);
+        if (!pre_process(e, form, or_and, ite))
+            continue;
+        post_process(e, form, or_and, ite);
+        m_to_process.pop_back();
     }
 }
 
+
 void static_features::process_root(expr * e) {
-    if (is_marked(e)) {
+    if (is_marked_post(e)) {
         m_num_sharing++;
         return;
     }
     m_num_roots++;
-    if (m_manager.is_or(e)) {
-        mark(e);
+    if (m.is_or(e)) {
+        mark_post(e);
         m_num_clauses++;
         m_num_bool_exprs++;
         unsigned num_args  = to_app(e)->get_num_args();
@@ -498,33 +537,18 @@ void static_features::process_root(expr * e) {
         if (num_args == 2)
             m_num_bin_clauses++;
         unsigned depth = 0;
-        unsigned form_depth = 0;
-        unsigned or_and_depth = 0;
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * arg = to_app(e)->get_arg(i);
-            if (m_manager.is_not(arg))
+            if (m.is_not(arg))
                 arg = to_app(arg)->get_arg(0);
-            process(arg, true, true, false, 0);
+            add_process(arg, true, true, false);
+            process_all();
             depth        = std::max(depth, get_depth(arg));
-            form_depth   = std::max(form_depth, get_form_depth(arg));
-            or_and_depth = std::max(or_and_depth, get_or_and_depth(arg));
         }
         depth++;
         set_depth(e, depth);
         if (depth > m_max_depth)
             m_max_depth = depth;
-        form_depth++;
-        m_num_formula_trees++;
-        m_sum_formula_depth += form_depth;
-        if (form_depth > m_max_formula_depth)
-            m_max_formula_depth = form_depth;
-        set_form_depth(e, form_depth);
-        or_and_depth++;
-        m_num_or_and_trees++;
-        m_sum_or_and_tree_depth += or_and_depth;
-        if (or_and_depth > m_max_or_and_tree_depth)
-            m_max_or_and_tree_depth = or_and_depth;
-        set_or_and_depth(e, or_and_depth);
         return;
     }
     if (!is_gate(e)) {
@@ -532,11 +556,12 @@ void static_features::process_root(expr * e) {
         m_num_units++;
         m_num_clauses++;
     }
-    process(e, false, false, false, 0);
+    add_process(e, false, false, false);
+    process_all();
 }
 
 void static_features::collect(unsigned num_formulas, expr * const * formulas) {
-    for (unsigned i = 0; i < num_formulas; i++)
+    for (unsigned i = 0; i < num_formulas; ++i)
         process_root(formulas[i]);
 }
 
@@ -545,8 +570,8 @@ bool static_features::internal_family(symbol const & f_name) const {
 }
 
 void static_features::display_family_data(std::ostream & out, char const * prefix, unsigned_vector const & data) const {
-    for (unsigned fid = 0; fid < data.size(); fid++) {
-        symbol const & n = m_manager.get_family_name(fid);
+    for (unsigned fid = 0; fid < data.size(); ++fid) {
+        symbol const & n = m.get_family_name(fid);
         if (!internal_family(n))
             out << prefix << "_" << n << " " << data[fid] << "\n";
     }
@@ -580,12 +605,6 @@ void static_features::display_primitive(std::ostream & out) const {
     out << "NUM_NESTED_FORMULAS " << m_num_nested_formulas << "\n";
     out << "NUM_BOOL_EXPRS " << m_num_bool_exprs << "\n";
     out << "NUM_BOOL_CONSTANTS " << m_num_bool_constants << "\n";
-    out << "NUM_FORMULA_TREES " << m_num_formula_trees << "\n"; 
-    out << "MAX_FORMULA_DEPTH " << m_max_formula_depth << "\n";
-    out << "SUM_FORMULA_DEPTH " << m_sum_formula_depth << "\n";
-    out << "NUM_OR_AND_TREES " << m_num_or_and_trees << "\n";
-    out << "MAX_OR_AND_TREE_DEPTH " << m_max_or_and_tree_depth << "\n";
-    out << "SUM_OR_AND_TREE_DEPTH " << m_sum_or_and_tree_depth << "\n";
     out << "NUM_ITE_TREES " << m_num_ite_trees << "\n";
     out << "MAX_ITE_TREE_DEPTH " << m_max_ite_tree_depth << "\n";
     out << "SUM_ITE_TREE_DEPTH " << m_sum_ite_tree_depth << "\n";
@@ -628,7 +647,6 @@ void static_features::display(std::ostream & out) const {
     out << "BEGIN_STATIC_FEATURES" << "\n";
     out << "CNF " << m_cnf << "\n";
     out << "MAX_DEPTH " << m_max_depth << "\n";
-    out << "MAX_OR_AND_TREE_DEPTH " << m_max_or_and_tree_depth << "\n";
     out << "MAX_ITE_TREE_DEPTH " << m_max_ite_tree_depth << "\n";
     out << "HAS_INT " << m_has_int << "\n";
     out << "HAS_REAL " << m_has_real << "\n";
@@ -652,4 +670,10 @@ void static_features::display(std::ostream & out) const {
 }
 
 void static_features::get_feature_vector(vector<double> & result) {
+}
+
+bool static_features::is_dense() const {
+    return 
+        (m_num_uninterpreted_constants < 1000) &&
+        (m_num_arith_eqs + m_num_arith_ineqs) > m_num_uninterpreted_constants * 9;
 }

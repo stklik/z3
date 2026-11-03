@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef NLSAT_ASSIGNMENT_H_
-#define NLSAT_ASSIGNMENT_H_
+#pragma once
 
 #include "nlsat/nlsat_types.h"
 #include "math/polynomial/algebraic_numbers.h"
@@ -30,12 +29,11 @@ namespace nlsat {
     */
     class assignment : public polynomial::var2anum {
         scoped_anum_vector m_values;
-        svector<bool>      m_assigned;
+        bool_vector      m_assigned;
     public:
         assignment(anum_manager & _m):m_values(_m) {}
-        virtual ~assignment() {}
         anum_manager & am() const { return m_values.m(); }
-        void swap(assignment & other) {
+        void swap(assignment & other) noexcept {
             m_values.swap(other.m_values);
             m_assigned.swap(other.m_assigned);
         }
@@ -69,7 +67,7 @@ namespace nlsat {
         anum_manager & m() const override { return am(); }
         bool contains(var x) const override { return is_assigned(x); }
         anum const & operator()(var x) const override { SASSERT(is_assigned(x)); return value(x); }
-        void swap(var x, var y) {
+        void swap(var x, var y) noexcept {
             SASSERT(x < m_values.size() && y < m_values.size());
             std::swap(m_assigned[x], m_assigned[y]);
             std::swap(m_values[x], m_values[y]);
@@ -99,6 +97,5 @@ namespace nlsat {
         bool contains(var x) const override { return x != m_y && m_assignment.is_assigned(x); }
         anum const & operator()(var x) const override { return m_assignment.value(x); }
     };
-};
+}
 
-#endif

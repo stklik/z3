@@ -21,13 +21,11 @@ Revision History:
 #include "util/ref_util.h"
 
 inline void shared_occs::insert(expr * t) {
-    obj_hashtable<expr>::entry * dummy;
-    if (m_shared.insert_if_not_there_core(t, dummy))
-        m.inc_ref(t);
+    m_shared.reserve(t->get_id() + 1);
+    m_shared[t->get_id()] = t;
 }
 
 void shared_occs::reset() { 
-    dec_ref_collection_values(m, m_shared);
     m_shared.reset(); 
 }
 
@@ -95,7 +93,9 @@ void shared_occs::operator()(expr * t, shared_occs_mark & visited) {
         expr * curr = fr.first;
         switch (curr->get_kind()) {
         case AST_APP: {
+			
             unsigned num_args = to_app(curr)->get_num_args();
+			
             while (fr.second < num_args) {
                 expr * arg = to_app(curr)->get_arg(fr.second);
                 fr.second++;
@@ -132,9 +132,15 @@ void shared_occs::operator()(expr * t) {
 }
 
 void shared_occs::display(std::ostream & out, ast_manager & m) const {
-    iterator it =  begin_shared();
-    iterator end = end_shared();
-    for (; it != end; ++it) {
-        out << mk_ismt2_pp(*it, m) << "\n";
+    for (expr* s : m_shared) {
+        if (s) {
+            out << mk_ismt2_pp(s, m) << "\n";
+        }
     }
+}
+
+unsigned shared_occs::num_shared() const{ 
+    unsigned count = 0;
+    for (expr* s : m_shared) if (s) count++;
+    return count;
 }

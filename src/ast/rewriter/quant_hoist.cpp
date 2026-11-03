@@ -44,7 +44,7 @@ public:
     void operator()(expr* fml, app_ref_vector& vars, bool& is_fa, expr_ref& result, bool use_fresh, bool rewrite_ok) {
         quantifier_type qt = Q_none_pos;
         pull_quantifier(fml, qt, vars, result, use_fresh, rewrite_ok);
-        TRACE("qe_verbose", 
+        TRACE(qe_verbose, 
               tout << mk_pp(fml, m) << "\n";
               tout << mk_pp(result, m) << "\n";);
         SASSERT(is_positive(qt));
@@ -54,7 +54,7 @@ public:
     void pull_exists(expr* fml, app_ref_vector& vars, expr_ref& result, bool use_fresh, bool rewrite_ok) {
         quantifier_type qt = Q_exists_pos;
         pull_quantifier(fml, qt, vars, result, use_fresh, rewrite_ok);
-        TRACE("qe_verbose", 
+        TRACE(qe_verbose, 
               tout << mk_pp(fml, m) << "\n";
               tout << mk_pp(result, m) << "\n";);
     }
@@ -63,7 +63,7 @@ public:
         quantifier_type qt = is_forall?Q_forall_pos:Q_exists_pos;
         expr_ref result(m);
         pull_quantifier(fml, qt, vars, result, use_fresh, rewrite_ok);
-        TRACE("qe_verbose", 
+        TRACE(qe_verbose, 
               tout << mk_pp(fml, m) << "\n";
               tout << mk_pp(result, m) << "\n";);
         fml = std::move(result);
@@ -78,7 +78,7 @@ public:
                                : m.mk_const (sym, s);
             vars.push_back(a);
         }
-        expr * const * exprs = (expr* const*) (vars.c_ptr() + vars.size()- nd);
+        expr * const * exprs = (expr* const*) (vars.data() + vars.size()- nd);
         result = instantiate(m, q, exprs);
     }
 
@@ -113,9 +113,9 @@ public:
                 bound_names.push_back(v->get_decl()->get_name());
             }                
             if (sorts) {
-                bound_sorts.push_back(m.get_sort(v));
+                bound_sorts.push_back(v->get_sort());
             }
-            rep.insert(v, m.mk_var(index++, m.get_sort(v)));
+            rep.insert(v, m.mk_var(index++, v->get_sort()));
         }
         if (names && !bound_names.empty()) {
             bound_names.reverse();
@@ -187,8 +187,6 @@ private:
         case Q_exists_neg: return is_forall;
         case Q_none_pos: return true;
         case Q_none_neg: return true;
-        default:
-            UNREACHABLE();
         }
         return false;
     }
@@ -214,12 +212,10 @@ private:
                     pull_quantifier(a->get_arg(i), qt, vars, tmp, use_fresh, rewrite_ok);
                     args.push_back(tmp);
                 }
-                if (rewrite_ok) {
-                m_rewriter.mk_and(args.size(), args.c_ptr(), result);
-            }
-                else {
-                    result = m.mk_and (args.size (), args.c_ptr ());
-                }
+                if (rewrite_ok) 
+                    m_rewriter.mk_and(args.size(), args.data(), result);
+                else 
+                    result = m.mk_and(std::span<expr* const>(args.data(), args.size()));
             }
             else if (m.is_or(fml)) {
                 num_args = to_app(fml)->get_num_args();
@@ -227,12 +223,10 @@ private:
                     pull_quantifier(to_app(fml)->get_arg(i), qt, vars, tmp, use_fresh, rewrite_ok);
                     args.push_back(tmp);
                 }
-                if (rewrite_ok) {
-                m_rewriter.mk_or(args.size(), args.c_ptr(), result);
-            }
-                else {
-                    result = m.mk_or (args.size (), args.c_ptr ());
-                }
+                if (rewrite_ok) 
+                    m_rewriter.mk_or(args.size(), args.data(), result);
+                else 
+                    result = m.mk_or (args.size (), args.data ());
             }
             else if (m.is_not(fml)) {
                 pull_quantifier(to_app(fml)->get_arg(0), negate(qt), vars, tmp, use_fresh, rewrite_ok);
@@ -253,7 +247,11 @@ private:
                     pull_quantifier(t1, qt, vars, tt1, use_fresh, rewrite_ok);
                     nt1 = m.mk_not(t1);
                     pull_quantifier(nt1, qt, vars, ntt1, use_fresh, rewrite_ok);
-                    result = m.mk_and(m.mk_or(ntt1, tt2), m.mk_or(tt1, tt3));
+                    {
+                        auto _seq252_0 = m.mk_or(ntt1, tt2);
+                        auto _seq252_1 = m.mk_or(tt1, tt3);
+                        result = m.mk_and(_seq252_0, _seq252_1);
+                    }
                 }
                 else {
                     result = m.mk_ite(t1, tt2, tt3);
@@ -267,7 +265,11 @@ private:
                 nt2 = m.mk_not(t2);
                 pull_quantifier(nt1, qt, vars, ntt1, use_fresh, rewrite_ok);
                 pull_quantifier(nt2, qt, vars, ntt2, use_fresh, rewrite_ok);
-                result = m.mk_and(m.mk_or(ntt1, tt2), m.mk_or(ntt2, tt1));
+                {
+                    auto _seq266_0 = m.mk_or(ntt1, tt2);
+                    auto _seq266_1 = m.mk_or(ntt2, tt1);
+                    result = m.mk_and(_seq266_0, _seq266_1);
+                }
             }
             else {
                 // the formula contains a quantifier, but it is "inaccessible"

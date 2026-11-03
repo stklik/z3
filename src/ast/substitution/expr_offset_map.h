@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef EXPR_OFFSET_MAP_H_
-#define EXPR_OFFSET_MAP_H_
+#pragma once
 
 #include "ast/substitution/expr_offset.h"
 #include "util/vector.h"
@@ -29,8 +28,7 @@ template<typename T>
 class expr_offset_map {
     struct data {
         T        m_data;
-        unsigned m_timestamp;
-        data():m_timestamp(0) {}
+        unsigned m_timestamp = 0;
     };
     vector<svector<data> > m_map;
     unsigned               m_timestamp;
@@ -91,4 +89,3 @@ public:
     }
 };
 
-#endif /* EXPR_OFFSET_MAP_H_ */

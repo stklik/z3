@@ -16,18 +16,17 @@ Author:
 Notes:
 
 --*/
-#ifndef Z3_SPACER_H_
-#define Z3_SPACER_H_
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
 
     /** \defgroup capi C API */
-    /*@{*/
+    /**@{*/
 
     /** @name Spacer facilities */
-    /*@{*/
+    /**@{*/
     /**
         \brief Pose a query against the asserted rules at the given level.
 
@@ -37,18 +36,18 @@ extern "C" {
         \endcode
 
         query returns
-        - Z3_L_FALSE if the query is unsatisfiable.
-        - Z3_L_TRUE if the query is satisfiable. Obtain the answer by calling #Z3_fixedpoint_get_answer.
-        - Z3_L_UNDEF if the query was interrupted, timed out or otherwise failed.
+        - \c Z3_L_FALSE if the query is unsatisfiable.
+        - \c Z3_L_TRUE if the query is satisfiable. Obtain the answer by calling #Z3_fixedpoint_get_answer.
+        - \c Z3_L_UNDEF if the query was interrupted, timed out or otherwise failed.
 
-        def_API('Z3_fixedpoint_query_from_lvl', INT, (_in(CONTEXT), _in(FIXEDPOINT), _in(AST), _in(UINT)))
+        def_API('Z3_fixedpoint_query_from_lvl', LBOOL, (_in(CONTEXT), _in(FIXEDPOINT), _in(AST), _in(UINT)))
     */
     Z3_lbool Z3_API Z3_fixedpoint_query_from_lvl (Z3_context c,Z3_fixedpoint d, Z3_ast query, unsigned lvl);
 
      /**
        \brief Retrieve a bottom-up (from query) sequence of ground facts
 
-       The previous call to Z3_fixedpoint_query must have returned Z3_L_TRUE.
+       The previous call to #Z3_fixedpoint_query must have returned \c Z3_L_TRUE.
 
        def_API('Z3_fixedpoint_get_ground_sat_answer', AST, (_in(CONTEXT), _in(FIXEDPOINT)))
     */
@@ -114,6 +113,22 @@ extern "C" {
        Z3_ast_map map);
 
     /**
+       \brief Project with witness extraction.
+
+       The returned map contains a binding of variables to terms that such that when the binding
+       is used for the formula, it remains true within the model.
+
+       def_API('Z3_qe_model_project_with_witness', AST, (_in(CONTEXT), _in(MODEL), _in(UINT), _in_array(2, APP), _in(AST), _in(AST_MAP)))
+    */
+    Z3_ast Z3_API Z3_qe_model_project_with_witness
+      (Z3_context c,
+       Z3_model m,
+       unsigned num_bounds,
+       Z3_app const bound[],
+       Z3_ast body,
+       Z3_ast_map map);
+
+    /**
        \brief Extrapolates a model of a formula
 
        def_API('Z3_model_extrapolate', AST, (_in(CONTEXT), _in(MODEL), _in(AST)))
@@ -133,11 +148,10 @@ extern "C" {
        Z3_ast_vector vars,
        Z3_ast body);
 
-    /*@}*/
-    /*@}*/
+    /**@}*/
+    /**@}*/
 
 #ifdef __cplusplus
 }
 #endif // __cplusplus
 
-#endif

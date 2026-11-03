@@ -25,11 +25,11 @@ void counter::update(unsigned el, int delta) {
 }
 
 int & counter::get(unsigned el) {
-    return m_data.insert_if_not_there2(el, 0)->get_data().m_value;
+    return m_data.insert_if_not_there(el, 0);
 }
 
 counter & counter::count(unsigned sz, const unsigned * els, int delta) {
-    for(unsigned i=0; i<sz; i++) {
+    for(unsigned i = 0; i < sz; ++i) {
         update(els[i], delta);
     }
     return *this;
@@ -37,58 +37,44 @@ counter & counter::count(unsigned sz, const unsigned * els, int delta) {
 
 unsigned counter::get_positive_count() const {
     unsigned cnt = 0;
-    iterator eit = begin();
-    iterator eend = end();
-    for(; eit!=eend; ++eit) {
-        if( eit->m_value>0 ) { 
+    for (auto const& kv : *this)
+        if (kv.m_value > 0) 
             cnt++;
-        }
-    }
     return cnt;
 }
 
 void counter::collect_positive(uint_set & acc) const {
-    iterator eit = begin();
-    iterator eend = end();
-    for(; eit!=eend; ++eit) {
-        if(eit->m_value>0) { acc.insert(eit->m_key); }
-    }
+    for (auto const& kv : *this) 
+        if(kv.m_value > 0) 
+            acc.insert(kv.m_key); 
 }
 
-bool counter::get_max_positive(unsigned & res) const {
-    bool found = false;
-    iterator eit = begin();
-    iterator eend = end();
-    for(; eit!=eend; ++eit) {
-        if( eit->m_value>0 && (!found || eit->m_key>res) ) { 
-            found = true;
-            res = eit->m_key;
+std::optional<unsigned> counter::get_max_positive() const {
+    std::optional<unsigned> result;
+    for (auto const& kv : *this) {
+        if (kv.m_value > 0 && (!result || kv.m_key > *result)) {
+            result = kv.m_key;
         }
     }
-    return found;
+    return result;
 }
 
-unsigned counter::get_max_positive() const {
-    unsigned max_pos;
-    VERIFY(get_max_positive(max_pos));
-    return max_pos;
+unsigned counter::get_max_positive_or_zero() const {
+    return get_max_positive().value_or(0);
 }
 
 int counter::get_max_counter_value() const {
     int res = 0;
-    iterator eit = begin();
-    iterator eend = end();
-    for (; eit!=eend; ++eit) {
-        if( eit->m_value>res ) { 
-            res = eit->m_value;
-        }
+    for (auto const& kv : *this) {
+        if (kv.m_value > res) 
+            res = kv.m_value;
     }
     return res;
 }
 
 void var_counter::count_vars(const app * pred, int coef) {
     unsigned n = pred->get_num_args();
-    for (unsigned i = 0; i < n; i++) {
+    for (unsigned i = 0; i < n; ++i) {
         m_fv(pred->get_arg(i));
         for (unsigned j = 0; j < m_fv.size(); ++j) {
             if (m_fv[j]) {

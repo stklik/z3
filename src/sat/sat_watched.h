@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_WATCHED_H_
-#define SAT_WATCHED_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "util/vector.h"
@@ -35,10 +34,13 @@ namespace sat {
        
        Remark: there are no clause objects for binary clauses.
     */
+
+    class extension;
+
     class watched {
     public:
         enum kind {
-            BINARY = 0, TERNARY, CLAUSE, EXT_CONSTRAINT
+            BINARY = 0, CLAUSE, EXT_CONSTRAINT
         };
     private:
         size_t   m_val1;
@@ -53,16 +55,6 @@ namespace sat {
             SASSERT(learned || is_binary_non_learned_clause());
         }
 
-        watched(literal l1, literal l2) {
-            SASSERT(l1 != l2);
-            if (l1.index() > l2.index())
-                std::swap(l1, l2);
-            m_val1 = l1.to_uint();
-            m_val2 = static_cast<unsigned>(TERNARY) + (l2.to_uint() << 2);
-            SASSERT(is_ternary_clause());
-            SASSERT(get_literal1() == l1);
-            SASSERT(get_literal2() == l2);
-        }
 
         unsigned val2() const { return m_val2; }
 
@@ -93,9 +85,6 @@ namespace sat {
 
         void set_learned(bool l) { if (l) m_val2 |= 4u; else m_val2 &= ~4u; SASSERT(is_learned() == l); }
                 
-        bool is_ternary_clause() const { return get_kind() == TERNARY; }
-        literal get_literal1() const { SASSERT(is_ternary_clause()); return to_literal(static_cast<unsigned>(m_val1)); }
-        literal get_literal2() const { SASSERT(is_ternary_clause()); return to_literal(m_val2 >> 2); }
 
         bool is_clause() const { return get_kind() == CLAUSE; }
         clause_offset get_clause_offset() const { SASSERT(is_clause()); return static_cast<clause_offset>(m_val1); }
@@ -114,17 +103,14 @@ namespace sat {
         bool operator!=(watched const & w) const { return !operator==(w); }
     };
 
-    static_assert(0 <= watched::BINARY && watched::BINARY <= 3, "");
-    static_assert(0 <= watched::TERNARY && watched::TERNARY <= 3, "");
-    static_assert(0 <= watched::CLAUSE && watched::CLAUSE <= 3, "");
-    static_assert(0 <= watched::EXT_CONSTRAINT && watched::EXT_CONSTRAINT <= 3, "");
+    static_assert(0 <= watched::BINARY && watched::BINARY <= 2, "");
+    static_assert(0 <= watched::CLAUSE && watched::CLAUSE <= 2, "");
+    static_assert(0 <= watched::EXT_CONSTRAINT && watched::EXT_CONSTRAINT <= 2, "");
 
     struct watched_lt {
         bool operator()(watched const & w1, watched const & w2) const {
             if (w2.is_binary_clause()) return false;
             if (w1.is_binary_clause()) return true;
-            if (w2.is_ternary_clause()) return false;
-            if (w1.is_ternary_clause()) return true;
             return false;
         }
     };
@@ -134,13 +120,10 @@ namespace sat {
     watched* find_binary_watch(watch_list & wlist, literal l);
     watched const* find_binary_watch(watch_list const & wlist, literal l);
     bool erase_clause_watch(watch_list & wlist, clause_offset c);
-    void erase_ternary_watch(watch_list & wlist, literal l1, literal l2);
-    void set_ternary_learned(watch_list& wlist, literal l1, literal l2, bool learned);
 
     class clause_allocator;
-    std::ostream& display_watch_list(std::ostream & out, clause_allocator const & ca, watch_list const & wlist);
+    std::ostream& display_watch_list(std::ostream & out, clause_allocator const & ca, watch_list const & wlist, extension* ext);
 
     void conflict_cleanup(watch_list::iterator it, watch_list::iterator it2, watch_list& wlist);
-};
+}
 
-#endif

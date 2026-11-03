@@ -25,8 +25,7 @@ Revision History:
 
 */
 
-#ifndef FACTOR_EQUIVS_H_
-#define FACTOR_EQUIVS_H_
+#pragma once
 
 #include "util/union_find.h"
 #include "ast/ast_util.h"
@@ -104,11 +103,10 @@ public:
             m_first = false;
             return *this;
         }
-        bool operator==(const iterator& o) {
+        bool operator!=(const iterator& o) const {
             SASSERT(&m_ouf == &o.m_ouf);
-            return  m_first == o.m_first && m_curr_id == o.m_curr_id;
+            return  m_first != o.m_first || m_curr_id != o.m_curr_id;
         }
-        bool operator!=(const iterator& o) {return !(*this == o);}
     };
 
     iterator begin(OBJ*o) {
@@ -153,11 +151,10 @@ public:
                     m_ouf.m_uf.is_root(m_rootnb) != true);
             return *this;
         }
-        bool operator==(const equiv_iterator& o) {
+        bool operator!=(const equiv_iterator& o) const {
             SASSERT(&m_ouf == &o.m_ouf);
-            return m_rootnb == o.m_rootnb;
+            return m_rootnb != o.m_rootnb;
         }
-        bool operator!=(const equiv_iterator& o) {return !(*this == o);}
     };
 
     equiv_iterator begin() {return equiv_iterator(*this, 0);}
@@ -187,4 +184,3 @@ void equiv_to_expr(expr_equiv_class &equiv, expr_ref_vector &out);
 bool equiv_to_expr_full(expr_equiv_class &equiv, expr_ref_vector &out);
 
 
-#endif

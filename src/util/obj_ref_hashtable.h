@@ -7,7 +7,7 @@ Module Name:
 
 Abstract:
 
-    corresponding obj_map with reference count managment.
+    corresponding obj_map with reference count management.
 
 Author:
 
@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef OBJ_REF_HASHTABLE_H_
-#define OBJ_REF_HASHTABLE_H_
+#pragma once
 
 #include "util/obj_hashtable.h"
 
@@ -105,7 +104,7 @@ public:
 
     unsigned long long get_num_collision() const { return m_table.get_num_collision(); }
 
-    void swap(obj_ref_map & other) {
+    void swap(obj_ref_map & other) noexcept {
         m_table.swap(other.m_table);
     }
 
@@ -113,5 +112,4 @@ public:
 };
 
 
-#endif /* OBJ_REF_HASHTABLE_H_ */
 

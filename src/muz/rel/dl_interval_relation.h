@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_INTERVAL_RELATION_H_
-#define DL_INTERVAL_RELATION_H_
+#pragma once
 
 
 #include "ast/arith_decl_plugin.h"
@@ -135,7 +134,6 @@ namespace datalog {
 
     };
         
-};
+}
 
-#endif 
 

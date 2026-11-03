@@ -17,14 +17,9 @@ Notes:
 
 --*/
 #include "util/prime_generator.h"
+#include "util/mutex.h"
 
 #define PRIME_LIST_MAX_SIZE 1<<20
-
-prime_generator::prime_generator() {
-    m_primes.push_back(2);
-    m_primes.push_back(3);
-    process_next_k_numbers(128);
-}
 
 void prime_generator::process_next_k_numbers(uint64_t k) {
     svector<uint64_t> todo;
@@ -37,12 +32,12 @@ void prime_generator::process_next_k_numbers(uint64_t k) {
     SASSERT(m_primes[j] == 3);
     while (!todo.empty()) {
         unsigned sz = m_primes.size();
-        for (; j < sz; j++) {
+        for (; j < sz; ++j) {
             uint64_t p = m_primes[j];
             unsigned todo_sz = todo.size();
             unsigned k1 = 0;
             unsigned k2 = 0;
-            for (; k1 < todo_sz; k1++) {
+            for (; k1 < todo_sz; ++k1) {
                 if (todo[k1] % p == 0)
                     continue;
                 todo[k2] = todo[k1];
@@ -53,7 +48,7 @@ void prime_generator::process_next_k_numbers(uint64_t k) {
                 return;
             if (p > (todo[k2-1] / p) + 1) {
                 // all numbers in todo are primes
-                for (unsigned k1 = 0; k1 < k2; k1++) {
+                for (unsigned k1 = 0; k1 < k2; ++k1) {
                     m_primes.push_back(todo[k1]);
                 }
                 return;
@@ -63,7 +58,7 @@ void prime_generator::process_next_k_numbers(uint64_t k) {
         p = p*p;
         unsigned todo_sz = todo.size();
         unsigned k1 = 0;
-        for (k1 = 0; k1 < todo_sz; k1++) {
+        for (k1 = 0; k1 < todo_sz; ++k1) {
             if (todo[k1] < p) {
                 m_primes.push_back(todo[k1]);
             }
@@ -72,11 +67,17 @@ void prime_generator::process_next_k_numbers(uint64_t k) {
             }
         }
         unsigned k2 = 0;
-        for (; k1 < todo_sz; k1++, k2++) {
+        for (; k1 < todo_sz; ++k1, ++k2) {
             todo[k2] = todo[k1];
         }
         todo.shrink(k2);
     }
+}
+
+void prime_generator::initialize() {
+    m_primes.push_back(2);
+    m_primes.push_back(3);
+    process_next_k_numbers(128);
 }
 
 void prime_generator::finalize() {
@@ -96,7 +97,7 @@ uint64_t prime_generator::operator()(unsigned idx) {
     return m_primes[idx];
 }
 
-prime_generator g_prime_generator;
+static prime_generator g_prime_generator;
 
 prime_iterator::prime_iterator(prime_generator * g):m_idx(0) {
     if (g == nullptr) {
@@ -109,6 +110,8 @@ prime_iterator::prime_iterator(prime_generator * g):m_idx(0) {
     }
 }
 
+static DECLARE_MUTEX(g_prime_iterator);
+
 uint64_t prime_iterator::next() {
     unsigned idx = m_idx;
     m_idx++;
@@ -117,7 +120,7 @@ uint64_t prime_iterator::next() {
     }
     else {
         uint64_t r;
-        #pragma omp critical (prime_iterator)
+        lock_guard lock(*g_prime_iterator);
         {
             r = (*m_generator)(idx);
         }
@@ -125,7 +128,12 @@ uint64_t prime_iterator::next() {
     }
 }
 
-void prime_iterator::finalize() {
-    g_prime_generator.finalize();
+void prime_iterator::initialize() {
+    ALLOC_MUTEX(g_prime_iterator);
+    g_prime_generator.initialize();
 }
 
+void prime_iterator::finalize() {
+    g_prime_generator.finalize();
+    DEALLOC_MUTEX(g_prime_iterator);
+}

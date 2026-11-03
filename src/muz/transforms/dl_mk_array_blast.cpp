@@ -38,9 +38,6 @@ namespace datalog {
         m_rewriter.updt_params(m_params);
     }
 
-    mk_array_blast::~mk_array_blast() {
-    }
-
     bool mk_array_blast::is_store_def(expr* e, expr*& x, expr*& y) {
         if (m.is_eq(e, x, y)) {
             if (!a.is_store(y)) {
@@ -91,7 +88,7 @@ namespace datalog {
                 r.get_vars(m, vars);
                 m_next_var = vars.size() + 1;
             }
-            v = m.mk_var(m_next_var, m.get_sort(e));
+            v = m.mk_var(m_next_var, e->get_sort());
             m_defs.insert(e, v);
             ++m_next_var;
         }
@@ -170,7 +167,7 @@ namespace datalog {
             }
             if (valid) {
                 todo.pop_back();
-                e1 = m.mk_app(ap->get_decl(), args.size(), args.c_ptr());
+                e1 = m.mk_app(ap->get_decl(), args.size(), args.data());
                 trail.push_back(e1);
                 if (a.is_select(ap)) {
                     if (m_defs.find(e1, v)) {
@@ -195,7 +192,7 @@ namespace datalog {
                 for (unsigned j = 0; j < s->get_num_args(); ++j) {
                     args.push_back(cache.find(s->get_arg(j)));
                 }
-                e1 = m.mk_app(s->get_decl(), args.size(), args.c_ptr());
+                e1 = m.mk_app(s->get_decl(), args.size(), args.data());
                 if (!m_defs.contains(e1) && !insert_def(r, e1, v)) {
                     return false;
                 }
@@ -219,7 +216,7 @@ namespace datalog {
             for (; it2 != end; ++it2) {
                 app* a2 = it2->m_key;
                 var* v2 = it2->m_value;
-                TRACE("dl", tout << mk_pp(a1, m) << " " << mk_pp(a2, m) << "\n";);
+                TRACE(dl, tout << mk_pp(a1, m) << " " << mk_pp(a2, m) << "\n";);
                 if (get_select(a1) != get_select(a2)) {
                     continue;
                 }
@@ -230,10 +227,11 @@ namespace datalog {
                 for (unsigned j = 0; j < args1.size(); ++j) {
                     eqs.push_back(m.mk_eq(args1[j], args2[j]));
                 }
-                conjs.push_back(m.mk_implies(m.mk_and(eqs.size(), eqs.c_ptr()), m.mk_eq(v1, v2)));
+                expr_ref same_indices(m.mk_and(eqs), m);
+                conjs.push_back(m.mk_implies(same_indices, m.mk_eq(v1, v2)));
             }
         }
-        body = m.mk_and(conjs.size(), conjs.c_ptr());        
+        body = m.mk_and(conjs);        
         m_rewriter(body);   
         return true;
     }
@@ -263,7 +261,7 @@ namespace datalog {
                 uint_set rhs_vars = rm.collect_vars(y);
                 lhs &= rhs_vars;
                 if (!lhs.empty()) {
-                    TRACE("dl", tout << "unusable equality " << mk_pp(e, m) << "\n";);
+                    TRACE(dl, tout << "unusable equality " << mk_pp(e, m) << "\n";);
                     new_conjs.push_back(e);
                 }
                 else {
@@ -281,13 +279,13 @@ namespace datalog {
             return false;        
         }
         expr_ref fml1(m), fml2(m), body(m), head(m);
-        body = m.mk_and(new_conjs.size(), new_conjs.c_ptr());
+        body = m.mk_and(new_conjs);
         head = r.get_head();
         sub(body);
         m_rewriter(body);
         sub(head);
         m_rewriter(head);
-        TRACE("dl", tout << body << " => " << head << "\n";);
+        TRACE(dl, tout << body << " => " << head << "\n";);
         change = ackermanize(r, body, head);
         if (!change) {
             rules.add_rule(&r);
@@ -297,7 +295,7 @@ namespace datalog {
         fml2 = m.mk_implies(body, head);
         proof_ref p(m);
         rule_set new_rules(m_ctx);
-        TRACE("dl", tout << fml2 << "\n";);
+        TRACE(dl, tout << fml2 << "\n";);
         rm.mk_rule(fml2, p, new_rules, r.name());
         
 
@@ -312,7 +310,7 @@ namespace datalog {
             }
             rules.add_rule(new_rule.get());
             rm.mk_rule_rewrite_proof(r, *new_rule.get());
-            TRACE("dl", new_rule->display(m_ctx, tout << "new rule\n"););
+            TRACE(dl, new_rule->display(m_ctx, tout << "new rule\n"););
         }
         return true;
     }
@@ -322,20 +320,20 @@ namespace datalog {
         if (!m_ctx.array_blast ()) {
             return nullptr;
         }
-        rule_set* rules = alloc(rule_set, m_ctx);
+        scoped_ptr<rule_set> rules = alloc(rule_set, m_ctx);
         rules->inherit_predicates(source);
-        rule_set::iterator it = source.begin(), end = source.end();
         bool change = false;
-        for (; !m_ctx.canceled() && it != end; ++it) {
-            change = blast(**it, *rules) || change;
+        for (rule* r : source) {
+            if (m_ctx.canceled())
+                return nullptr;
+            change = blast(*r, *rules) || change;
         }
         if (!change) {
-            dealloc(rules);
             rules = nullptr;
         }        
-        return rules;        
+        return rules.detach();        
     }
 
-};
+}
 
 

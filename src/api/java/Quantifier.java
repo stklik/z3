@@ -141,7 +141,7 @@ public class Quantifier extends BoolExpr
      **/
     public BoolExpr getBody()
     {
-        return new BoolExpr(getContext(), Native.getQuantifierBody(getContext()
+        return (BoolExpr) Expr.create(getContext(), Native.getQuantifierBody(getContext()
                 .nCtx(), getNativeObject()));
     }
 
@@ -161,6 +161,12 @@ public class Quantifier extends BoolExpr
     /**
      * Create a quantified expression.
      *
+     * @param ctx Context to create the quantifier on.
+     * @param isForall Quantifier type.
+     * @param sorts Sorts of bound variables.
+     * @param names Names of bound variables
+     * @param body Body of quantifier
+     * @param weight Weight used to indicate priority for quantifier instantiation
      * @param patterns Nullable patterns
      * @param noPatterns Nullable noPatterns
      * @param quantifierID Nullable quantifierID
@@ -168,7 +174,7 @@ public class Quantifier extends BoolExpr
      */
     public static Quantifier of(
             Context ctx, boolean isForall, Sort[] sorts, Symbol[] names,
-            Expr body, int weight, Pattern[] patterns, Expr[] noPatterns,
+            Expr<BoolSort> body, int weight, Pattern[] patterns, Expr<?>[] noPatterns,
             Symbol quantifierID, Symbol skolemID) {
         ctx.checkContextMatch(patterns);
         ctx.checkContextMatch(noPatterns);
@@ -212,8 +218,8 @@ public class Quantifier extends BoolExpr
      * @param quantifierID Nullable quantifier identifier.
      * @param skolemID Nullable skolem identifier.
      */
-    public static Quantifier of(Context ctx, boolean isForall, Expr[] bound, Expr body,
-            int weight, Pattern[] patterns, Expr[] noPatterns,
+    public static Quantifier of(Context ctx, boolean isForall, Expr<?>[] bound, Expr<BoolSort> body,
+            int weight, Pattern[] patterns, Expr<?>[] noPatterns,
             Symbol quantifierID, Symbol skolemID) {
         ctx.checkContextMatch(noPatterns);
         ctx.checkContextMatch(patterns);

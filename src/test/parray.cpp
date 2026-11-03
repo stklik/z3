@@ -19,6 +19,7 @@ Revision History:
 #include "util/parray.h"
 #include "util/small_object_allocator.h"
 #include "ast/ast.h"
+#include <iostream>
 
 template<bool PRESERVE_ROOTS>
 struct int_parray_config {
@@ -48,14 +49,14 @@ static void tst1() {
     m.mk(a1);
     ENSURE(m.size(a1) == 0);
     m.push_back(a1, 10, a2);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";);
     ENSURE(m.size(a1) == 0);
     ENSURE(m.size(a2) == 1);
     m.push_back(a1, 20, a1);
     m.push_back(a1, 30, a1);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";);
     ENSURE(m.get(a1, 0) == 20);
@@ -68,7 +69,7 @@ static void tst1() {
     ENSURE(m.size(a3) == 2);
     ENSURE(m.get(a3, 0) == 10);
     ENSURE(m.get(a3, 1) == 100);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
           m.display_info(tout, a3); tout << "\n";);
@@ -76,7 +77,7 @@ static void tst1() {
     ENSURE(m.get(a2, 0) == 10);
     ENSURE(m.get(a2, 1) == 50);
     ENSURE(m.size(a2) == 2);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
           m.display_info(tout, a3); tout << "\n";);
@@ -90,7 +91,7 @@ static void tst2() {
     typedef parray_manager<int_parray_config<PRESERVE_ROOTS> > int_parray_manager;
     typedef typename int_parray_manager::ref int_array;
     
-    TRACE("parray", tout << "tst2\n";);
+    TRACE(parray, tout << "tst2\n";);
     dummy_value_manager<int> vm;
     small_object_allocator   a;
     int_parray_manager m(vm, a);
@@ -98,30 +99,30 @@ static void tst2() {
     int_array a1;
     int_array a2;
  
-    for (unsigned i = 0; i < 100; i++) 
+    for (unsigned i = 0; i < 100; ++i) 
         m.push_back(a1, i);
     ENSURE(m.size(a1) == 100);
     m.push_back(a1, 100, a2);
-    for (unsigned i = 0; i < 10; i++) 
+    for (unsigned i = 0; i < 10; ++i) 
         m.push_back(a2, i+101);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";);
     ENSURE(m.get(a1, 0) == 0);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";);
-    for (unsigned i = 0; i < m.size(a1); i++) {
+    for (unsigned i = 0; i < m.size(a1); ++i) {
         ENSURE(static_cast<unsigned>(m.get(a1, i)) == i);
     }
-    for (unsigned i = 0; i < m.size(a2); i++) {
+    for (unsigned i = 0; i < m.size(a2); ++i) {
         ENSURE(static_cast<unsigned>(m.get(a2, i)) == i);
     }
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";);
     m.unshare(a1);
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";);
     m.del(a1);
@@ -133,7 +134,7 @@ static void tst3() {
     typedef parray_manager<int_parray_config<PRESERVE_ROOTS> > int_parray_manager;
     typedef typename int_parray_manager::ref int_array;
 
-    TRACE("parray", tout << "tst3\n";);
+    TRACE(parray, tout << "tst3\n";);
     dummy_value_manager<int> vm;
     small_object_allocator   a;
     int_parray_manager m(vm, a);
@@ -143,11 +144,11 @@ static void tst3() {
     int_array a3;
     int_array a4;
  
-    for (unsigned i = 0; i < 20; i++) 
+    for (unsigned i = 0; i < 20; ++i) 
         m.push_back(a1, i);
     ENSURE(m.size(a1) == 20);
     m.set(a1, 0, 1, a2);
-    for (unsigned i = 1; i < 20; i++) {
+    for (unsigned i = 1; i < 20; ++i) {
         if (i == 6) {
             m.copy(a2, a3);
             m.pop_back(a3);
@@ -160,17 +161,17 @@ static void tst3() {
     m.pop_back(a4);
     m.push_back(a4, 30);
     
-    for (unsigned i = 0; i < 20; i++) {
+    for (unsigned i = 0; i < 20; ++i) {
         ENSURE(static_cast<unsigned>(m.get(a2, i)) == i+1);
     }
-    TRACE("parray", 
+    TRACE(parray, 
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
           m.display_info(tout, a3); tout << "\n";
           m.display_info(tout, a4); tout << "\n";
           );
     ENSURE(m.get(a1, 10) == 10);
-    TRACE("parray", 
+    TRACE(parray, 
           tout << "after rerooting...\n";
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
@@ -181,7 +182,7 @@ static void tst3() {
     ENSURE(m.size(a2) == 20);
     ENSURE(m.size(a3) == 19);
     ENSURE(m.size(a4) == 19);
-    for (unsigned i = 0; i < 20; i++) {
+    for (unsigned i = 0; i < 20; ++i) {
         ENSURE(static_cast<unsigned>(m.get(a1, i)) == i);
         ENSURE(static_cast<unsigned>(m.get(a2, i)) == i+1);
         ENSURE(i >= 18 || static_cast<unsigned>(m.get(a4, i)) == i+1);
@@ -190,7 +191,7 @@ static void tst3() {
     }
     ENSURE(m.get(a4, 18) == 30);
     ENSURE(m.get(a3, 18) == 40);
-    TRACE("parray", 
+    TRACE(parray, 
           tout << "after many gets...\n";
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
@@ -198,7 +199,7 @@ static void tst3() {
           m.display_info(tout, a4); tout << "\n";
           );
     m.unshare(a1);
-    TRACE("parray", 
+    TRACE(parray, 
           tout << "after unshare...\n";
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
@@ -206,7 +207,7 @@ static void tst3() {
           m.display_info(tout, a4); tout << "\n";
           );
     m.reroot(a4);
-    TRACE("parray", 
+    TRACE(parray, 
           tout << "after reroot...\n";
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
@@ -214,7 +215,7 @@ static void tst3() {
           m.display_info(tout, a4); tout << "\n";
           );
     m.unshare(a2);
-    TRACE("parray", 
+    TRACE(parray, 
           tout << "after second unshare...\n";
           m.display_info(tout, a1); tout << "\n";
           m.display_info(tout, a2); tout << "\n";
@@ -243,7 +244,7 @@ typedef parray_manager<expr_array_config> expr_array_manager;
 typedef expr_array_manager::ref expr_array;
 
 static void tst4() {
-    TRACE("parray", tout << "tst4\n";);
+    TRACE(parray, tout << "tst4\n";);
     ast_manager m;
     expr_array_manager m2(m, m.get_allocator());
     
@@ -261,12 +262,12 @@ static void tst4() {
     m2.push_back(a1, v3);
     m2.push_back(a2, v2);
     m2.pop_back(a1);
-    TRACE("parray", 
+    TRACE(parray, 
           m2.display_info(tout, a1); tout << "\n";
           m2.display_info(tout, a2); tout << "\n";
           );
     m2.reroot(a1);
-    TRACE("parray", 
+    TRACE(parray, 
           m2.display_info(tout, a1); tout << "\n";
           m2.display_info(tout, a2); tout << "\n";
           );
@@ -281,7 +282,7 @@ static void tst5() {
     expr_array  a2;
 
     m.mk(a1);
-    for (unsigned i = 0; i < 100; i++) {
+    for (unsigned i = 0; i < 100; ++i) {
         m.push_back(a1, m.mk_var(i, m.mk_bool_sort()));
     }
 
@@ -290,7 +291,7 @@ static void tst5() {
 
     m.copy(a1, a2);
     
-    for (unsigned i = 0; i < 1000000; i++) {
+    for (unsigned i = 0; i < 1000000; ++i) {
         m.set(a1, i % 100, m.mk_var(rand() % 100, m.mk_bool_sort()));
     }
 

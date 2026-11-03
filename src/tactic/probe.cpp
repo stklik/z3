@@ -248,7 +248,7 @@ probe * mk_div(probe * p1, probe * p2) {
 }
 
 struct is_non_propositional_predicate {
-    struct found {};
+    struct found : public std::exception {};
     ast_manager & m;
 
     is_non_propositional_predicate(ast_manager & _m):m(_m) {}
@@ -270,7 +270,7 @@ struct is_non_propositional_predicate {
 };
 
 struct is_non_qfbv_predicate {
-    struct found {};
+    struct found : public std::exception {};
     ast_manager & m;
     bv_util       u;
 
@@ -325,7 +325,7 @@ probe * mk_is_qfbv_probe() {
 }
 
 struct is_non_qfaufbv_predicate {
-    struct found {};
+    struct found : public std::exception {};
     ast_manager & m;
     bv_util       m_bv_util;
     array_util    m_array_util;
@@ -364,7 +364,7 @@ probe * mk_is_qfaufbv_probe() {
 
 
 struct is_non_qfufbv_predicate {
-    struct found {};
+    struct found : public std::exception {};
     ast_manager & m;
     bv_util       m_bv_util;
 
@@ -430,7 +430,7 @@ class num_consts_probe : public probe {
                             m_counter++;
                     }
                     else {
-                        if (m.get_sort(n)->get_family_id() == m_fid)
+                        if (n->get_sort()->get_family_id() == m_fid)
                             m_counter++;
                     }
                 }
@@ -446,7 +446,7 @@ public:
         proc p(g.m(), m_bool, m_family);
         unsigned sz = g.size();
         expr_fast_mark1 visited;
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             for_each_expr_core<proc, expr_fast_mark1, true, true>(p, visited, g.form(i));
         }
         return result(p.m_counter);
@@ -503,7 +503,7 @@ probe * mk_produce_unsat_cores_probe() {
 }
 
 struct has_pattern_probe : public probe {
-    struct found {};
+    struct found : public std::exception {};
 
     struct proc {
         void operator()(var * n) {}
@@ -519,12 +519,12 @@ public:
             expr_fast_mark1 visited;
             proc p;
             unsigned sz = g.size();
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < sz; ++i) {
                 quick_for_each_expr(p, visited, g.form(i));
             }
             return false;
         }
-        catch (found) {
+        catch (const found &) {
             return true;
         }
     }
@@ -536,7 +536,7 @@ probe * mk_has_pattern_probe() {
 
 
 struct has_quantifier_probe : public probe {
-    struct found {};
+    struct found : public std::exception {};
 
     struct proc {
         void operator()(var * n) {}
@@ -549,12 +549,12 @@ public:
             expr_fast_mark1 visited;
             proc p;
             unsigned sz = g.size();
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < sz; ++i) {
                 quick_for_each_expr(p, visited, g.form(i));
             }
             return false;
         }
-        catch (found) {
+        catch (const found &) {
             return true;
         }
     }

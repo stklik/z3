@@ -1,10 +1,12 @@
 #include "model/model.h"
 #include "model/model_evaluator.h"
+#include "model/func_interp.h"
 #include "model/model_pp.h"
+#include "ast/array_decl_plugin.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/reg_decl_plugins.h"
 #include "ast/ast_pp.h"
-
+#include <iostream>
 
 void tst_model_evaluator() {
     ast_manager m;
@@ -37,7 +39,11 @@ void tst_model_evaluator() {
     func_interp* fi = alloc(func_interp, m, 2);
     func_interp* gi = alloc(func_interp, m, 2);
     func_interp* hi = alloc(func_interp, m, 2);
-    hi->set_else(m.mk_ite(vB1p, m.mk_app(f, vI0p, vB1p), m.mk_app(g, vI0p, vB1p)));
+    {
+        expr_ref then_value(m.mk_app(f, vI0p, vB1p), m);
+        expr_ref else_value(m.mk_app(g, vI0p, vB1p), m);
+        hi->set_else(m.mk_ite(vB1p, then_value, else_value));
+    }
     mdl.register_decl(h, hi);
     
 
@@ -47,8 +53,16 @@ void tst_model_evaluator() {
 
     {
         symbol nI("N");
-        fi->set_else(m.mk_ite(m.mk_exists(1, &sI, &nI, a.mk_le(vI0p, m.mk_app(F, vI1p, vB2p))), vI0p, a.mk_int(1)));
-        gi->set_else(m.mk_ite(m.mk_exists(1, &sI, &nI, a.mk_le(vI0p, m.mk_app(G, vI1p, vB2p))), a.mk_int(2), vI0p));
+        {
+            expr_ref condition(m.mk_exists(1, &sI, &nI, a.mk_le(vI0p, m.mk_app(F, vI1p, vB2p))), m);
+            expr_ref else_value(a.mk_int(1), m);
+            fi->set_else(m.mk_ite(condition, vI0p, else_value));
+        }
+        {
+            expr_ref condition(m.mk_exists(1, &sI, &nI, a.mk_le(vI0p, m.mk_app(G, vI1p, vB2p))), m);
+            expr_ref then_value(a.mk_int(2), m);
+            gi->set_else(m.mk_ite(condition, then_value, vI0p));
+        }
         mdl.register_decl(g, gi);
         mdl.register_decl(f, fi);
         model_pp(std::cout, mdl);
@@ -60,12 +74,47 @@ void tst_model_evaluator() {
     {
         fi->set_else(m.mk_app(F, vI0p, vB1p));
         gi->set_else(m.mk_app(G, vI0p, vB1p));
-        mdl.register_decl(g, gi);
-        mdl.register_decl(h, hi);
         model_pp(std::cout, mdl);
         e = m.mk_app(h, vI0p, vB1p);
         eval(e, v);
         std::cout << e << " " << v << "\n";
+    }
+
+    {
+        func_interp fi2(m, 1);
+        expr_ref zero(a.mk_int(0), m);
+        expr_ref one(a.mk_int(1), m);
+        fi2.set_else(zero);
+        for (unsigned i = 0; i < 600; ++i) {
+            expr_ref arg(a.mk_int(rational(i)), m);
+            expr* args[1] = { arg.get() };
+            fi2.insert_entry(args, i == 599 ? one.get() : zero.get());
+        }
+        fi2.compress();
+        ENSURE(fi2.num_entries() == 1);
+
+        expr_ref removed_arg(a.mk_int(0), m);
+        [[maybe_unused]] expr* removed_args[1] = { removed_arg.get() };
+        ENSURE(fi2.get_entry(removed_args) == nullptr);
+
+        expr_ref kept_arg(a.mk_int(599), m);
+        expr* kept_args[1] = { kept_arg.get() };
+        [[maybe_unused]] func_entry* kept = fi2.get_entry(kept_args);
+        ENSURE(kept != nullptr);
+        ENSURE(kept->get_result() == one.get());
+    }
+
+    {
+        array_util au(m);
+        sort* dom[1] = { sI };
+        func_decl_ref fn(m.mk_func_decl(symbol("fn"), 1, dom, sI), m);
+        expr_ref as_array(au.mk_as_array(fn), m);
+        ENSURE(eval.eval(as_array, v, true));
+        ENSURE(!au.is_as_array(v));
+        ENSURE(au.is_const(v));
+        func_interp* fni = mdl.get_func_interp(fn);
+        ENSURE(fni != nullptr);
+        ENSURE(fni->get_else() != nullptr);
     }
     
 }

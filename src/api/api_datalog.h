@@ -16,12 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef API_DATALOG_H_
-#define API_DATALOG_H_
+#pragma once
 
 #include "api/z3.h"
 #include "ast/ast.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "smt/smt_kernel.h"
 #include "api/api_util.h"
 
@@ -31,7 +30,7 @@ typedef void (*reduce_assign_callback_fptr)(void*, func_decl*, unsigned, expr*co
 namespace api {
     class fixedpoint_context;
     class context;
-};
+}
 
 
 struct Z3_fixedpoint_ref : public api::object {
@@ -46,4 +45,3 @@ inline Z3_fixedpoint of_datalog(Z3_fixedpoint_ref * s) { return reinterpret_cast
 inline api::fixedpoint_context * to_fixedpoint_ref(Z3_fixedpoint s) { return to_fixedpoint(s)->m_datalog; }
 
 
-#endif

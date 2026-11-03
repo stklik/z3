@@ -1,14 +1,14 @@
 z3_add_component(portfolio
   SOURCES
-    bounded_int2bv_solver.cpp
+    euf_completion_tactic.cpp
     default_tactic.cpp
-    enum2bv_solver.cpp
-    fd_solver.cpp
-    pb2bv_solver.cpp
+    ff_tactic.cpp
     smt_strategic_solver.cpp
     solver2lookahead.cpp
+    solver_subsumption_tactic.cpp
   COMPONENT_DEPENDENCIES
     aig_tactic
+    ff_tactics
     fp
     fpa_tactics
     qe
@@ -17,7 +17,6 @@ z3_add_component(portfolio
     smtlogic_tactics
     subpaving_tactic
     ufbv_tactic
-  TACTIC_HEADERS
-    default_tactic.h
-    fd_solver.h
+    fd_solver
+    simplifiers
 )

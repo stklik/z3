@@ -5,6 +5,7 @@ Copyright (c) 2015 Microsoft Corporation
 --*/
 #include "util/rlimit.h"
 #include "math/hilbert/hilbert_basis.h"
+#include <iostream>
 
 /*
   Test generation of linear congruences a la Karr.
@@ -149,7 +150,7 @@ namespace karr {
         TD.display(std::cout << "TD:\n");
         for (unsigned i = 0; i < TD.size(); ++i) {
             vector<rational> v;
-            v.append(src.size(), TD.A[i].c_ptr() + src.size());
+            v.append(src.size(), TD.A[i].data() + src.size());
             dst.A.push_back(v);
             dst.b.push_back(TD.b[i]);
         }
@@ -293,7 +294,7 @@ namespace karr {
 
     }
 
-};
+}
 
 void tst_karr() {
     karr::tst3();

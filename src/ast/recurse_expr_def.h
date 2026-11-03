@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef RECURSE_EXPR_DEF_H_
-#define RECURSE_EXPR_DEF_H_
+#pragma once
 
 #include "ast/recurse_expr.h"
 
@@ -36,16 +35,16 @@ bool recurse_expr<T, Visitor, IgnorePatterns, CallDestructors>::visit_children(e
     switch (n->get_kind()) {
     case AST_APP:
         num = to_app(n)->get_num_args();
-        for (unsigned j = 0; j < num; j++) 
+        for (unsigned j = 0; j < num; ++j) 
             visit(to_app(n)->get_arg(j), visited);
         break;
     case AST_QUANTIFIER:
         if (!IgnorePatterns) {
             num = to_quantifier(n)->get_num_patterns();
-            for (unsigned j = 0; j < num; j++)
+            for (unsigned j = 0; j < num; ++j)
                 visit(to_quantifier(n)->get_pattern(j), visited);
             num = to_quantifier(n)->get_num_no_patterns();
-            for (unsigned j = 0; j < num; j++)
+            for (unsigned j = 0; j < num; ++j)
                 visit(to_quantifier(n)->get_no_pattern(j), visited);
         }
         visit(to_quantifier(n)->get_expr(), visited);
@@ -63,9 +62,9 @@ void recurse_expr<T, Visitor, IgnorePatterns, CallDestructors>::process(expr * n
     case AST_APP:
         m_results1.reset();
         num = to_app(n)->get_num_args();
-        for (unsigned j = 0; j < num; j++)
+        for (unsigned j = 0; j < num; ++j)
             m_results1.push_back(get_cached(to_app(n)->get_arg(j)));
-        cache_result(n, this->Visitor::visit(to_app(n), m_results1.c_ptr()));
+        cache_result(n, this->Visitor::visit(to_app(n), m_results1.data()));
         break;
     case AST_VAR: 
         cache_result(n, this->Visitor::visit(to_var(n)));
@@ -78,12 +77,12 @@ void recurse_expr<T, Visitor, IgnorePatterns, CallDestructors>::process(expr * n
             m_results1.reset();
             m_results2.reset();
             num = to_quantifier(n)->get_num_patterns();
-            for (unsigned j = 0; j < num; j++)
+            for (unsigned j = 0; j < num; ++j)
                 m_results1.push_back(get_cached(to_quantifier(n)->get_pattern(j)));
             num = to_quantifier(n)->get_num_no_patterns();
-            for (unsigned j = 0; j < num; j++)
+            for (unsigned j = 0; j < num; ++j)
                 m_results2.push_back(get_cached(to_quantifier(n)->get_no_pattern(j)));
-            cache_result(n, this->Visitor::visit(to_quantifier(n), get_cached(to_quantifier(n)->get_expr()), m_results1.c_ptr(), m_results2.c_ptr()));
+            cache_result(n, this->Visitor::visit(to_quantifier(n), get_cached(to_quantifier(n)->get_expr()), m_results1.data(), m_results2.data()));
         }
         break;
     default: 
@@ -106,4 +105,3 @@ T recurse_expr<T, Visitor, IgnorePatterns, CallDestructors>::operator()(expr * r
     return get_cached(r);
 }
 
-#endif /* RECURSE_EXPR_DEF_H_ */

@@ -25,12 +25,13 @@ Author:
 Revision History:
 
 --*/
-#ifndef CHASHTABLE_H_
-#define CHASHTABLE_H_
+#pragma once
 
 #include "util/memory_manager.h"
 #include "util/debug.h"
 #include "util/trace.h"
+#include "util/tptr.h"
+#include "util/util.h"
 #ifdef Z3DEBUG
 #include "util/hashtable.h"
 #endif
@@ -51,11 +52,11 @@ public:
 
 protected:
     struct cell {
-        cell *  m_next;
+        cell *  m_next = (cell*)1;
         T       m_data;
-        cell():m_next(reinterpret_cast<cell*>(1)) {}
-        bool is_free() const { return m_next == reinterpret_cast<cell*>(1); }
-        void mark_free() { m_next = reinterpret_cast<cell*>(1); }
+        bool is_free() const { return GET_TAG(m_next) == 1; }
+        void mark_free() { m_next = TAG(cell*, m_next, 1); }
+        void unmark_free() { m_next = UNTAG(cell*, m_next); }
     };
     
     cell *    m_table;         // array of cells.
@@ -70,6 +71,7 @@ protected:
 #endif
     cell *    m_next_cell;   
     cell *    m_free_cell;   
+    cell *    m_tofree_cell;
     
     unsigned get_hash(T const & d) const { return HashProc::operator()(d); }
     bool equals(T const & e1, T const & e2) const { return EqProc::operator()(e1, e2); }
@@ -87,7 +89,7 @@ protected:
     cell * copy_table(cell * source, unsigned source_slots, unsigned source_capacity, 
                       cell * target, unsigned target_slots, unsigned target_capacity,
                       unsigned & used_slots) {
-        TRACE("chashtable", tout << "copy_table...\n";);
+        TRACE(chashtable, tout << "copy_table...\n";);
         SASSERT(target_slots >= source_slots);
         SASSERT(target_capacity >= source_capacity);
         unsigned target_mask  = target_slots - 1;
@@ -127,8 +129,8 @@ protected:
             }
         }
 #if 0
-        TRACE("chashtable", 
-              for (unsigned i = 0; i < source_capacity; i++) {
+        TRACE(chashtable, 
+              for (unsigned i = 0; i < source_capacity; ++i) {
                   tout << i << ":[";
                   if (source[i].m_next == 0)
                       tout << "null";
@@ -139,7 +141,7 @@ protected:
                   tout << ", " << source[i].m_data << "]\n";
               }
               tout << "\n";
-              for (unsigned i = 0; i < target_capacity; i++) {
+              for (unsigned i = 0; i < target_capacity; ++i) {
                   tout << i << ":[";
                   if (target[i].m_next == 0)
                       tout << "null";
@@ -158,8 +160,12 @@ protected:
         unsigned curr_cellar  = (m_capacity - m_slots);
         unsigned new_slots    = m_slots * 2;
         unsigned new_cellar   = curr_cellar * 2;
+        if (new_slots < m_slots || new_cellar < curr_cellar)
+            throw default_exception("table overflow");            
         while (true) {
             unsigned new_capacity = new_slots + new_cellar;
+            if (new_capacity < new_slots)
+                throw default_exception("table overflow");
             cell * new_table      = alloc_table(new_capacity);
             cell * next_cell      = copy_table(m_table, m_slots, m_capacity,
                                                new_table, new_slots, new_capacity,
@@ -171,10 +177,13 @@ protected:
                 m_slots      = new_slots;
                 m_next_cell  = next_cell;
                 m_free_cell  = nullptr;
+                m_tofree_cell = nullptr;
                 CASSERT("chashtable", check_invariant());
                 return;
             }
             dealloc_vect(new_table, new_capacity);
+            if (2*new_cellar < new_cellar)
+                throw default_exception("table overflow");                
             new_cellar *= 2;
         }
     }
@@ -204,6 +213,12 @@ protected:
         m_free_cell = c;
     }
 
+    void push_recycle_cell(cell* c) {
+        SASSERT(c < m_table + m_capacity);
+        c->m_next = m_tofree_cell;
+        m_tofree_cell = c;
+    }
+
     void init(unsigned slots, unsigned cellar) {
         m_capacity   = slots + cellar;
         m_table      = alloc_table(m_capacity);
@@ -212,6 +227,7 @@ protected:
         m_size       = 0;
         m_next_cell  = m_table + slots;
         m_free_cell  = nullptr;
+        m_tofree_cell = nullptr;
     }
 
 public:
@@ -268,6 +284,28 @@ public:
 
     unsigned used_slots() const {
         return m_used_slots;
+    }
+
+    void insert_fresh(T const& d) {
+        if (!has_free_cells()) {
+            expand_table();
+        }
+        unsigned mask = m_slots - 1;
+        unsigned h    = get_hash(d);
+        unsigned idx  = h & mask;
+        cell * c      = m_table + idx;
+        cell * new_c  = nullptr;
+        m_size++;
+        if (c->is_free()) {
+            m_used_slots++;
+        }
+        else {
+            new_c = get_free_cell();
+            *new_c = *c;
+        }
+        c->m_next = new_c;
+        c->m_data = d;
+        CASSERT("chashtable_bug", check_invariant());
     }
     
     void insert(T const & d) {
@@ -446,7 +484,7 @@ public:
         unsigned idx  = h & mask;
         cell * c      = m_table + idx;
         if (c->is_free())
-            return; 
+            return;
         cell * prev = nullptr;
         do { 
             if (equals(c->m_data, d)) {
@@ -513,14 +551,13 @@ public:
             return *this;
         }
         iterator operator++(int) { iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(iterator const & it) const { return m_list_it == it.m_list_it; }
         bool operator!=(iterator const & it) const { return m_list_it != it.m_list_it; }
     };
     
     iterator begin() const { return iterator(m_table, m_table + m_slots); }
     iterator end() const { return iterator(); }
 
-    void swap(chashtable & other) {
+    void swap(chashtable & other) noexcept {
         std::swap(m_table,       other.m_table);
         std::swap(m_capacity,    other.m_capacity);
         std::swap(m_init_slots,  other.m_init_slots);
@@ -571,7 +608,7 @@ public:
     struct key_value {
         Key    m_key;
         Value  m_value;
-        key_value() {}
+        key_value() = default;
         key_value(Key const & k):m_key(k) {}
         key_value(Key const & k, Value const & v):m_key(k), m_value(v) {}
     };
@@ -669,4 +706,3 @@ public:
     }
 };
 
-#endif

@@ -19,7 +19,7 @@ Notes:
 
 #include "solver/solver.h"
 #include "tactic/tactic.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "solver/solver2tactic.h"
 #include "ast/ast_util.h"
 
@@ -31,7 +31,7 @@ void extract_clauses_and_dependencies(goal_ref const& g, expr_ref_vector& clause
     ast_manager& m = g->m();
     expr_ref_vector clause(m);
     unsigned sz = g->size();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         expr * f            = g->form(i);
         expr_dependency * d = g->dep(i);
         if (d == nullptr || !g->unsat_core_enabled()) {
@@ -44,10 +44,7 @@ void extract_clauses_and_dependencies(goal_ref const& g, expr_ref_vector& clause
             deps.reset();
             m.linearize(d, deps);
             SASSERT(!deps.empty()); // d != 0, then deps must not be empty
-            ptr_vector<expr>::iterator it  = deps.begin();
-            ptr_vector<expr>::iterator end = deps.end();
-            for (; it != end; ++it) {
-                expr * d = *it;
+            for (expr* d : deps) {
                 if (is_uninterp_const(d) && m.is_bool(d)) {
                     // no need to create a fresh boolean variable for d
                     if (!bool2dep.contains(d)) {
@@ -74,7 +71,7 @@ void extract_clauses_and_dependencies(goal_ref const& g, expr_ref_vector& clause
             }
             SASSERT(clause.size() > 1);
             expr_ref cls(m);
-            cls = mk_or(m, clause.size(), clause.c_ptr());
+            cls = mk_or(m, clause.size(), clause.data());
             clauses.push_back(cls);
         }
     }
@@ -110,7 +107,19 @@ public:
         extract_clauses_and_dependencies(in, clauses, assumptions, bool2dep, fmc);
         ref<solver> local_solver = m_solver->translate(m, m_params);
         local_solver->assert_expr(clauses);
-        lbool r = local_solver->check_sat(assumptions.size(), assumptions.c_ptr()); 
+        TRACE(solver2tactic, tout << "clauses asserted\n";);
+        lbool r;
+        try {
+            r = local_solver->check_sat(assumptions.size(), assumptions.data()); 
+        }
+        catch (...) {
+            local_solver->collect_statistics(m_st);
+            throw;
+        }
+        TRACE(solver2tactic, tout << "check sat result " << r << "\n";);
+        proof* pr = local_solver->get_proof();
+        if (pr) in->set(proof2proof_converter(m, pr));
+        local_solver->collect_statistics(m_st);
         switch (r) {
         case l_true: 
             if (in->models_enabled()) {
@@ -128,11 +137,6 @@ public:
         case l_false: {
             in->reset();
             expr_dependency_ref lcore(m);
-            proof* pr = nullptr;
-            if (in->proofs_enabled()) {
-                pr = local_solver->get_proof();
-                in->set(proof2proof_converter(m, pr));
-            }
             if (in->unsat_core_enabled()) {
                 expr_ref_vector core(m);
                 local_solver->get_unsat_core(core);
@@ -146,22 +150,24 @@ public:
             break;
         }
         case l_undef:
-            if (m.canceled()) {
+            if (!m.inc()) {
                 throw tactic_exception(Z3_CANCELED_MSG);
             }
-            model_converter_ref mc;
-            mc = local_solver->get_model_converter();                
-            mc = concat(fmc.get(), mc.get());            
-            in->reset();
-            in->add(mc.get());
-            unsigned sz = local_solver->get_num_assertions();
-            for (unsigned i = 0; i < sz; ++i) {
-                in->assert_expr(local_solver->get_assertion(i));
+            if (!in->unsat_core_enabled()) {
+                model_converter_ref mc;
+                mc = local_solver->get_model_converter();                
+                mc = concat(fmc.get(), mc.get());            
+                in->reset();
+                in->add(mc.get());
+                unsigned sz = local_solver->get_num_assertions();
+                for (unsigned i = 0; i < sz; ++i) {
+                    in->assert_expr(local_solver->get_assertion(i));
+                }
             }
+            in->set_reason_unknown(local_solver->reason_unknown());
             result.push_back(in.get());
             break;
         }
-        local_solver->collect_statistics(m_st);
     }
 
     void collect_statistics(statistics & st) const override {
@@ -181,6 +187,13 @@ public:
     tactic * translate(ast_manager & m) override {
         return alloc(solver2tactic, m_solver->translate(m, m_params));
     }    
+
+    char const* name() const override { return "solver2tactic"; }
+
+
+    void user_propagate_initialize_value(expr* var, expr* value) override {
+        m_solver->user_propagate_initialize_value(var, value);
+    }
 };
 
 tactic* mk_solver2tactic(solver* s) { return alloc(solver2tactic, s); }

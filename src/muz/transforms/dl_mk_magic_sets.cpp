@@ -45,7 +45,7 @@ namespace datalog {
     void mk_magic_sets::adornment::populate(app * lit, const var_idx_set & bound_vars) {
         SASSERT(empty());
         unsigned arity = lit->get_num_args();
-        for (unsigned i = 0; i < arity; i++) {
+        for (unsigned i = 0; i < arity; ++i) {
             const expr * arg = lit->get_arg(i);
             bool bound = !is_var(arg) || bound_vars.contains(to_var(arg)->get_idx());
             push_back(bound ? AD_BOUND : AD_FREE);
@@ -65,7 +65,7 @@ namespace datalog {
     unsigned get_bound_arg_count(app * lit, const var_idx_set & bound_vars) {
         unsigned res = 0;
         unsigned n = lit->get_num_args();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             const expr * arg = lit->get_arg(i);
             if (!is_var(arg) || bound_vars.contains(to_var(arg)->get_idx())) {
                 SASSERT(is_var(arg) || is_app(arg));
@@ -80,7 +80,7 @@ namespace datalog {
         func_decl * pred = lit->get_decl();
         float res = 1;
         unsigned n = lit->get_num_args();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             const expr * arg = lit->get_arg(i);
             if (is_var(arg) && !bound_vars.contains(to_var(arg)->get_idx())) {
                 res *= m_context.get_sort_size_estimate(pred->get_domain(i));
@@ -100,7 +100,7 @@ namespace datalog {
         float best_cost;
         int candidate_index = -1;
         unsigned n = cont.size();
-        for (unsigned i=0; i<n; i++) {
+        for (unsigned i=0; i<n; ++i) {
             app * lit = r->get_tail(cont[i]);
             unsigned bound_cnt = get_bound_arg_count(lit, bound_vars);
             if (bound_cnt==0) {
@@ -129,15 +129,13 @@ namespace datalog {
         SASSERT(m.is_bool(old_pred->get_range()));
         adornment_desc adn(old_pred);
         adn.m_adornment.populate(lit, bound_vars);
-        adornment_map::entry * e = m_adorned_preds.insert_if_not_there2(adn, nullptr);
-        func_decl * new_pred = e->get_data().m_value;
+        func_decl *& new_pred = m_adorned_preds.insert_if_not_there(adn, nullptr);
         if (new_pred==nullptr) {
             std::string suffix = "ad_"+adn.m_adornment.to_string();
             new_pred = m_context.mk_fresh_head_predicate(
                 old_pred->get_name(), symbol(suffix.c_str()), 
                 old_pred->get_arity(), old_pred->get_domain(), old_pred);
             m_pinned.push_back(new_pred);
-            e->get_data().m_value = new_pred;
             m_todo.push_back(adn);
             m_adornments.insert(new_pred, adn.m_adornment);
         }
@@ -155,31 +153,29 @@ namespace datalog {
 
         unsigned l_arity = l->get_num_args();
         ptr_vector<expr> bound_args;
-        for (unsigned i=0; i<l_arity; i++) {
+        for (unsigned i=0; i<l_arity; ++i) {
             if (adn[i]==AD_BOUND) {
                 bound_args.push_back(l->get_arg(i));
             }
         }
 
-        pred2pred::obj_map_entry * e = m_magic_preds.insert_if_not_there2(l_pred, 0);
-        func_decl * mag_pred = e->get_data().m_value;
+        func_decl *& mag_pred = m_magic_preds.insert_if_not_there(l_pred, 0);
         if (mag_pred==nullptr) {
             unsigned mag_arity = bound_args.size();
 
             ptr_vector<sort> mag_domain;
-            for (unsigned i=0; i<l_arity; i++) {
+            for (unsigned i=0; i<l_arity; ++i) {
                 if (adn[i]==AD_BOUND) {
                     mag_domain.push_back(l_pred->get_domain(i));
                 }
             }
 
             mag_pred = m_context.mk_fresh_head_predicate(l_pred->get_name(), symbol("ms"), 
-                mag_arity, mag_domain.c_ptr(), l_pred);
+                mag_arity, mag_domain.data(), l_pred);
             m_pinned.push_back(mag_pred);
-            e->get_data().m_value = mag_pred;
         }
 
-        app * res = m.mk_app(mag_pred, bound_args.c_ptr());
+        app * res = m.mk_app(mag_pred, bound_args.data());
         m_pinned.push_back(res);
         return res;
     }
@@ -187,19 +183,19 @@ namespace datalog {
     void mk_magic_sets::create_magic_rules(app * head, unsigned tail_cnt, app * const * tail, bool const* negated, rule_set& result) {
         //TODO: maybe include relevant interpreted predicates from the original rule
         ptr_vector<app> new_tail;
-        svector<bool> negations;
+        bool_vector negations;
         new_tail.push_back(create_magic_literal(head));
         new_tail.append(tail_cnt, tail);
         negations.push_back(false);
         negations.append(tail_cnt, negated);
 
-        for (unsigned i=0; i<tail_cnt; i++) {
+        for (unsigned i=0; i<tail_cnt; ++i) {
             if (m_extentional.contains(tail[i]->get_decl())) {
                 continue;
             }
             app * mag_head = create_magic_literal(tail[i]);
-            rule * r = m_context.get_rule_manager().mk(mag_head, i+1, new_tail.c_ptr(), negations.c_ptr());
-            TRACE("dl", r->display(m_context,tout); );
+            rule * r = m_context.get_rule_manager().mk(mag_head, i+1, new_tail.data(), negations.data());
+            TRACE(dl, r->display(m_context,tout); );
             result.add_rule(r);
         }
     }
@@ -210,7 +206,7 @@ namespace datalog {
         SASSERT(head_len==head_adornment.size());
 
         var_idx_set bound_vars;
-        for (unsigned i=0; i<head_len; i++) {
+        for (unsigned i=0; i<head_len; ++i) {
             expr * arg = head->get_arg(i);
             if (head_adornment[i]==AD_BOUND && is_var(arg)) {
                 bound_vars.insert(to_var(arg)->get_idx());
@@ -220,7 +216,7 @@ namespace datalog {
         unsigned processed_tail_len = r->get_uninterpreted_tail_size();
         unsigned_vector exten_tails;
         unsigned_vector inten_tails;
-        for (unsigned i=0; i<processed_tail_len; i++) {
+        for (unsigned i=0; i<processed_tail_len; ++i) {
             app * t = r->get_tail(i);
             if (m_extentional.contains(t->get_decl())) {
                 exten_tails.push_back(i);
@@ -231,7 +227,7 @@ namespace datalog {
         }
 
         ptr_vector<app> new_tail;
-        svector<bool> negations;
+        bool_vector negations;
         while (new_tail.size()!=processed_tail_len) {
             bool intentional = false;
             int curr_index = pop_bound(exten_tails, r, bound_vars);
@@ -269,10 +265,10 @@ namespace datalog {
         app * new_head = m.mk_app(new_head_pred, head->get_args());
 
         SASSERT(new_tail.size()==r->get_uninterpreted_tail_size());
-        create_magic_rules(new_head, new_tail.size(), new_tail.c_ptr(), negations.c_ptr(), result);
+        create_magic_rules(new_head, new_tail.size(), new_tail.data(), negations.data(), result);
 
         unsigned tail_len = r->get_tail_size();
-        for (unsigned i=processed_tail_len; i<tail_len; i++) {
+        for (unsigned i=processed_tail_len; i<tail_len; ++i) {
             new_tail.push_back(r->get_tail(i));
             negations.push_back(r->is_neg_tail(i));
         }
@@ -280,7 +276,7 @@ namespace datalog {
         new_tail.push_back(create_magic_literal(new_head));
         negations.push_back(false);
 
-        rule * nr = m_context.get_rule_manager().mk(new_head, new_tail.size(), new_tail.c_ptr(), negations.c_ptr(), r->name());
+        rule * nr = m_context.get_rule_manager().mk(new_head, new_tail.size(), new_tail.data(), negations.data(), r->name());
         result.add_rule(nr);
         nr->set_accounting_parent_object(m_context, r);
     }
@@ -291,12 +287,12 @@ namespace datalog {
         SASSERT(arity == d.m_pred->get_arity());
 
         ptr_vector<expr> args;
-        for (unsigned i=0; i<arity; i++) {
+        for (unsigned i=0; i<arity; ++i) {
             args.push_back(m.mk_var(i, adn_pred->get_domain(i)));
         }
 
-        app * lit = m.mk_app(d.m_pred, args.c_ptr());
-        app * adn_lit = m.mk_app(adn_pred, args.c_ptr());
+        app * lit = m.mk_app(d.m_pred, args.data());
+        app * adn_lit = m.mk_app(adn_pred, args.data());
         app * mag_lit = create_magic_literal(adn_lit);
 
         app * tail[] = {lit, mag_lit};
@@ -318,7 +314,7 @@ namespace datalog {
         unsigned init_rule_cnt = source.get_num_rules();
         {
             func_decl_set intentional;
-            for (unsigned i=0; i<init_rule_cnt; i++) {
+            for (unsigned i=0; i<init_rule_cnt; ++i) {
                 func_decl* pred = source.get_rule(i)->get_decl();
                 intentional.insert(pred);
             }
@@ -349,7 +345,7 @@ namespace datalog {
         var_idx_set empty_var_idx_set;
         adorn_literal(goal_head, empty_var_idx_set);
 
-        rule_set * result = alloc(rule_set, m_context);
+        scoped_ptr<rule_set> result = alloc(rule_set, m_context);
         result->inherit_predicates(source);
 
         while (!m_todo.empty()) {
@@ -377,7 +373,7 @@ namespace datalog {
 
         rule * back_to_goal_rule = m_context.get_rule_manager().mk(goal_head, 1, &adn_goal_head, nullptr);
         result->add_rule(back_to_goal_rule);
-        return result;
+        return result.detach();
     }
-};
+}
 

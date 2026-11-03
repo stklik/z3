@@ -27,9 +27,6 @@ namespace qe {
         {
         }
 
-        ~array_plugin() override {}
-
-        
         void assign(contains_app& x, expr* fml, rational const& vl) override {
             UNREACHABLE();
         }
@@ -55,7 +52,7 @@ namespace qe {
             expr_ref_vector eqs(m);
             conjs.extract_equalities(eqs);
             for (unsigned i = 0; i < eqs.size(); ++i) {
-                TRACE("qe_verbose", 
+                TRACE(qe_verbose, 
                       tout << mk_pp(eqs[i].get(), m) << "\n";);
                 expr* e = eqs[i].get();
                 if (solve_eq_zero(e, fml)) {
@@ -92,8 +89,8 @@ namespace qe {
                 for (unsigned i = 0; i < sz; ++i) {
                     expr_ref save(m);
                     save = lhs = args[i].get();                    
-                    args[i] = arith.mk_numeral(rational(0), m.get_sort(lhs));
-                    rhs = arith.mk_uminus(arith.mk_add(args.size(), args.c_ptr()));
+                    args[i] = arith.mk_numeral(rational(0), lhs->get_sort());
+                    rhs = arith.mk_uminus(arith.mk_add(args.size(), args.data()));
                     if (arith.is_mul(lhs, e1, e2) && 
                         arith.is_numeral(e1, r) &&
                         r.is_minus_one()) {
@@ -117,7 +114,7 @@ namespace qe {
                 return false;
             }
             
-            TRACE("qe_verbose", 
+            TRACE(qe_verbose, 
                   tout << mk_pp(lhs, m) << 
                   " == " << mk_pp(rhs, m) << "\n";);
             expr_ref tmp(m);
@@ -165,7 +162,7 @@ namespace qe {
                 expr_ref store_B_i_t(m);
 
                 unsigned num_args = args[0].size();
-                B = m.mk_fresh_const("B", m.get_sort(A));
+                B = m.mk_fresh_const("B", A->get_sort());
                 ptr_buffer<expr> args2;
                 args2.push_back(B);
                 for (unsigned i = 0; i < num_args; ++i) {
@@ -173,9 +170,9 @@ namespace qe {
                 }
                 args2.push_back(rhs);
                 
-                store_B_i_t = m.mk_app(m_fid, OP_STORE, args2.size(), args2.c_ptr());
+                store_B_i_t = m.mk_app(m_fid, OP_STORE, args2.size(), args2.data());
                 
-                TRACE("qe", 
+                TRACE(qe, 
                       tout << "fml: " << mk_pp(fml, m) << "\n";
                       tout << "solved form: " << mk_pp(store_B_i_t, m) << "\n";
                       tout << "eq: " << mk_pp(lhs, m) << " == " << mk_pp(rhs, m) << "\n";
@@ -232,22 +229,22 @@ namespace qe {
                 for (unsigned i = args.size(); i > 0; ) {
                     --i;
                     args2.reset();
-                    w = m.mk_fresh_const("w", m.get_sort(args[i].back()));
+                    w = m.mk_fresh_const("w", args[i].back()->get_sort());
                     args2.push_back(store_T);
                     args2.append(args[i]);
                     
-                    select_t = m.mk_app(m_fid, OP_SELECT, args2.size()-1, args2.c_ptr());
+                    select_t = m.mk_app(m_fid, OP_SELECT, args2.size()-1, args2.data());
                     fml = m.mk_and(fml, m.mk_eq(select_t, args2.back()));
-                    store_T = m.mk_app(m_fid, OP_STORE, args2.size(), args2.c_ptr());
+                    store_T = m.mk_app(m_fid, OP_STORE, args2.size(), args2.data());
 
                     args2[0] = store_t;
                     args2.back() = w;
-                    store_t = m.mk_app(m_fid, OP_STORE, args2.size(), args2.c_ptr());
+                    store_t = m.mk_app(m_fid, OP_STORE, args2.size(), args2.data());
 
                     m_ctx.add_var(w);
                 }
                                
-                TRACE("qe", 
+                TRACE(qe, 
                       tout << "Variable: " << mk_pp(A, m) << "\n";
                       tout << "fml: " << mk_pp(fml, m) << "\n";
                       tout << "solved form: " << mk_pp(store_t, m) << "\n";
@@ -264,21 +261,16 @@ namespace qe {
         bool is_array_app_of(app* a, unsigned& idx, expr* t, decl_kind k, vector<ptr_vector<expr> >& args) {
             if (m_ctx.is_var(a, idx)) {
                 contains_app& contains_v = m_ctx.contains(idx);
-                if (args.empty() || contains_v(t)) {
+                if (args.empty() || contains_v(t)) 
                     return false;
-                }
-                for (unsigned i = 0; i < args.size(); ++i) {
-                    for (unsigned j = 0; j < args[i].size(); ++j) {
-                        if (contains_v(args[i][j])) {
+                for (auto const& vs : args)
+                    for (auto v : vs)
+                        if (contains_v(v))
                             return false;
-                        }
-                    }
-                }
                 return true;
             }            
-            if (!is_app_of(a, m_fid, k)) {
+            if (!is_app_of(a, m_fid, k)) 
                 return false;
-            }
             args.push_back(ptr_vector<expr>());
             for (unsigned i = 1; i < a->get_num_args(); ++i) {
                 args.back().push_back(a->get_arg(i));

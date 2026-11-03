@@ -16,16 +16,15 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_BV_H_
-#define THEORY_BV_H_
+#pragma once
 
-#include "smt/smt_theory.h"
-#include "smt/params/theory_bv_params.h"
 #include "ast/rewriter/bit_blaster/bit_blaster.h"
 #include "util/trail.h"
 #include "util/union_find.h"
 #include "ast/arith_decl_plugin.h"
-#include "smt/proto_model/numeral_factory.h"
+#include "model/numeral_factory.h"
+#include "smt/smt_theory.h"
+#include "params/theory_bv_params.h"
 
 namespace smt {
     
@@ -38,13 +37,12 @@ namespace smt {
 
     class theory_bv : public theory {
         typedef rational numeral;
-        typedef trail_stack<theory_bv> th_trail_stack;
         typedef union_find<theory_bv>  th_union_find;
         typedef std::pair<theory_var, unsigned> var_pos;
 
         class atom {
         public:
-            virtual ~atom() {}
+            virtual ~atom() = default;
             virtual bool is_bit() const = 0;
         };
 
@@ -56,9 +54,7 @@ namespace smt {
         };
 
         struct bit_atom : public atom {
-            var_pos_occ * m_occs;
-            bit_atom():m_occs(nullptr) {}
-            ~bit_atom() override {}
+            var_pos_occ * m_occs = nullptr;
             bool is_bit() const override { return true; }
         };
 
@@ -66,7 +62,6 @@ namespace smt {
             literal    m_var;
             literal    m_def;
             le_atom(literal v, literal d):m_var(v), m_def(d) {}
-            ~le_atom() override {}
             bool is_bit() const override { return false; }
         };
 
@@ -106,16 +101,17 @@ namespace smt {
         atom * get_bv2a(bool_var bv) const { return m_bool_var2atom.get(bv, 0); }
 #endif
         theory_bv_stats          m_stats;
-        theory_bv_params const & m_params;
         bv_util                  m_util;
         arith_util               m_autil;
         bit_blaster              m_bb;
-        th_trail_stack           m_trail_stack;
+        trail_stack              m_trail_stack;
         th_union_find            m_find;
         vector<literal_vector>   m_bits;     // per var, the bits of a given variable.
+        ptr_vector<expr>         m_bits_expr;
         svector<unsigned>        m_wpos;     // per var, watch position for fixed variable detection. 
         vector<zero_one_bits>    m_zero_one_bits; // per var, see comment in the struct zero_one_bit
         bool_var2atom            m_bool_var2atom;
+        enode_vector             m_bv2int;
         typedef svector<theory_var> vars;
 
         typedef std::pair<numeral, unsigned> value_sort_pair;
@@ -123,7 +119,21 @@ namespace smt {
         typedef map<value_sort_pair, theory_var, value_sort_pair_hash, default_eq<value_sort_pair> > value2var;
 
         value2var                m_fixed_var_table;
+        mutable vector<rational>         m_power2;
         
+        unsigned char            m_eq_activity[256];
+        struct bv_diseq {
+            theory_var v1, v2;
+            unsigned idx;
+            bv_diseq(theory_var v1, theory_var v2, unsigned idx):v1(v1), v2(v2), idx(idx) {}
+        };
+        svector<bv_diseq> m_prop_diseqs;
+        unsigned          m_prop_diseqs_qhead { 0 };
+        vector<vector<std::pair<theory_var, theory_var>>> m_diseq_watch;
+        unsigned char            m_diseq_activity[256];
+        svector<bool_var> m_diseq_watch_trail;
+        unsigned_vector   m_diseq_watch_lim;
+
         literal_vector           m_tmp_literals;
         svector<var_pos>         m_prop_queue;
         bool                     m_approximates_large_bvs;
@@ -132,15 +142,15 @@ namespace smt {
         theory_var next(theory_var v) const { return m_find.next(v); }
         bool is_root(theory_var v) const { return m_find.is_root(v); }
         unsigned get_bv_size(app const * n) const { return m_util.get_bv_size(n); }
-        unsigned get_bv_size(enode const * n) const { return m_util.get_bv_size(n->get_owner()); }
+        unsigned get_bv_size(enode const * n) const { return m_util.get_bv_size(n->get_expr()); }
         unsigned get_bv_size(theory_var v) const { return get_bv_size(get_enode(v)); }
-        bool is_bv(app const* n) const { return m_util.is_bv_sort(get_manager().get_sort(n)); }
-        bool is_bv(enode const* n) const { return is_bv(n->get_owner()); }
+        bool is_bv(expr const* n) const { return m_util.is_bv_sort(n->get_sort()); }
+        bool is_bv(enode const* n) const { return is_bv(n->get_expr()); }
         bool is_bv(theory_var v) const { return is_bv(get_enode(v)); }
         region & get_region() { return m_trail_stack.get_region(); }
 
-        bool is_numeral(theory_var v) const { return m_util.is_numeral(get_enode(v)->get_owner()); }
-        app * mk_bit2bool(app * bv, unsigned idx);
+        bool is_numeral(theory_var v) const { return m_util.is_numeral(get_expr(v)); }
+        app * mk_bit2bool(expr * bv, unsigned idx);
         void mk_bits(theory_var v);
         friend class mk_atom_trail;
         void mk_bit2bool(app * n);
@@ -155,7 +165,8 @@ namespace smt {
         void get_arg_bits(app * n, unsigned idx, expr_ref_vector & r);
         friend class add_var_pos_trail;
         void simplify_bit(expr * s, expr_ref & r);
-        void mk_new_diseq_axiom(theory_var v1, theory_var v2, unsigned idx);
+        void add_new_diseq_axiom(theory_var v1, theory_var v2, unsigned idx);
+        void assert_new_diseq_axiom(theory_var v1, theory_var v2, unsigned idx);
         friend class register_true_false_bit_trail;
         void register_true_false_bit(theory_var v, unsigned idx);
         void find_new_diseq_axioms(var_pos_occ * occs, theory_var v, unsigned idx);
@@ -166,6 +177,7 @@ namespace smt {
         void fixed_var_eh(theory_var v);
         void add_fixed_eq(theory_var v1, theory_var v2);
         bool get_fixed_value(theory_var v, numeral & result) const;
+        bool internalize_term_core(app * term);
         void internalize_num(app * n);
         void internalize_add(app * n);
         void internalize_sub(app * n);
@@ -175,6 +187,7 @@ namespace smt {
         void internalize_urem(app * n);
         void internalize_srem(app * n);
         void internalize_smod(app * n);
+        void internalize_udiv_quot_rem(app* n);
         void internalize_shl(app * n);
         void internalize_lshr(app * n);
         void internalize_ashr(app * n);
@@ -182,6 +195,7 @@ namespace smt {
         void internalize_ext_rotate_right(app * n);
         void internalize_and(app * n);
         void internalize_or(app * n);
+        void internalize_neg(app * n);
         void internalize_not(app * n);
         void internalize_nand(app * n);
         void internalize_nor(app * n);
@@ -203,7 +217,7 @@ namespace smt {
         void internalize_smul_no_overflow(app *n);
         void internalize_smul_no_underflow(app *n);
 
-        bool approximate_term(app* n);
+        bool approximate_term(expr* e);
 
         template<bool Signed>
         void internalize_le(app * atom);
@@ -214,9 +228,11 @@ namespace smt {
         void assign_bit(literal consequent, theory_var v1, theory_var v2, unsigned idx, literal antecedent, bool propagate_eqc);
         void assert_int2bv_axiom(app* n);
         void assert_bv2int_axiom(app* n);
+        void assert_udiv_quot_rem_axiom(app * n);
+        void assert_bv_divrem_bound_axiom(app * n);
+
 
     protected:
-        void init(context * ctx) override;
         theory_var mk_var(enode * n) override;
         bool internalize_atom(app * atom, bool gate_ctx) override;
         bool internalize_term(app * term) override;
@@ -225,14 +241,17 @@ namespace smt {
         void new_diseq_eh(theory_var v1, theory_var v2) override;
         virtual void expand_diseq(theory_var v1, theory_var v2);
         void assign_eh(bool_var v, bool is_true) override;
-        void relevant_eh(app * n) override;
+        void relevant_eh(expr * n) override;
         void push_scope_eh() override;
         void pop_scope_eh(unsigned num_scopes) override;
-        final_check_status final_check_eh() override;
+        final_check_status final_check_eh(unsigned) override;
         void reset_eh() override;
         bool include_func_interp(func_decl* f) override;
         svector<theory_var>   m_merge_aux[2]; //!< auxiliary vector used in merge_zero_one_bits
         bool merge_zero_one_bits(theory_var r1, theory_var r2);
+        bool can_propagate() override { return m_prop_diseqs_qhead < m_prop_diseqs.size(); }
+        void propagate() override;
+        void initialize_value(expr* var, expr* value) override;
 
         // -----------------------------------
         //
@@ -243,18 +262,24 @@ namespace smt {
         void init_model(model_generator & m) override;
         model_value_proc * mk_value(enode * n, model_generator & mg) override;
 
+        smt_params const& params() const;
     public:
-        theory_bv(ast_manager & m, theory_bv_params const & params, bit_blaster_params const & bb_params);
-        ~theory_bv() override;
+        
+        typedef std::pair<enode*, unsigned> var_enode_pos;
+        
+        theory_bv(context& ctx);
         
         theory * mk_fresh(context * new_ctx) override;
 
         char const * get_name() const override { return "bit-vector"; }
 
-        th_trail_stack & get_trail_stack() { return m_trail_stack; }
+        trail_stack & get_trail_stack() { return m_trail_stack; }
         void merge_eh(theory_var, theory_var, theory_var v1, theory_var v2);
         void after_merge_eh(theory_var r1, theory_var r2, theory_var v1, theory_var v2) { SASSERT(check_zero_one_bits(r1)); }
         void unmerge_eh(theory_var v1, theory_var v2);
+
+        bool get_lower(enode* n, rational& v);
+        bool get_upper(enode* n, rational& v);
 
         void display_var(std::ostream & out, theory_var v) const;
         void display_bit_atom(std::ostream & out, bool_var v, bit_atom const * a) const;
@@ -263,15 +288,13 @@ namespace smt {
         void collect_statistics(::statistics & st) const override;
 
         bool get_fixed_value(app* x, numeral & result) const;
+        bool is_fixed_propagated(theory_var v, expr_ref& val, literal_vector& explain) override;
 
+        var_enode_pos get_bv_with_theory(bool_var v, theory_id id) const;
+        bool_var get_bit(unsigned bit, enode* n) const;
 
-#ifdef Z3DEBUG
-        bool check_assignment(theory_var v) const;
-        bool check_invariant() const;
-        bool check_zero_one_bits(theory_var v) const;
-#endif
+        bool check_assignment(theory_var v);
+        bool check_invariant();
+        bool check_zero_one_bits(theory_var v);
     };
-};
-
-#endif /* THEORY_BV_H_ */
-
+}

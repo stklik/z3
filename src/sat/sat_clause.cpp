@@ -38,12 +38,11 @@ namespace sat {
         memcpy(m_lits, lits, sizeof(literal) * sz);
         mark_strengthened();
         SASSERT(check_approx());
-        SASSERT(sz > 1);
     }
 
     var_approx_set clause::approx(unsigned num, literal const * lits) {
         var_approx_set r;
-        for (unsigned i = 0; i < num; i++)
+        for (unsigned i = 0; i < num; ++i)
             r.insert(lits[i].var());
         return r;
     }
@@ -76,13 +75,14 @@ namespace sat {
 
     void clause::elim(literal l) {
         unsigned i;
-        for (i = 0; i < m_size; i++)
+        for (i = 0; i < m_size; ++i)
             if (m_lits[i] == l)
                 break;
         SASSERT(i < m_size);
         i++;
-        for (; i < m_size; i++)
+        for (; i < m_size; ++i)
             m_lits[i-1] = m_lits[i];
+        m_lits[m_size-1] = l;
         m_size--;
         mark_strengthened();
     }
@@ -93,6 +93,11 @@ namespace sat {
             m_size = num_lits; 
             mark_strengthened(); 
         } 
+    }
+    
+    void clause::restore(unsigned num_lits) {
+        SASSERT(num_lits <= m_capacity);
+        m_size = num_lits;
     }
 
     bool clause::satisfied_by(model const & m) const {
@@ -111,7 +116,7 @@ namespace sat {
 
     clause_offset clause::get_new_offset() const {
         unsigned o1 = m_lits[0].index();
-#if defined(_AMD64_) || defined(_M_IA64)
+#if defined(__LP64__) || defined(_WIN64)
         if (sizeof(clause_offset) == 8) {
             unsigned o2 = m_lits[1].index();
             return (clause_offset)o1 + (((clause_offset)o2) << 32);
@@ -122,7 +127,7 @@ namespace sat {
 
     void clause::set_new_offset(clause_offset offset) {
         m_lits[0] = to_literal(static_cast<unsigned>(offset));
-#if defined(_AMD64_) || defined(_M_IA64)
+#if defined(__LP64__) || defined(_WIN64)
         if (sizeof(offset) == 8) {
             m_lits[1] = to_literal(static_cast<unsigned>(offset >> 32));
         }
@@ -146,7 +151,7 @@ namespace sat {
             memcpy(m_clause->m_lits, lits, sizeof(literal) * num_lits);
         }
         SASSERT(m_clause->m_size <= m_clause->m_capacity);
-        for (unsigned i = 0; i < num_lits; i++) {
+        for (unsigned i = 0; i < num_lits; ++i) {
             SASSERT((*m_clause)[i] == lits[i]);
         }
     }
@@ -173,7 +178,7 @@ namespace sat {
         size_t size = clause::get_obj_size(num_lits);
         void * mem = m_allocator.allocate(size);
         clause * cls = new (mem) clause(m_id_gen.mk(), num_lits, lits, learned);
-        TRACE("sat_clause", tout << "alloc: " << cls->id() << " " << *cls << " " << (learned?"l":"a") << "\n";);
+        TRACE(sat_clause, tout << "alloc: " << cls->id() << " " << *cls << " " << (learned?"l":"a") << "\n";);
         SASSERT(!learned || cls->is_learned());
         return cls;
     }
@@ -191,7 +196,7 @@ namespace sat {
     }
 
     void clause_allocator::del_clause(clause * cls) {
-        TRACE("sat_clause", tout << "delete: " << cls->id() << " " << *cls << "\n";);
+        TRACE(sat_clause, tout << "delete: " << cls->id() << " " << *cls << "\n";);
         m_id_gen.recycle(cls->id());
         size_t size = clause::get_obj_size(cls->m_capacity);
         cls->~clause();
@@ -200,7 +205,7 @@ namespace sat {
 
     std::ostream & operator<<(std::ostream & out, clause const & c) {
         out << "(";
-        for (unsigned i = 0; i < c.size(); i++) {
+        for (unsigned i = 0; i < c.size(); ++i) {
             if (i > 0) out << " ";
             out << c[i];
         }
@@ -220,7 +225,7 @@ namespace sat {
 
     bool clause_wrapper::contains(literal l) const {
         unsigned sz = size();
-        for (unsigned i = 0; i < sz; i++)
+        for (unsigned i = 0; i < sz; ++i)
             if (operator[](i) == l)
                 return true;
         return false;
@@ -228,7 +233,7 @@ namespace sat {
 
     bool clause_wrapper::contains(bool_var v) const {
         unsigned sz = size();
-        for (unsigned i = 0; i < sz; i++)
+        for (unsigned i = 0; i < sz; ++i)
             if (operator[](i).var() == v)
                 return true;
         return false;
@@ -244,4 +249,4 @@ namespace sat {
         return out;
     }
 
-};
+}

@@ -34,7 +34,7 @@ void expr_rand::add_func_decl(func_decl* f) {
 }
 
 void expr_rand::add_expr(expr* t) {
-    sort* s = m_manager.get_sort(t);
+    sort* s = t->get_sort();
     expr_ref_vector* vals = nullptr;
     if (!m_nodes.find(s, vals)) {
         vals = alloc(expr_ref_vector, m_manager);
@@ -55,7 +55,7 @@ void expr_rand::walk() {
     for (unsigned i = 0; i < arity; ++i) {
         args.push_back(choose_expr(f->get_domain(i)));
     }
-    expr* r = m_manager.mk_app(f, args.size(), args.c_ptr());
+    expr* r = m_manager.mk_app(f, args.size(), args.data());
     add_expr(r);
 }
 
@@ -77,7 +77,7 @@ expr* expr_rand::choose_expr(sort* s) {
         if (!m_nodes.find(s, vals)) {
             UNREACHABLE();
         }
-        SASSERT(vals);
+        ENSURE(vals);
     }
     unsigned idx = m_random(vals->size());
     return (*vals)[idx].get();
@@ -241,8 +241,7 @@ void expr_rand::initialize_bv(unsigned num_vars) {
 
 void expr_rand::initialize_array(unsigned num_vars, sort* dom, sort* rng) {
     family_id afid = m_manager.mk_family_id("array");
-    parameter p1(dom), p2(rng);
-    parameter ps[2] = { p1, p2 };
+    parameter ps[2] = { parameter(dom), parameter(rng) };
     sort* a = m_manager.mk_sort(afid, ARRAY_SORT, 2, ps);
     sort* ss[3] = { a, dom, rng };
     

@@ -16,13 +16,10 @@ Author:
 Notes:
 
 --*/
-#ifndef NRA_TACTIC_H_
-#define NRA_TACTIC_H_
+#pragma once
+#include "tactic/tactic.h"
 
 tactic * mk_nra_tactic(ast_manager & m, params_ref const & p = params_ref());
 
-/*
-ADD_TACTIC("nra", "builtin strategy for solving NRA problems.", "mk_nra_tactic(m, p)")
-*/
+Z3_ADD_TACTIC(nra, "nra", "builtin strategy for solving NRA problems.", mk_nra_tactic(m, p));
 
-#endif

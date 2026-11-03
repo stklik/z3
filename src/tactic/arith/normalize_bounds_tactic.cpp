@@ -19,9 +19,9 @@ Revision History:
 
 --*/
 #include "tactic/tactical.h"
-#include "tactic/arith/bound_manager.h"
+#include "ast/simplifiers/bound_manager.h"
 #include "ast/rewriter/th_rewriter.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/expr_substitution.h"
 #include "ast/ast_smt2_pp.h"
@@ -67,13 +67,11 @@ class normalize_bounds_tactic : public tactic {
         }
         
         bool has_lowers() {
-            bound_manager::iterator it  = m_bm.begin();
-            bound_manager::iterator end = m_bm.end();
-            for (; it != end; ++it) {
-                TRACE("normalize_bounds_tactic", 
+            for (auto* e : m_bm) {
+                TRACE(normalize_bounds_tactic, 
                       rational val; bool strict;
-                      tout << mk_ismt2_pp(*it, m) << " has_lower: " << m_bm.has_lower(*it, val, strict) << " val: " << val << "\n";);
-                if (is_target(*it))
+                      tout << mk_ismt2_pp(e, m) << " has_lower: " << m_bm.has_lower(e, val, strict) << " val: " << val << "\n";);
+                if (is_target(e))
                     return true;
             }
             return false;
@@ -83,8 +81,9 @@ class normalize_bounds_tactic : public tactic {
             bool produce_models = in->models_enabled();
             bool produce_proofs = in->proofs_enabled();
             tactic_report report("normalize-bounds", *in);
-            
-            m_bm(*in);
+         
+            for (unsigned i = 0; i < in->size(); ++i)
+                m_bm(in->form(i), in->dep(i), in->pr(i));
             
             if (!has_lowers()) {
                 result.push_back(in.get());
@@ -104,7 +103,7 @@ class normalize_bounds_tactic : public tactic {
             for (expr * x : m_bm) {
                 if (is_target(x, val)) {
                     num_norm_bounds++;
-                    sort * s = m.get_sort(x);
+                    sort * s = x->get_sort();
                     app * x_prime = m.mk_fresh_const(nullptr, s);
                     expr * def = m_util.mk_add(x_prime, m_util.mk_numeral(val, s));
                     subst.insert(x, def);
@@ -119,10 +118,10 @@ class normalize_bounds_tactic : public tactic {
             
             m_rw.set_substitution(&subst);
             expr_ref   new_curr(m);
-            proof_ref  new_pr(m);
-            unsigned size = in->size();
-            for (unsigned idx = 0; idx < size; idx++) {
+            
+            for (unsigned idx = 0; !in->inconsistent() && idx < in->size(); ++idx) {
                 expr * curr = in->form(idx);
+                proof_ref  new_pr(m);
                 m_rw(curr, new_curr, new_pr);
                 if (produce_proofs) {
                     proof * pr = in->pr(idx);
@@ -130,7 +129,7 @@ class normalize_bounds_tactic : public tactic {
                 }
                 in->update(idx, new_curr, new_pr, in->dep(idx));
             }
-            TRACE("normalize_bounds_tactic", in->display(tout););
+            TRACE(normalize_bounds_tactic, in->display(tout););
             in->inc_depth();
             result.push_back(in.get());
         }
@@ -153,13 +152,15 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "normalize_bounds"; }
+
     void updt_params(params_ref const & p) override {
         m_imp->updt_params(p);
     }
 
     void collect_param_descrs(param_descrs & r) override {
         insert_produce_models(r);
-        r.insert("norm_int_only", CPK_BOOL, "(default: true) normalize only the bounds of integer constants.");
+        r.insert("norm_int_only", CPK_BOOL, "normalize only the bounds of integer constants.", "true");
     }
 
     void operator()(goal_ref const & in, 
@@ -168,7 +169,7 @@ public:
             (*m_imp)(in, result);
         }
         catch (rewriter_exception & ex) {
-            throw tactic_exception(ex.msg());
+            throw tactic_exception(ex.what());
         }
     }
     

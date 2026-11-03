@@ -16,12 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef PROGRESS_CALLBACK_H_
-#define PROGRESS_CALLBACK_H_
+#pragma once
 
 class progress_callback {
 public:
-    virtual ~progress_callback() {}
+    virtual ~progress_callback() = default;
     
     // Called on every check for resource limit exceeded (much more frequent).
     virtual void fast_progress_sample() {}
@@ -30,4 +29,3 @@ public:
     virtual void slow_progress_sample() {}
 };
 
-#endif

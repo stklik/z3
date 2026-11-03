@@ -16,12 +16,12 @@ Author:
 Notes:
 
 --*/
-#ifndef PRIME_GENERATOR_H_
-#define PRIME_GENERATOR_H_
+#pragma once
 
 #include "util/vector.h"
 #include "util/z3_exception.h"
 #include "util/util.h"
+#include "util/memory_manager.h"
 
 class prime_generator_exception : public default_exception {
 public:
@@ -35,8 +35,8 @@ class prime_generator {
     svector<uint64_t> m_primes;
     void process_next_k_numbers(uint64_t k);
 public:
-    prime_generator();
     uint64_t operator()(unsigned idx);
+    void initialize();
     void finalize();
 };
 
@@ -47,10 +47,10 @@ class prime_iterator {
 public:
     prime_iterator(prime_generator * g = nullptr);
     uint64_t next();
+    static void initialize();
     static void finalize();
-    /*
-      ADD_FINALIZER('prime_iterator::finalize();')
-    */
 };
 
-#endif
+Z3_ADD_INITIALIZER(prime_iterator, prime_iterator::initialize, 0);
+Z3_ADD_FINALIZER(prime_iterator, prime_iterator::finalize);
+

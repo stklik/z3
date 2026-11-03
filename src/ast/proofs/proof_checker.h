@@ -16,11 +16,13 @@ Author:
 Revision History:
 
 --*/
-#ifndef PROOF_CHECKER_H_
-#define PROOF_CHECKER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/map.h"
+#include <memory>
+
+namespace lp { class evidence_proof_checker; }
 
 class proof_checker {
     ast_manager&     m;
@@ -34,6 +36,7 @@ class proof_checker {
     bool             m_dump_lemmas;
     std::string      m_logic; 
     unsigned         m_proof_lemma_id;
+    std::unique_ptr<lp::evidence_proof_checker> m_lp_checker;
     enum hyp_decl_kind {
         OP_CONS,
         OP_ATOM,
@@ -53,8 +56,6 @@ class proof_checker {
     public:
         hyp_decl_plugin();
 
-        ~hyp_decl_plugin() override {}
-
         void finalize() override;
         
         decl_plugin * mk_fresh() override { return alloc(hyp_decl_plugin); }
@@ -69,14 +70,15 @@ class proof_checker {
     };
 public:
     proof_checker(ast_manager& m);
+    ~proof_checker();
     void set_dump_lemmas(char const * logic = "AUFLIA") { m_dump_lemmas = true; m_logic = logic; } 
     bool check(proof* p, expr_ref_vector& side_conditions);
+    bool check_arith_literal(bool is_pos, app* lit, rational const& coeff, expr_ref& sum, bool& is_strict);
 private:
     bool check1(proof* p, expr_ref_vector& side_conditions);
     bool check1_basic(proof* p, expr_ref_vector& side_conditions);
     bool check1_spc(proof* p, expr_ref_vector& side_conditions);
     bool check_arith_proof(proof* p);
-    bool check_arith_literal(bool is_pos, app* lit, rational const& coeff, expr_ref& sum, bool& is_strict);
     bool match_fact(proof const* p, expr*& fact) const;
     void add_premise(proof* p);
     bool match_proof(proof const* p) const;
@@ -114,5 +116,3 @@ private:
 
     void set_false(expr_ref& e, unsigned idx, expr_ref& lit);
 };
-
-#endif

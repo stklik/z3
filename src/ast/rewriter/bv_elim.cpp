@@ -51,14 +51,14 @@ bool bv_elim_cfg::reduce_quantifier(quantifier * q,
             for (unsigned j = 0; j < num_bits; ++j) {
                 std::ostringstream new_name;
                 new_name << nm.str();
-                new_name << "_";
+                new_name << '_';
                 new_name << j;
-                var* v = m.mk_var(var_idx++, m.mk_bool_sort());                
+                var* v = m.mk_var(var_idx++, m.mk_bool_sort());
                 args.push_back(v);
                 _sorts.push_back(m.mk_bool_sort());
-                _names.push_back(symbol(new_name.str().c_str()));
+                _names.push_back(symbol(new_name.str()));
             }
-            bv = m.mk_app(bfid, OP_MKBV, 0, nullptr, args.size(), args.c_ptr());
+            bv = m.mk_app(bfid, OP_MKBV, 0, nullptr, args.size(), args.data());
             _subst_map.push_back(bv.get());
         }
         else {
@@ -84,28 +84,28 @@ bool bv_elim_cfg::reduce_quantifier(quantifier * q,
         subst_map.push_back(_subst_map[i]);
     }
 
-    expr* const* sub  = subst_map.c_ptr();
+    expr* const* sub  = subst_map.data();
     unsigned sub_size = subst_map.size();
 
     new_body = subst(old_body, sub_size, sub);
 
-    for (unsigned j = 0; j < q->get_num_patterns(); j++) {
+    for (unsigned j = 0; j < q->get_num_patterns(); ++j) {
         pats.push_back(subst(new_patterns[j], sub_size, sub));
     }
-    for (unsigned j = 0; j < q->get_num_no_patterns(); j++) {
+    for (unsigned j = 0; j < q->get_num_no_patterns(); ++j) {
         no_pats.push_back(subst(new_no_patterns[j], sub_size, sub));
     }
 
     result = m.mk_quantifier(forall_k, 
                         names.size(),
-                        sorts.c_ptr(),
-                        names.c_ptr(),
+                        sorts.data(),
+                        names.data(),
                         new_body.get(),
                         q->get_weight(),
                         q->get_qid(),
                         q->get_skid(),
-                        pats.size(), pats.c_ptr(),
-                        no_pats.size(), no_pats.c_ptr());
+                        pats.size(), pats.data(),
+                        no_pats.size(), no_pats.data());
     result_pr = m.mk_rewrite(q, result);
     return true;
 }

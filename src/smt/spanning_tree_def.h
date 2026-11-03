@@ -16,8 +16,7 @@ Notes:
    
 --*/
 
-#ifndef SPANNING_TREE_DEF_H_
-#define SPANNING_TREE_DEF_H_
+#pragma once
 
 #include "smt/spanning_tree.h"
 
@@ -49,7 +48,7 @@ namespace smt {
             m_thread[i] = i + 1;
         }
 
-        TRACE("network_flow", {
+        TRACE(network_flow, {
             tout << pp_vector("Predecessors", m_pred) << pp_vector("Threads", m_thread); 
             tout << pp_vector("Depths", m_depth) << pp_vector("Tree", m_tree);
         });
@@ -67,7 +66,7 @@ namespace smt {
     }
 
     template<typename Ext>
-    void thread_spanning_tree<Ext>::get_path(node_id start, node_id end, svector<edge_id> & path, svector<bool> & against) {
+    void thread_spanning_tree<Ext>::get_path(node_id start, node_id end, svector<edge_id> & path, bool_vector & against) {
         node_id join = get_common_ancestor(start, end);
         path.reset();
         while (start != join) {
@@ -157,7 +156,7 @@ namespace smt {
 
         SASSERT(is_ancestor_of(v, q));
         
-        TRACE("network_flow", { 
+        TRACE(network_flow, { 
             tout << "update_spanning_tree: (" << p << ", " << q << ") enters, (";
             tout << u << ", " << v << ") leaves\n";
         });
@@ -203,7 +202,7 @@ namespace smt {
         SASSERT(!in_subtree_t2(u));
         SASSERT(in_subtree_t2(v));
 
-        TRACE("network_flow", {
+        TRACE(network_flow, {
             tout << pp_vector("Predecessors", m_pred) << pp_vector("Threads", m_thread); 
             tout << pp_vector("Depths", m_depth) << pp_vector("Tree", m_tree);
             });
@@ -282,7 +281,7 @@ namespace smt {
 
         // Check that m_thread traverses each node.
         // This gets checked using union-find as well.
-        svector<bool> found(m_thread.size(), false);
+        bool_vector found(m_thread.size(), false);
         found[root] = true;
         for (node_id x = m_thread[root]; x != root; x = m_thread[x]) {
             SASSERT(x != m_thread[x]);
@@ -486,4 +485,3 @@ namespace smt {
 
 }
 
-#endif

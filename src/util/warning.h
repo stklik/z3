@@ -16,9 +16,8 @@ Author:
 Revision History:
 
 --*/
-#ifndef WARNING_H_
-#define WARNING_H_
-#include<iostream>
+#pragma once
+#include<ostream>
 #include<stdarg.h>
 
 void send_warnings_to_stdout(bool flag);
@@ -29,32 +28,10 @@ void set_error_stream(std::ostream* strm);
 
 void set_warning_stream(std::ostream* strm);
 
-void warning_msg(const char * msg, ...);
+std::ostream* warning_stream();
 
-void disable_error_msg_prefix();
+void warning_msg(const char * msg, ...);
 
 void format2ostream(std::ostream& out, char const* fmt, va_list args);
 
-class warning_displayer {
-    const char * m_msg;
-    bool         m_displayed;
-public:
-    warning_displayer(const char * msg):
-        m_msg(msg),
-        m_displayed(false) {
-    }
-
-    void sign() {
-        if (!m_displayed) {
-            warning_msg(m_msg);
-            m_displayed = true;
-        }
-    }
-
-    void reset() {
-        m_displayed = false;
-    }
-};
-
-#endif /* WARNING_H_ */
 

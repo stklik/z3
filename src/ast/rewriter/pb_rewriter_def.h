@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef PB_REWRITER_DEF_H_
-#define PB_REWRITER_DEF_H_
+#pragma once
 
 #include "ast/rewriter/pb_rewriter.h"
 
@@ -36,7 +35,7 @@ void pb_rewriter_util<PBU>::display(std::ostream& out, typename PBU::args_t& arg
 template<typename PBU>
 void pb_rewriter_util<PBU>::unique(typename PBU::args_t& args, typename PBU::numeral& k, bool is_eq) {
     
-    TRACE("pb_verbose", display(tout << "pre-unique:", args, k, is_eq););
+    TRACE(pb_verbose, display(tout << "pre-unique:", args, k, is_eq););
     for (unsigned i = 0; i < args.size(); ++i) {
         if (m_util.is_negated(args[i].first)) {
             args[i].first = m_util.negate(args[i].first);
@@ -85,12 +84,12 @@ void pb_rewriter_util<PBU>::unique(typename PBU::args_t& args, typename PBU::num
         }
     }
     args.resize(i);
-    TRACE("pb_verbose", display(tout << "post-unique:", args, k, is_eq););
+    TRACE(pb_verbose, display(tout << "post-unique:", args, k, is_eq););
 }
 
 template<typename PBU>
 lbool pb_rewriter_util<PBU>::normalize(typename PBU::args_t& args, typename PBU::numeral& k, bool is_eq) {
-    TRACE("pb_verbose", display(tout << "pre-normalize:", args, k, is_eq););
+    TRACE(pb_verbose, display(tout << "pre-normalize:", args, k, is_eq););
 
     DEBUG_CODE(
         bool found = false;
@@ -164,8 +163,11 @@ lbool pb_rewriter_util<PBU>::normalize(typename PBU::args_t& args, typename PBU:
         }            
     }
 
+    if (is_eq && k.is_neg()) {
+        return l_false;
+    }
     if (is_eq) {
-        TRACE("pb_verbose", display(tout << "post-normalize:", args, k, is_eq););
+        TRACE(pb_verbose, display(tout << "post-normalize:", args, k, is_eq););
         return l_undef;
     }
     
@@ -256,16 +258,14 @@ lbool pb_rewriter_util<PBU>::normalize(typename PBU::args_t& args, typename PBU:
         typename PBU::numeral n0 = k/max;
         typename PBU::numeral n1 = floor(n0);
         typename PBU::numeral n2 = ceil(k/min) - PBU::numeral::one();
-        if (n1 == n2 && !n0.is_int()) {
-            IF_VERBOSE(3, display(verbose_stream() << "set cardinality\n", args, k, is_eq););
-            
+        if (n1 == n2 && !n0.is_int()) {            
             for (unsigned i = 0; i < args.size(); ++i) {
                 args[i].second = PBU::numeral::one();
             }
             k = n1 + PBU::numeral::one();
         }
     }
-    TRACE("pb_verbose", display(tout << "post-normalize:", args, k, is_eq););
+    TRACE(pb_verbose, display(tout << "post-normalize:", args, k, is_eq););
     return l_undef;
 }
 
@@ -295,4 +295,3 @@ void pb_rewriter_util<PBU>::prune(typename PBU::args_t& args, typename PBU::nume
     }    
 }
 
-#endif

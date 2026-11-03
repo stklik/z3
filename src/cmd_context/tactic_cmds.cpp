@@ -23,11 +23,11 @@ Notes:
 #include "util/scoped_timer.h"
 #include "util/scoped_ctrl_c.h"
 #include "util/cancel_eh.h"
+#include "util/manage_warnings.h"
 #include "model/model_smt2_pp.h"
 #include "ast/ast_smt2_pp.h"
 #include "tactic/tactic.h"
 #include "tactic/tactical.h"
-#include "tactic/probe.h"
 #include "solver/check_sat_result.h"
 #include "cmd_context/cmd_context_to_goal.h"
 #include "cmd_context/echo_tactic.h"
@@ -36,9 +36,6 @@ probe_info::probe_info(symbol const & n, char const * d, probe * p):
     m_name(n),
     m_descr(d),
     m_probe(p) {
-}
-
-probe_info::~probe_info() {
 }
 
 class declare_tactic_cmd : public cmd {
@@ -77,15 +74,14 @@ ATOMIC_CMD(get_user_tactics_cmd, "get-user-tactics", "display tactics defined us
         it->m_value->display(buf);
         buf << ")";
     }
-    std::string r = buf.str();
-    ctx.regular_stream() << escaped(r.c_str());
+    ctx.regular_stream() << escaped(buf.str());
     ctx.regular_stream() << ")\n";
 });
 
 void help_tactic(cmd_context & ctx) {
     std::ostringstream buf;
     buf << "combinators:\n";
-    buf << "- (and-then <tactic>+) executes the given tactics sequencially.\n";
+    buf << "- (and-then <tactic>+) executes the given tactics sequentially.\n";
     buf << "- (or-else <tactic>+) tries the given tactics in sequence until one of them succeeds (i.e., the first that doesn't fail).\n";
     buf << "- (par-or <tactic>+) executes the given tactics in parallel until one of them succeeds (i.e., the first that doesn't fail).\n";
     buf << "- (par-then <tactic1> <tactic2>) executes tactic1 and then tactic2 to every subgoal produced by tactic1. All subgoals are processed in parallel.\n";
@@ -95,10 +91,7 @@ void help_tactic(cmd_context & ctx) {
     buf << "- (fail-if <probe>) fail if <probe> evaluates to true.\n";
     buf << "- (using-params <tactic> <attribute>*) executes the given tactic using the given attributes, where <attribute> ::= <keyword> <value>. ! is a syntax sugar for using-params.\n";
     buf << "builtin tactics:\n";
-    cmd_context::tactic_cmd_iterator it  = ctx.begin_tactic_cmds();
-    cmd_context::tactic_cmd_iterator end = ctx.end_tactic_cmds();
-    for (; it != end; ++it) {
-        tactic_cmd * cmd = *it;
+    for (tactic_cmd* cmd : ctx.tactics()) {
         buf << "- " << cmd->get_name() << " " << cmd->get_descr() << "\n";
         tactic_ref t = cmd->mk(ctx.m());
         param_descrs descrs;
@@ -106,13 +99,10 @@ void help_tactic(cmd_context & ctx) {
         descrs.display(buf, 4);
     }
     buf << "builtin probes:\n";
-    cmd_context::probe_iterator it2  = ctx.begin_probes();
-    cmd_context::probe_iterator end2 = ctx.end_probes();
-    for (; it2 != end2; ++it2) {
-        probe_info * pinfo = *it2;
+    for (probe_info * pinfo : ctx.probes()) {
         buf << "- " << pinfo->get_name() << " " << pinfo->get_descr() << "\n";
     }
-    ctx.regular_stream() << "\"" << escaped(buf.str().c_str()) << "\"\n";
+    ctx.regular_stream() << '"' << escaped(buf.str()) << "\"\n";
 }
 
 ATOMIC_CMD(help_tactic_cmd, "help-tactic", "display the tactic combinators and primitives.", help_tactic(ctx););
@@ -173,9 +163,9 @@ public:
   }
 };
 
-class check_sat_using_tactict_cmd : public exec_given_tactic_cmd {
+class check_sat_using_tactic_cmd : public exec_given_tactic_cmd {
 public:
-    check_sat_using_tactict_cmd():
+    check_sat_using_tactic_cmd():
         exec_given_tactic_cmd("check-sat-using") {
     }
 
@@ -203,7 +193,7 @@ public:
         labels_vec labels;
         goal_ref g = alloc(goal, m, ctx.produce_proofs(), ctx.produce_models(), ctx.produce_unsat_cores());
         assert_exprs_from(ctx, *g);
-        TRACE("check_sat_using", g->display(tout););
+        TRACE(check_sat_using, g->display(tout););
         model_ref           md;
         proof_ref           pr(m);
         expr_dependency_ref core(m);
@@ -224,7 +214,7 @@ public:
                     ctx.display_sat_result(r);
                     result->set_status(r);
                     if (r == l_undef) {
-                        if (reason_unknown != "") {
+                        if (!reason_unknown.empty()) {
                             result->m_unknown = reason_unknown;
                             // ctx.diagnostic_stream() << "\"" << escaped(reason_unknown.c_str(), true) << "\"" << std::endl;
                         }
@@ -238,18 +228,20 @@ public:
                 }
                 catch (z3_exception & ex) {
                     result->set_status(l_undef);
-                    result->m_unknown = ex.msg();
-                    ctx.regular_stream() << "(error \"tactic failed: " << ex.msg() << "\")" << std::endl;
+                    result->m_unknown = ex.what();
+                    ctx.regular_stream() << "(error \"tactic failed: " << ex.what() << "\")" << std::endl;
                 }
                 ctx.validate_check_sat_result(r);
             }
-            t.collect_statistics(result->m_stats);
+            statistics stats;
+            t.collect_statistics(stats);
+            result->add_statistics(stats);
         }
 
         if (ctx.produce_unsat_cores()) {
             ptr_vector<expr> core_elems;
             m.linearize(core, core_elems);
-            result->m_core.append(core_elems.size(), core_elems.c_ptr());
+            result->m_core.append(core_elems.size(), core_elems.data());
             if (p.get_bool("print_unsat_core", false)) {
                 ctx.regular_stream() << "(unsat-core";
                 for (expr * e : core_elems) {
@@ -278,6 +270,8 @@ public:
             }
         }
 
+        ctx.check_proof();
+
         if (p.get_bool("print_statistics", false))
             display_statistics(ctx, tref.get());
     }
@@ -303,9 +297,10 @@ public:
     }
 
     void execute(cmd_context & ctx) override {
-        if (!m_tactic) {
+        if (!m_tactic) 
             throw cmd_exception("apply needs a tactic argument");
-        }
+        if (ctx.ignore_check())
+            return;
         params_ref p = ctx.params().merge_default_params(ps());
         tactic_ref tref = using_params(sexpr2tactic(ctx, m_tactic), p);
         {
@@ -331,7 +326,7 @@ public:
                     exec(t, g, result_goals);
                 }
                 catch (tactic_exception & ex) {
-                    ctx.regular_stream() << "(error \"tactic failed: " << ex.msg() << "\")" << std::endl;
+                    ctx.regular_stream() << "(error \"tactic failed: " << ex.what() << "\")" << std::endl;
                     failed = true;
                 }
             }
@@ -340,7 +335,7 @@ public:
                 bool print_dependencies = p.get_bool("print_dependencies", false);
                 ctx.regular_stream() << "(goals\n";
                 unsigned sz = result_goals.size();
-                for (unsigned i = 0; i < sz; i++) {
+                for (unsigned i = 0; i < sz; ++i) {
                     if (print_dependencies)
                         result_goals[i]->display_with_dependencies(ctx);
                     else
@@ -363,25 +358,25 @@ public:
                     goal * fg = result_goals[0];
                     unsigned sz = fg->size();
                     ptr_buffer<expr> assertions;
-                    for (unsigned i = 0; i < sz; i++) {
+                    for (unsigned i = 0; i < sz; ++i) {
                         assertions.push_back(fg->form(i));
                     }
-                    ctx.display_smt2_benchmark(ctx.regular_stream(), assertions.size(), assertions.c_ptr());
+                    ctx.display_smt2_benchmark(ctx.regular_stream(), assertions.size(), assertions.data());
                 }
                 else {
                     // create a big OR
                     expr_ref_buffer or_args(m);
                     ptr_vector<expr> formulas;
-                    for (unsigned i = 0; i < num_goals; i++) {
+                    for (unsigned i = 0; i < num_goals; ++i) {
                         formulas.reset();
                         result_goals[i]->get_formulas(formulas);
                         if (formulas.size() == 1)
                             or_args.push_back(formulas[0]);
                         else
-                            or_args.push_back(m.mk_and(formulas.size(), formulas.c_ptr()));
+                            or_args.push_back(m.mk_and(formulas));
                     }
                     expr_ref assertion_ref(m);
-                    assertion_ref = m.mk_or(or_args.size(), or_args.c_ptr());
+                    assertion_ref = m.mk_or(or_args);
                     expr * assertions[1] = { assertion_ref.get() };
                     ctx.display_smt2_benchmark(ctx.regular_stream(), 1, assertions);
                 }
@@ -396,15 +391,11 @@ public:
     }
 };
 
-// The install_tactics procedure is automatically generated for every
-// component that includes the cmd_context & tactic modules.
-void install_tactics(tactic_manager & ctx);
-
 void install_core_tactic_cmds(cmd_context & ctx) {
     ctx.insert(alloc(declare_tactic_cmd));
     ctx.insert(alloc(get_user_tactics_cmd));
     ctx.insert(alloc(help_tactic_cmd));
-    ctx.insert(alloc(check_sat_using_tactict_cmd));
+    ctx.insert(alloc(check_sat_using_tactic_cmd));
     ctx.insert(alloc(apply_tactic_cmd));
     install_tactics(ctx);
 }
@@ -417,9 +408,9 @@ static tactic * mk_and_then(cmd_context & ctx, sexpr * n) {
     if (num_children == 2)
         return sexpr2tactic(ctx, n->get_child(1));
     tactic_ref_buffer args;
-    for (unsigned i = 1; i < num_children; i++)
+    for (unsigned i = 1; i < num_children; ++i)
         args.push_back(sexpr2tactic(ctx, n->get_child(i)));
-    return and_then(args.size(), args.c_ptr());
+    return and_then(args.size(), args.data());
 }
 
 static tactic * mk_or_else(cmd_context & ctx, sexpr * n) {
@@ -430,9 +421,9 @@ static tactic * mk_or_else(cmd_context & ctx, sexpr * n) {
     if (num_children == 2)
         return sexpr2tactic(ctx, n->get_child(1));
     tactic_ref_buffer args;
-    for (unsigned i = 1; i < num_children; i++)
+    for (unsigned i = 1; i < num_children; ++i)
         args.push_back(sexpr2tactic(ctx, n->get_child(i)));
-    return or_else(args.size(), args.c_ptr());
+    return or_else(args.size(), args.data());
 }
 
 static tactic * mk_par(cmd_context & ctx, sexpr * n) {
@@ -443,9 +434,9 @@ static tactic * mk_par(cmd_context & ctx, sexpr * n) {
     if (num_children == 2)
         return sexpr2tactic(ctx, n->get_child(1));
     tactic_ref_buffer args;
-    for (unsigned i = 1; i < num_children; i++)
+    for (unsigned i = 1; i < num_children; ++i)
         args.push_back(sexpr2tactic(ctx, n->get_child(i)));
-    return par(args.size(), args.c_ptr());
+    return par(args.size(), args.data());
 }
 
 static tactic * mk_par_then(cmd_context & ctx, sexpr * n) {
@@ -456,9 +447,9 @@ static tactic * mk_par_then(cmd_context & ctx, sexpr * n) {
     if (num_children == 2)
         return sexpr2tactic(ctx, n->get_child(1));
     tactic_ref_buffer args;
-    for (unsigned i = 1; i < num_children; i++)
+    for (unsigned i = 1; i < num_children; ++i)
         args.push_back(sexpr2tactic(ctx, n->get_child(i)));
-    return par_and_then(args.size(), args.c_ptr());
+    return par_and_then(args.size(), args.data());
 }
 
 static tactic * mk_try_for(cmd_context & ctx, sexpr * n) {
@@ -488,16 +479,11 @@ static tactic * mk_repeat(cmd_context & ctx, sexpr * n) {
     return repeat(t, max);
 }
 
-static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
+params_ref sexpr2params(cmd_context& ctx, sexpr * n, param_descrs const& descrs) {
     SASSERT(n->is_composite());
     unsigned num_children = n->get_num_children();
     if (num_children < 2)
         throw cmd_exception("invalid using-params combinator, at least one argument expected", n->get_line(), n->get_pos());
-    if (num_children == 2)
-        return sexpr2tactic(ctx, n->get_child(1));
-    tactic_ref t = sexpr2tactic(ctx, n->get_child(1));
-    param_descrs descrs;
-    t->collect_param_descrs(descrs);
     params_ref p;
     unsigned i = 2;
     while (i < num_children) {
@@ -507,7 +493,7 @@ static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
             throw cmd_exception("invalid using-params combinator, keyword expected", c->get_line(), c->get_pos());
         if (i == num_children)
             throw cmd_exception("invalid using-params combinator, parameter value expected", c->get_line(), c->get_pos());
-        symbol param_name = symbol(norm_param_name(c->get_symbol()).c_str());
+        symbol param_name = symbol(norm_param_name(c->get_symbol()));
         c = n->get_child(i);
         i++;
         switch (descrs.get_kind_in_module(param_name)) {
@@ -542,6 +528,20 @@ static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
             throw cmd_exception("invalid using-params combinator, unsupported parameter kind");
         }
     }
+    return p;
+}
+
+static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
+    SASSERT(n->is_composite());
+    unsigned num_children = n->get_num_children();
+    if (num_children < 2)
+        throw cmd_exception("invalid using-params combinator, at least one argument expected", n->get_line(), n->get_pos());
+    if (num_children == 2)
+        return sexpr2tactic(ctx, n->get_child(1));
+    tactic_ref t = sexpr2tactic(ctx, n->get_child(1));
+    param_descrs descrs;
+    t->collect_param_descrs(descrs);
+    params_ref p = sexpr2params(ctx, n, descrs);
     return using_params(t.get(), p);
 }
 
@@ -581,7 +581,7 @@ static tactic * mk_echo(cmd_context & ctx, sexpr * n) {
     if (num_children < 2)
         throw cmd_exception("invalid echo tactic, must have at least one argument", n->get_line(), n->get_pos());
     tactic_ref res;
-    for (unsigned i = 1; i < num_children; i++) {
+    for (unsigned i = 1; i < num_children; ++i) {
         sexpr * curr = n->get_child(i);
         bool last = (i == num_children - 1);
         tactic * t;
@@ -732,6 +732,7 @@ static probe * NAME ## _probe (cmd_context & ctx, sexpr * n) {                  
     return NAME(p1.get(), p2.get());                                                                            \
 }
 
+START_DISABLE_EXTRA_SEMI_WARNING;
 MK_BIN_PROBE(mk_eq);
 MK_BIN_PROBE(mk_le);
 MK_BIN_PROBE(mk_lt);
@@ -740,6 +741,7 @@ MK_BIN_PROBE(mk_gt);
 MK_BIN_PROBE(mk_implies);
 MK_BIN_PROBE(mk_div);
 MK_BIN_PROBE(mk_sub);
+END_DISABLE_WARNING;
 
 #define MK_NARY_PROBE(NAME)                                                                                     \
 static probe * NAME ## _probe(cmd_context & ctx, sexpr * n) {                                                   \
@@ -761,10 +763,12 @@ static probe * NAME ## _probe(cmd_context & ctx, sexpr * n) {                   
     }                                                                                                           \
 }
 
+START_DISABLE_EXTRA_SEMI_WARNING;
 MK_NARY_PROBE(mk_and);
 MK_NARY_PROBE(mk_or);
 MK_NARY_PROBE(mk_add);
 MK_NARY_PROBE(mk_mul);
+END_DISABLE_WARNING;
 
 probe * sexpr2probe(cmd_context & ctx, sexpr * n) {
     if (n->is_symbol()) {

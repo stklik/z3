@@ -15,6 +15,7 @@ Author:
 
 --*/
 
+#include "ast/ast_util.h"
 #include "smt/tactic/unit_subsumption_tactic.h"
 #include "smt/smt_context.h"
 
@@ -37,15 +38,19 @@ struct unit_subsumption_tactic : public tactic {
         m_clauses(m) {
     }
 
+    char const* name() const override { return "unit_subsumption"; }
+
     void cleanup() override {}
 
     void operator()(/* in */  goal_ref const & in, 
-                    /* out */ goal_ref_buffer & result) override {        
+                    /* out */ goal_ref_buffer & result) override {  
+        tactic_report report("unit-subsume-simplify", *in);
+        fail_if_proof_generation("unit-subsume-simplify", in);
         reduce_core(in, result);
     }
 
     void updt_params(params_ref const& p) override {
-        m_params = p;
+        m_params.append(p);
         // m_context.updt_params(p); does not exist.
     }
     
@@ -54,9 +59,7 @@ struct unit_subsumption_tactic : public tactic {
     }
     
     void checkpoint() {
-        if (m.canceled()) {
-            throw tactic_exception(m.limit().get_cancel_msg());
-        }
+        tactic::checkpoint(m);
     }
 
     void reduce_core(goal_ref const& g, goal_ref_buffer& result) {
@@ -70,12 +73,13 @@ struct unit_subsumption_tactic : public tactic {
         r->elim_true();
         result.push_back(r.get());        
         m_context.pop(2);
-        TRACE("unit_subsumption_tactic", g->display(tout); r->display(tout););
+        TRACE(unit_subsumption_tactic, g->display(tout); r->display(tout););
     }
 
     void assert_clauses(goal_ref const& g) {
         for (unsigned i = 0; i < g->size(); ++i) {
-            m_context.assert_expr(m.mk_iff(new_clause(), g->form(i)));
+            expr_ref fml(m.mk_iff(new_clause(), g->form(i)), m);
+            m_context.assert_expr(fml);
         }
     }
 
@@ -89,24 +93,25 @@ struct unit_subsumption_tactic : public tactic {
         m_context.push();
         for (unsigned j = 0; j < m_clause_count; ++j) {
             if (i == j) {
-                m_context.assert_expr(m.mk_not(m_clauses[j].get()));
+                expr_ref fml(mk_not(m, m_clauses.get(j)), m);
+                m_context.assert_expr(fml);
             }
             else if (!m_is_deleted.get(j)) {
-                m_context.assert_expr(m_clauses[j].get());
+                m_context.assert_expr(m_clauses.get(j));
             }
         }
         m_context.push(); // force propagation
         bool is_unsat = m_context.inconsistent();
         m_context.pop(2);
         if (is_unsat) {            
-            TRACE("unit_subsumption_tactic", tout << "Removing clause " << i << "\n";);
+            TRACE(unit_subsumption_tactic, tout << "Removing clause " << i << "\n";);
             m_is_deleted.set(i, true);
             m_deleted.push_back(i);
         }
     }
 
     void insert_result(goal_ref& result) {        
-        for (auto  d : m_deleted) result->update(d, m.mk_true()); // TBD proof?
+        for (auto  d : m_deleted) result->update(d, m.mk_true()); 
     }
 
     void init(goal_ref const& g) {
@@ -114,6 +119,7 @@ struct unit_subsumption_tactic : public tactic {
         m_is_deleted.reset();
         m_is_deleted.resize(g->size());
         m_deleted.reset();
+        
     }
 
     expr* new_bool(unsigned& count, expr_ref_vector& v, char const* name) {

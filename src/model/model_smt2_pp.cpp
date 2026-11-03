@@ -21,11 +21,12 @@ Revision History:
 #include "model/model_smt2_pp.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/func_decl_dependencies.h"
+#include "ast/recfun_decl_plugin.h"
 #include "ast/pp.h"
 using namespace format_ns;
 
 static void pp_indent(std::ostream & out, unsigned indent) {
-    for (unsigned i = 0; i < indent; i++) 
+    for (unsigned i = 0; i < indent; ++i) 
         out << " ";
 }
 
@@ -41,8 +42,13 @@ static unsigned pp_symbol(std::ostream & out, symbol const & s) {
         return static_cast<unsigned>(str.length());
     }
     else {
-        out << s.bare_str();
-        return static_cast<unsigned>(strlen(s.bare_str()));
+        if (s.is_null()) {
+            out << "null";
+            return 4; // length of "null"
+        } else {
+            out << s.bare_str();
+            return static_cast<unsigned>(strlen(s.bare_str()));
+        }
     }
 }
 
@@ -52,7 +58,7 @@ static void pp_uninterp_sorts(std::ostream & out, ast_printer_context & ctx, mod
     ast_manager & m = ctx.get_ast_manager();
     ptr_buffer<format> f_conds;
     unsigned num = md.get_num_uninterpreted_sorts();
-    for (unsigned i = 0; i < num; i++) {
+    for (unsigned i = 0; i < num; ++i) {
         sort * s = md.get_uninterpreted_sort(i);
         ptr_vector<expr> const & u = md.get_universe(s);
         std::ostringstream buffer;
@@ -60,20 +66,18 @@ static void pp_uninterp_sorts(std::ostream & out, ast_printer_context & ctx, mod
         ctx.display(buffer, s, 13);
         buffer << ":\n";
         pp_indent(buffer, TAB_SZ);
-        ptr_vector<expr>::const_iterator it  = u.begin();
-        ptr_vector<expr>::const_iterator end = u.end();
-        for (; it != end; ++it) {
-            SASSERT(is_app(*it));
-            app * c = to_app(*it);
+        for (expr* e : u) {
+            SASSERT(is_app(e));
+            app * c = to_app(e);
             pp_symbol(buffer, c->get_decl()->get_name());
             buffer << " ";
         }
         buffer << "\n-----------";
-        std::string buffer_str = buffer.str();
+        std::string buffer_str = std::move(buffer).str();
         unsigned len = static_cast<unsigned>(buffer_str.length());
         pp_indent(out, indent);
         out << ";; ";
-        for (unsigned i = 0; i < len; i++) {
+        for (unsigned i = 0; i < len; ++i) {
             char c = buffer_str[i];
             if (c == '\n') {
                 out << "\n";
@@ -87,9 +91,8 @@ static void pp_uninterp_sorts(std::ostream & out, ast_printer_context & ctx, mod
         out << "\n";
         pp_indent(out, indent);
         out << ";; definitions for universe elements:\n";
-        it  = u.begin();
-        for (; it != end; ++it) {
-            app * c = to_app(*it);
+        for (expr * e : u) {
+            app * c = to_app(e);
             pp_indent(out, indent);
             out << "(declare-fun ";
             unsigned len  = pp_symbol(out, c->get_decl()->get_name());
@@ -101,16 +104,15 @@ static void pp_uninterp_sorts(std::ostream & out, ast_printer_context & ctx, mod
         out << ";; cardinality constraint:\n";
         f_conds.reset();
         format * var = mk_string(m, "x");
-        it  = u.begin();
-        for (; it != end; ++it) {
-            app * c = to_app(*it);
+        for (expr* e : u) {
+            app * c = to_app(e);
             symbol csym = c->get_decl()->get_name();
             std::string cname;
             if (is_smt2_quoted_symbol(csym))
                 cname = mk_smt2_quoted_symbol(csym);
             else
                 cname = csym.str();
-            format * c_args[2] = { var, mk_string(m, cname.c_str()) };
+            format * c_args[2] = { var, mk_string(m, cname) };
             f_conds.push_back(mk_seq1<format**, f2f>(m, c_args, c_args+2, f2f(), "="));
         }
         SASSERT(!f_conds.empty());
@@ -137,7 +139,7 @@ static void pp_uninterp_sorts(std::ostream & out, ast_printer_context & ctx, mod
 
 static void pp_consts(std::ostream & out, ast_printer_context & ctx, model_core const & md, unsigned indent) {
     unsigned num = md.get_num_constants();
-    for (unsigned i = 0; i < num; i++) {
+    for (unsigned i = 0; i < num; ++i) {
         func_decl * c = md.get_constant(i);
         expr * c_i    = md.get_const_interp(c);
         pp_indent(out, indent);
@@ -156,7 +158,7 @@ void sort_fun_decls(ast_manager & m, model_core const & md, ptr_buffer<func_decl
     func_decl_set         visited;
     ptr_vector<func_decl> todo;
     unsigned sz = md.get_num_functions();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         func_decl * f = md.get_function(i);
         if (visited.contains(f))
             continue;
@@ -170,10 +172,7 @@ void sort_fun_decls(ast_manager & m, model_core const & md, ptr_buffer<func_decl
                 func_decl_set deps;
                 bool all_visited = true;
                 collect_func_decls(m, curr_i->get_else(), deps);
-                func_decl_set::iterator it2  = deps.begin();
-                func_decl_set::iterator end2 = deps.end();
-                for (; it2 != end2; ++it2) {
-                    func_decl * d = *it2;
+                for (func_decl * d : deps) {
                     if (d->get_arity() > 0 && md.has_interpretation(d) && !visited.contains(d)) {
                         todo.push_back(d);
                         visited.insert(d);
@@ -189,8 +188,10 @@ void sort_fun_decls(ast_manager & m, model_core const & md, ptr_buffer<func_decl
     }
 }
 
+
 static void pp_funs(std::ostream & out, ast_printer_context & ctx, model_core const & md, unsigned indent) {
     ast_manager & m = ctx.get_ast_manager();
+    recfun::util recfun_util(m);
     sbuffer<symbol>    var_names;
     ptr_buffer<format> f_var_names;
     ptr_buffer<format> f_arg_decls;
@@ -198,29 +199,30 @@ static void pp_funs(std::ostream & out, ast_printer_context & ctx, model_core co
     ptr_buffer<format> f_entry_conds;
     ptr_buffer<func_decl> func_decls;
     sort_fun_decls(m, md, func_decls);
-    for (unsigned i = 0; i < func_decls.size(); i++) {
-        func_decl * f     = func_decls[i]; 
+    for (func_decl * f : func_decls) {
+        if (recfun_util.is_defined(f) && !recfun_util.is_generated(f)) 
+            continue;
+        if (!m.is_considered_uninterpreted(f)) 
+            continue;            
         func_interp * f_i = md.get_func_interp(f);
         SASSERT(f->get_arity() == f_i->get_arity());
         format_ref body(fm(m));
         var_names.reset();
         if (f_i->is_partial()) {
             body = mk_string(m, "#unspecified");
-            for (unsigned j = 0; j < f->get_arity(); j++) {
-                std::stringstream strm;
-                strm << "x!" << (j+1);
-                var_names.push_back(symbol(strm.str().c_str()));
+            for (unsigned j = 0; j < f->get_arity(); ++j) {
+                var_names.push_back(symbol("x!" + std::to_string(j+1)));
             }
         }
         else {
             ctx.pp(f_i->get_else(), f->get_arity(), "x", body, var_names);  
         }
-        TRACE("model_smt2_pp", for (unsigned i = 0; i < var_names.size(); i++) tout << var_names[i] << "\n";);
+        TRACE(model_smt2_pp, for (unsigned i = 0; i < var_names.size(); ++i) tout << var_names[i] << "\n";);
         f_var_names.reset();
-        for (unsigned i = 0; i < f->get_arity(); i++)
-            f_var_names.push_back(mk_string(m, var_names[i].bare_str()));
+        for (auto const& vn : var_names) 
+            f_var_names.push_back(mk_string(m, vn.bare_str()));
         f_arg_decls.reset();
-        for (unsigned i = 0; i < f->get_arity(); i++) {
+        for (unsigned i = 0; i < f->get_arity(); ++i) {
             format_ref f_domain(fm(m));
             ctx.pp(f->get_domain(i), f_domain);
             format * args[2] = { f_var_names[i], f_domain.get() };
@@ -231,10 +233,10 @@ static void pp_funs(std::ostream & out, ast_printer_context & ctx, model_core co
         ctx.pp(f->get_range(), f_range);
         if (f_i->num_entries() > 0) {
             f_entries.reset();
-            for (unsigned i = 0; i < f_i->num_entries(); i++) {
+            for (unsigned i = 0; i < f_i->num_entries(); ++i) {
                 func_entry const * e = f_i->get_entry(i);
                 f_entry_conds.reset();
-                for (unsigned j = 0; j < f->get_arity(); j++) {
+                for (unsigned j = 0; j < f->get_arity(); ++j) {
                     format_ref f_arg(fm(m));
                     ctx.pp(e->get_arg(j), f_arg);
                     format * eq_args[2] = { f_var_names[j], f_arg.get() };
@@ -260,9 +262,9 @@ static void pp_funs(std::ostream & out, ast_printer_context & ctx, model_core co
             f_entries.push_back(mk_indent(m, TAB_SZ, mk_compose(m,
                                                                 mk_line_break(m),
                                                                 body.get())));
-            for (unsigned i = 0; i < f_i->num_entries(); i++)
+            for (unsigned i = 0; i < f_i->num_entries(); ++i)
                 f_entries.push_back(mk_string(m, ")"));
-            body = mk_compose(m, f_entries.size(), f_entries.c_ptr());
+            body = mk_compose(m, f_entries.size(), f_entries.data());
         }
         format_ref def(fm(m));
         std::string fname;
@@ -273,7 +275,7 @@ static void pp_funs(std::ostream & out, ast_printer_context & ctx, model_core co
         def = mk_indent(m, indent, mk_compose(m, 
                                               mk_compose(m, 
                                                          mk_string(m, "(define-fun "),
-                                                         mk_string(m, fname.c_str()),
+                                                         mk_string(m, fname),
                                                          mk_string(m, " "),
                                                          mk_compose(m, 
                                                                     f_domain,

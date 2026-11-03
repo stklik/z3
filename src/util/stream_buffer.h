@@ -18,10 +18,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef STREAM_BUFFER_H_
-#define STREAM_BUFFER_H_
+#pragma once
 
-#include<iostream>
+#include<istream>
 
 class stream_buffer {
     std::istream & m_stream;
@@ -41,6 +40,3 @@ public:
         m_val = m_stream.get();
     }
 };
-
-#endif /* STREAM_BUFFER_H_ */
-

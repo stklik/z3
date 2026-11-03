@@ -1,0 +1,660 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true  
+
+# This workflow migrates jobs from azure-pipelines.yml to GitHub Actions.
+# See .github/workflows/CI_MIGRATION.md for details on the migration.
+
+jobs:
+  # ============================================================================
+  # Manylinux Python Builds
+  # ============================================================================
+  manylinux-python-amd64:
+    name: "Python bindings (manylinux Centos AMD64) build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: "quay.io/pypa/manylinux_2_34_x86_64:latest"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select Python
+        run: |
+          # Use the first available manylinux interpreter for deterministic selection.
+          PYTHON=$(printf '%s\n' /opt/python/*/bin/python | sort -V | head -n1)
+          test -x "$PYTHON" || { echo "Error: no interpreter found under /opt/python/*/bin/python"; exit 1; }
+          echo "PYTHON=$PYTHON" >> "$GITHUB_ENV"
+          "$PYTHON" --version
+
+      - name: Setup Python virtual environment
+        run: "$PYTHON -m venv $PWD/env"
+
+      - name: Install build dependencies
+        env:
+          PIP_CACHE_DIR: ${{ runner.temp }}/pip-cache
+        run: |
+          source $PWD/env/bin/activate
+          mkdir -p "$PIP_CACHE_DIR"
+          echo "PIP_CACHE_DIR=$PIP_CACHE_DIR" >> "$GITHUB_ENV"
+          pip install build git+https://github.com/rhelmot/auditwheel
+
+      - name: Build Python wheel
+        run: |
+          source $PWD/env/bin/activate
+          cd src/api/python
+          python -m build
+          AUDITWHEEL_PLAT= auditwheel repair --best-plat dist/*.whl
+          cd ../../..
+
+      - name: Test Python wheel
+        run: |
+          source $PWD/env/bin/activate
+          pip install ./src/api/python/wheelhouse/*.whl
+          python - <src/api/python/z3test.py z3
+          python - <src/api/python/z3test.py z3num
+          python -m unittest discover -s examples/python -p test_proof_certificate.py
+          python -m unittest discover -s examples/python -p test_proof_to_lean.py
+
+  manylinux-python-arm64:
+    name: "Python bindings (manylinux Centos ARM64 cross) build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: quay.io/pypa/manylinux_2_28_x86_64:latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download ARM toolchain
+        run: curl -L -o /tmp/arm-toolchain.tar.xz 'https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz'
+
+      - name: Extract ARM toolchain
+        run: |
+          mkdir -p /tmp/arm-toolchain/
+          tar xf /tmp/arm-toolchain.tar.xz -C /tmp/arm-toolchain/ --strip-components=1
+
+      - name: Select Python
+        run: |
+          # Use the first available manylinux interpreter for deterministic selection.
+          PYTHON=$(printf '%s\n' /opt/python/*/bin/python | sort -V | head -n1)
+          test -x "$PYTHON" || { echo "Error: no interpreter found under /opt/python/*/bin/python"; exit 1; }
+          echo "PYTHON=$PYTHON" >> "$GITHUB_ENV"
+          "$PYTHON" --version
+
+      - name: Setup Python virtual environment
+        run: "$PYTHON -m venv $PWD/env"
+
+      - name: Install build dependencies
+        env:
+          PIP_CACHE_DIR: ${{ runner.temp }}/pip-cache
+        run: |
+          source $PWD/env/bin/activate
+          mkdir -p "$PIP_CACHE_DIR"
+          echo "PIP_CACHE_DIR=$PIP_CACHE_DIR" >> "$GITHUB_ENV"
+          pip install build git+https://github.com/rhelmot/auditwheel
+
+      - name: Build Python wheel (cross-compile)
+        env:
+          AR: aarch64-none-linux-gnu-ar
+          CC: aarch64-none-linux-gnu-gcc
+          CXX: aarch64-none-linux-gnu-g++
+          LD: aarch64-none-linux-gnu-ld
+        run: |
+          source $PWD/env/bin/activate
+          export PATH="/tmp/arm-toolchain/bin:/tmp/arm-toolchain/aarch64-none-linux-gnu/libc/usr/bin:$PATH"
+          cd src/api/python
+          python -m build
+          AUDITWHEEL_PLAT= auditwheel repair --best-plat dist/*.whl
+          cd ../../..
+
+  # ============================================================================
+  # Ubuntu OCaml Builds
+  # ============================================================================
+  ubuntu-ocaml:
+    name: "Ubuntu with OCaml"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@93303b622b2522e4411e295f9e77411a24912ac7 # v3.9.0
+        with:
+          ocaml-compiler: '5'
+          opam-disable-sandboxing: true
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev
+
+      - name: Install OCaml dependencies
+        run: opam install zarith ocamlfind -y
+
+      - name: Configure
+        run: eval `opam config env`; cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_LIBDIR=lib -DZ3_BUILD_OCAML_BINDINGS=ON
+
+      - name: Build
+        run: |
+          set -e
+          eval `opam config env`
+          cmake --build build --parallel $(nproc)
+          cmake --build build --target test-z3 --parallel $(nproc)
+
+      - name: Install and test OCaml bindings
+        run: |
+          eval "$(opam env)"
+          bash scripts/test_ocaml_install.sh build "$PWD/install"
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ./test-z3 -a
+          cd ..
+
+      - name: Clone z3test
+        run: git clone https://github.com/z3prover/z3test z3test
+
+      - name: Run regressions
+        run: python z3test/scripts/test_benchmarks.py build/z3 z3test/regressions/smt2
+
+      - name: Generate documentation
+        run: |
+          cd doc
+          sudo apt-get install -y doxygen graphviz
+          python mk_api_doc.py --no-z3py
+          cd ..
+
+  ubuntu-ocaml-static:
+    name: "Ubuntu with OCaml on z3-static"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@93303b622b2522e4411e295f9e77411a24912ac7 # v3.9.0
+        with:
+          ocaml-compiler: '5'
+          opam-disable-sandboxing: true
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev
+
+      - name: Install OCaml dependencies
+        run: opam install zarith ocamlfind -y
+
+      - name: Configure
+        run: eval `opam config env`; cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZ3_BUILD_OCAML_BINDINGS=ON
+
+      - name: Build
+        run: |
+          set -e
+          eval `opam config env`
+          cmake --build build --parallel $(nproc)
+          cmake --build build --target test-z3 --parallel $(nproc)
+
+      - name: Install Z3 OCaml package
+        run: |
+          eval `opam config env`
+          ML=build/src/api/ml
+          ocamlfind install z3-static "$ML"/META "$ML"/*.cmi "$ML"/*.cmx "$ML"/*.mli "$ML"/*.a "$ML"/*.cma "$ML"/*.cmxa "$ML"/*.cmxs src/api/ml/z3.mli -dll "$ML"/dllz3ml.so
+          # Ensure the stublibs directory where dllz3ml.so was installed is
+          # listed in ld.conf so the OCaml bytecode linker can find it.  When no
+          # explicit -dll flag is passed, ocamlfind installs dll* files to stublibs
+          # but may not update ld.conf, causing "Fatal error: exception End_of_file"
+          # in ocamlc when it cannot locate the stub shared library at link time.
+          STUBLIBS="$(ocamlfind printconf destdir)/stublibs"
+          LDCONF="$(ocamlfind printconf ldconf)"
+          if [ -d "$STUBLIBS" ] && ! grep -qF "$STUBLIBS" "$LDCONF" 2>/dev/null; then
+            echo "$STUBLIBS" >> "$LDCONF"
+          fi
+
+      - name: Build and run OCaml examples
+        run: |
+          set -e
+          eval `opam config env`
+          EX=examples/ml/ml_example.ml
+          ocamlfind ocamlc -o ml_example_static.byte -thread -package z3-static -linkpkg "$EX"
+          ./ml_example_static.byte
+          ocamlfind ocamlc -custom -o ml_example_static_custom.byte -thread -package z3-static -linkpkg "$EX"
+          ./ml_example_static_custom.byte
+          ocamlfind ocamlopt -o ml_example_static -thread -package z3-static -linkpkg "$EX"
+          ./ml_example_static
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ./test-z3 -a
+          cd ..
+
+      - name: Clone z3test
+        run: git clone https://github.com/z3prover/z3test z3test
+
+      - name: Run regressions
+        run: python z3test/scripts/test_benchmarks.py build/z3 z3test/regressions/smt2
+
+      - name: Generate documentation
+        run: |
+          cd doc
+          sudo apt-get install -y doxygen graphviz
+          python mk_api_doc.py --no-z3py
+          cd ..
+
+  # ============================================================================
+  # Ubuntu CMake Builds
+  # ============================================================================
+  ubuntu-cmake:
+    name: "Ubuntu build - cmake - ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: releaseClang
+            cc: clang
+            cxx: clang++
+            setupCmd1: ''
+            setupCmd2: ''
+            buildCmd: 'cmake -G "Ninja" -S . -B build -DCMAKE_BUILD_TYPE=Release -DZ3_BUILD_DOTNET_BINDINGS=True -DZ3_BUILD_JAVA_BINDINGS=True -DZ3_BUILD_PYTHON_BINDINGS=True -DZ3_BUILD_GO_BINDINGS=True'
+            runTests: true
+          - name: debugClang
+            cc: clang
+            cxx: clang++
+            setupCmd1: 'julia -e "using Pkg; Pkg.add(PackageSpec(name=\"libcxxwrap_julia_jll\"))"'
+            setupCmd2: 'JlCxxDir=$(julia -e "using libcxxwrap_julia_jll; print(dirname(libcxxwrap_julia_jll.libcxxwrap_julia_path))")'
+            buildCmd: 'cmake -G "Ninja" -S . -B build -DJlCxx_DIR=$JlCxxDir/cmake/JlCxx -DZ3_BUILD_JULIA_BINDINGS=True -DZ3_BUILD_DOTNET_BINDINGS=True -DZ3_BUILD_JAVA_BINDINGS=True -DZ3_BUILD_PYTHON_BINDINGS=True -DZ3_BUILD_GO_BINDINGS=True'
+            runTests: true
+          - name: debugGcc
+            cc: gcc
+            cxx: g++
+            setupCmd1: ''
+            setupCmd2: ''
+            buildCmd: 'cmake -G "Ninja" -S . -B build -DZ3_BUILD_DOTNET_BINDINGS=True -DZ3_BUILD_JAVA_BINDINGS=True -DZ3_BUILD_PYTHON_BINDINGS=True -DZ3_BUILD_GO_BINDINGS=True'
+            runTests: true
+          - name: releaseSTGcc
+            cc: gcc
+            cxx: g++
+            setupCmd1: ''
+            setupCmd2: ''
+            buildCmd: 'cmake -G "Ninja" -S . -B build -DCMAKE_BUILD_TYPE=Release -DZ3_SINGLE_THREADED=ON -DZ3_BUILD_DOTNET_BINDINGS=True -DZ3_BUILD_JAVA_BINDINGS=True -DZ3_BUILD_PYTHON_BINDINGS=True -DZ3_BUILD_GO_BINDINGS=True'
+            runTests: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.20'
+          cache-dependency-path: |
+            src/api/go/go.mod
+            examples/go/go.mod
+
+      - name: Setup Julia (if needed)
+        if: matrix.name == 'debugClang'
+        uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687 # v3.0.3
+        with:
+          version: '1'
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          set -e
+          ${{ matrix.setupCmd1 }}
+          ${{ matrix.setupCmd2 }}
+          python_install_dir=$(python -c 'import sysconfig; print("lib/python" + sysconfig.get_python_version() + "/site-packages")')
+          ${{ matrix.buildCmd }} -DCMAKE_INSTALL_PYTHON_PKG_DIR="$python_install_dir"
+
+      - name: Build
+        run: |
+          cd build
+          ninja
+          ninja test-z3
+          cd ..
+
+      - name: Run unit tests
+        if: matrix.runTests
+        run: |
+          cd build
+          ./test-z3 -a
+          cd ..
+
+      - name: Clone z3test
+        if: matrix.runTests
+        run: git clone https://github.com/z3prover/z3test z3test
+
+      - name: Run the proof regression matrix tests
+        if: matrix.runTests
+        env:
+          Z3_EXE: ${{ github.workspace }}/build/z3
+        run: python -m unittest discover -s z3test/scripts/proofs -p test_proof_matrix.py -v
+
+      - name: Run proof canaries
+        if: matrix.name == 'releaseClang'
+        run: |
+          python z3test/scripts/proofs/proof_matrix.py \
+            --z3 build/z3 \
+            --benchmark-root z3test \
+            --timeout 30 \
+            --out "${{ runner.temp }}/proof-canaries.jsonl" \
+            z3test/regressions/proofs/canaries/*.txt
+
+      - name: Check native proofs in Lean
+        if: matrix.name == 'releaseClang'
+        run: scripts/ci_lean_proofs.sh --install-lean --z3 build/z3 --z3test z3test --out "${{ runner.temp }}"
+
+      - name: Upload native and Lean proof artifacts
+        if: always() && matrix.name == 'releaseClang'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lean-proof-certificates
+          path: |
+            ${{ runner.temp }}/lean-proof-artifacts/
+            ${{ runner.temp }}/lean-proof-matrix.jsonl
+            ${{ runner.temp }}/lean-proof-summary.md
+          if-no-files-found: warn
+
+      - name: Run examples
+        if: matrix.runTests
+        run: |
+          set -e
+          cd build
+          ninja c_example
+          ninja cpp_example
+          ninja c_maxsat_example
+          examples/c_example_build_dir/c_example
+          examples/cpp_example_build_dir/cpp_example
+          examples/c_maxsat_example_build_dir/c_maxsat_example ../examples/maxsat/ex.smt
+          cd ..
+
+      - name: Build Go bindings
+        if: matrix.runTests
+        run: |
+          cd build
+          ninja go-bindings
+          cd ..
+
+      - name: Test Go bindings
+        if: matrix.runTests
+        run: |
+          cd build
+          ninja test-go-examples
+          cd ..
+
+      - name: Run regressions
+        if: matrix.runTests
+        run: python z3test/scripts/test_benchmarks.py build/z3 z3test/regressions/smt2
+
+  cmake-package:
+    name: "CMake package - ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build_cmake: "3.26"
+            consumer_cmake: 3.5
+            name: minimum builder and consumer
+          - build_cmake: latest
+            consumer_cmake: latest
+            name: latest CMake
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ matrix.build_cmake }}
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev ninja-build
+
+      - name: Build and install shared library
+        run: |
+          cmake -G Ninja -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DZ3_USE_LIB_GMP=ON \
+            -DZ3_BUILD_EXECUTABLE=ON \
+            -DZ3_BUILD_TEST_EXECUTABLES=OFF \
+            -DZ3_ENABLE_EXAMPLE_TARGETS=OFF
+          cmake --build build --target libz3 shell
+          cmake --install build --prefix "$PWD/install"
+
+      - name: Snapshot the shared-only install
+        run: cp -a install install-shared-only
+
+      - name: Reconfigure in-place and build and install static library
+        run: |
+          cmake -G Ninja -S . -B build -DBUILD_SHARED_LIBS=OFF
+          cmake --build build --target libz3 shell
+          cmake --install build --prefix "$PWD/install"
+
+      - name: Consume relocated static pkg-config package
+        run: |
+          cp -a install install-relocated
+          export PKG_CONFIG_PATH="$PWD/install-relocated/lib/pkgconfig"
+          c++ cmake/tests/package/package_test.cpp \
+            $(pkg-config --cflags --libs --static z3) \
+            -static \
+            -o pkg-config-test
+          ./pkg-config-test
+
+          # Confirm the binary has no dynamic library dependencies at all.
+          ! ldd pkg-config-test
+
+      - name: Build Python bindings from installed shared package
+        env:
+          Z3_ROOT: ${{ github.workspace }}/install
+        run: |
+          cmake -G Ninja -S . -B build-python-only \
+            -DZ3_BUILD_LIBZ3_CORE=OFF \
+            -DZ3_BUILD_PYTHON_BINDINGS=ON \
+            -DZ3_INSTALL_PYTHON_BINDINGS=OFF
+          cmake --build build-python-only --target build_z3_python_bindings
+
+      - name: Setup consumer CMake
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ matrix.consumer_cmake }}
+
+      # jwlawson's old CMake/ctest binaries are linked against libidn.so.11,
+      # which Ubuntu dropped after focal; pull just that runtime lib from the
+      # focal archive since noble no longer ships it.
+      - name: Install libidn11 for old ctest binary
+        if: matrix.consumer_cmake != 'latest'
+        run: |
+          echo "deb http://archive.ubuntu.com/ubuntu focal main" | sudo tee /etc/apt/sources.list.d/focal.list
+          sudo apt-get update
+          sudo apt-get install -y libidn11
+          sudo rm /etc/apt/sources.list.d/focal.list
+          sudo apt-get update
+
+      - name: Consume shared package component
+        run: >-
+          ctest --build-and-test cmake/tests/package consume-shared
+          --build-generator Ninja
+          --build-options
+          -DZ3_TEST_COMPONENT=shared
+          -DZ3_TEST_CONFLICTING_COMPONENT=static
+          -DZ3_TEST_EXPECTED_TYPE=SHARED_LIBRARY
+          -DCMAKE_PREFIX_PATH=$PWD/install
+          --test-command ctest --output-on-failure
+
+      - name: Consume static package component
+        run: >-
+          ctest --build-and-test cmake/tests/package consume-static
+          --build-generator Ninja
+          --build-options
+          -DZ3_TEST_COMPONENT=static
+          -DZ3_TEST_CONFLICTING_COMPONENT=shared
+          -DZ3_TEST_EXPECTED_TYPE=STATIC_LIBRARY
+          -DCMAKE_PREFIX_PATH=$PWD/install
+          --test-command ctest --output-on-failure
+
+      # Only a shared library is installed here. A consumer that sets
+      # BUILD_SHARED_LIBS=OFF (e.g. to prefer static linking generally)
+      # should still fall back to the shared package that's actually
+      # available rather than failing to find a nonexistent static one.
+      - name: Consume shared-only package with BUILD_SHARED_LIBS=OFF
+        run: >-
+          ctest --build-and-test cmake/tests/package consume-shared-only-fallback
+          --build-generator Ninja
+          --build-options
+          -DBUILD_SHARED_LIBS=OFF
+          -DZ3_TEST_EXPECTED_TYPE=SHARED_LIBRARY
+          -DCMAKE_PREFIX_PATH=$PWD/install-shared-only
+          --test-command ctest --output-on-failure
+
+  # ============================================================================
+  # macOS JNI cross-compilation validation (ARM64 host -> x86_64 target)
+  # ============================================================================
+  macos-jni-cross-compile:
+    name: "MacOS JNI cross-compile (ARM64 -> x64) architecture validation"
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Configure (cross-compile ARM64 host -> x86_64 target)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DZ3_BUILD_JAVA_BINDINGS=ON -DCMAKE_OSX_ARCHITECTURES=x86_64
+
+      - name: Build
+        run: |
+          set -e
+          NPROC=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+          cmake --build build --target z3java --parallel "$NPROC"
+
+      - name: Validate libz3java.dylib is x86_64
+        run: |
+          echo "Checking libz3java.dylib architecture..."
+          ARCH=$(lipo -archs build/libz3java.dylib)
+          echo "libz3java.dylib architecture: $ARCH"
+          if [ "$ARCH" != "x86_64" ]; then
+            echo "ERROR: Expected x86_64 (cross-compiled target), got: $ARCH"
+            echo "This is the regression fixed in: JNI bindings use wrong architecture in macOS cross-compilation"
+            exit 1
+          fi
+          echo "OK: libz3java.dylib correctly built for x86_64 target on ARM64 host"
+
+  # ============================================================================
+  # Python script unit tests (build-script logic validation)
+  # ============================================================================
+  python-script-tests:
+    name: "Python build-script unit tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Run Python script unit tests
+        working-directory: ${{ github.workspace }}
+        run: python -m unittest discover -s scripts/tests -p "test_*.py" -v
+
+  # ============================================================================
+  # macOS CMake Builds
+  # ============================================================================
+  macos-cmake:
+    name: "MacOS build with CMake"
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Setup Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: |
+          brew install ninja gmp pkg-config
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@93303b622b2522e4411e295f9e77411a24912ac7 # v3.9.0
+        with:
+          ocaml-compiler: '5'
+
+      - name: Install OCaml dependencies
+        run: opam install zarith ocamlfind -y
+
+      - name: Configure
+        run: |
+          set -e
+          eval "$(opam env)"
+          python_install_dir=$(python -c 'import sysconfig; print("lib/python" + sysconfig.get_python_version() + "/site-packages")')
+          cmake -G "Ninja" -S . -B build -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_LIBDIR=lib -DZ3_BUILD_JAVA_BINDINGS=True -DZ3_BUILD_PYTHON_BINDINGS=True -DZ3_BUILD_DOTNET_BINDINGS=False -DZ3_BUILD_OCAML_BINDINGS=ON -DCMAKE_INSTALL_PYTHON_PKG_DIR="$python_install_dir"
+
+      - name: Build
+        run: |
+          eval "$(opam env)"
+          cd build
+          ninja
+          ninja test-z3
+          cd ..
+
+      - name: Install and test OCaml bindings
+        run: |
+          eval "$(opam env)"
+          bash scripts/test_ocaml_install.sh build "$PWD/install"
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ./test-z3 -a
+          cd ..
+
+      - name: Clone z3test
+        run: git clone https://github.com/z3prover/z3test z3test
+
+      - name: Run regressions
+        run: python z3test/scripts/test_benchmarks.py build/z3 z3test/regressions/smt2

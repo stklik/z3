@@ -15,8 +15,7 @@ Revision History:
 
 --*/
 
-#ifndef DL_MK_ARRAY_EQ_REWRITE_H_
-#define DL_MK_ARRAY_EQ_REWRITE_H_
+#pragma once
 
 #include "muz/base/dl_rule_transformer.h"
 
@@ -41,11 +40,9 @@ namespace datalog {
      public:
         mk_array_eq_rewrite(context & ctx, unsigned priority);
         rule_set * operator()(rule_set const & source) override;
-        ~mk_array_eq_rewrite() override{}
     };
 
 
 
-};
+}
 
-#endif /* DL_MK_ARRAY_EQ_REWRITE_H_ */

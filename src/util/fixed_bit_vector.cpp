@@ -19,7 +19,7 @@ Revision History:
 
 --*/
 
-#include<limits.h>
+#include<climits>
 #include "util/fixed_bit_vector.h"
 #include "util/trace.h"
 #include "util/hash.h"
@@ -48,6 +48,7 @@ fixed_bit_vector_manager::fixed_bit_vector_manager(unsigned num_bits):
     m_num_bytes = m_num_words * sizeof(unsigned);
     unsigned bit_rest = m_num_bits % 32;
     m_mask = (1U << bit_rest) - 1;
+    memset(&m_0, 0, sizeof(m_0));
     if (m_mask == 0) m_mask = UINT_MAX;
 }
 
@@ -99,21 +100,21 @@ fixed_bit_vector_manager::fill1(fixed_bit_vector& bv) const {
 
 fixed_bit_vector& 
 fixed_bit_vector_manager::set_and(fixed_bit_vector& dst, fixed_bit_vector const& src) const {
-    for (unsigned i = 0; i < m_num_words; i++) 
+    for (unsigned i = 0; i < m_num_words; ++i) 
         dst.m_data[i] &= src.m_data[i];
     return dst;
 }
 
 fixed_bit_vector& 
 fixed_bit_vector_manager::set_or(fixed_bit_vector& dst,  fixed_bit_vector const& src) const {
-    for (unsigned i = 0; i < m_num_words; i++) 
+    for (unsigned i = 0; i < m_num_words; ++i) 
         dst.m_data[i] |= src.m_data[i];
     return dst;
 }
 
 fixed_bit_vector& 
 fixed_bit_vector_manager::set_neg(fixed_bit_vector& dst) const {
-    for (unsigned i = 0; i < m_num_words; i++) 
+    for (unsigned i = 0; i < m_num_words; ++i) 
         dst.m_data[i] = ~dst.m_data[i];
     return dst;
 }
@@ -129,14 +130,14 @@ bool fixed_bit_vector_manager::equals(fixed_bit_vector const& a, fixed_bit_vecto
     unsigned n = num_words();
     if (n == 0)
         return true;
-    for (unsigned i = 0; i < n - 1; i++) {
+    for (unsigned i = 0; i < n - 1; ++i) {
         if (a.m_data[i] != b.m_data[i])
             return false;
     }
     return last_word(a) == last_word(b);
 }
 unsigned fixed_bit_vector_manager::hash(fixed_bit_vector const& src) const {
-    return string_hash(reinterpret_cast<char const* const>(src.m_data), num_bits()/8, num_bits());
+    return string_hash(std::string_view(reinterpret_cast<char const* const>(src.m_data), num_bits()/8), num_bits());
 }
 
 bool fixed_bit_vector_manager::contains(fixed_bit_vector const& a, fixed_bit_vector const& b) const {

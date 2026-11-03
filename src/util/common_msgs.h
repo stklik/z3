@@ -16,18 +16,17 @@ Author:
 Notes:
 
 --*/
-#ifndef COMMON_MSGS_H_
-#define COMMON_MSGS_H_
+#pragma once
 
 class common_msgs {
 public:
-    static char const * g_canceled_msg;
-    static char const * g_max_memory_msg;
-    static char const * g_max_scopes_msg;
-    static char const * g_max_steps_msg;
-    static char const * g_max_frames_msg;
-    static char const * g_no_proofs_msg;
-    static char const * g_max_resource_msg;
+    static char const g_canceled_msg[];
+    static char const g_max_memory_msg[];
+    static char const g_max_scopes_msg[];
+    static char const g_max_steps_msg[];
+    static char const g_max_frames_msg[];
+    static char const g_no_proofs_msg[];
+    static char const g_max_resource_msg[];
 };
 
 #define Z3_CANCELED_MSG      common_msgs::g_canceled_msg
@@ -38,4 +37,3 @@ public:
 #define Z3_NO_PROOF_GEN_MSG  common_msgs::g_no_proofs_msg
 #define Z3_MAX_RESOURCE_MSG  common_msgs::g_max_resource_msg
 
-#endif

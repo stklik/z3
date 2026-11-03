@@ -7,7 +7,6 @@ Module Name:
 
 Abstract:
 
-    Convert quantified NIA problems to bounded bit-vector arithmetic problems.
 
 Author:
 
@@ -16,18 +15,38 @@ Author:
 Notes:
     Ported to tactic framework on 2012-02-28
 
+Tactic Documentation:
+
+## Tactic nla2bv
+
+### Short Description
+
+Convert quantified NIA problems to bounded bit-vector arithmetic problems.
+
+### Example
+
+```z3
+(declare-const x Int)
+(declare-const y Int)
+(declare-const z Int)
+(assert (= (* x x y) (*  2 z y y)))
+(apply nla2bv)
+```
+
+### Notes
+
+* The tactic creates an under-approximation (a stronger set of formulas)
+
+
 --*/
-#ifndef NLA2BV_TACTIC_H_
-#define NLA2BV_TACTIC_H_
+#pragma once
 
 #include "util/params.h"
+#include "tactic/tactic.h"
 class ast_manager;
 class tactic;
 
 tactic * mk_nla2bv_tactic(ast_manager & m, params_ref const & p = params_ref());
-/*
-  ADD_TACTIC("nla2bv", "convert a nonlinear arithmetic problem into a bit-vector problem, in most cases the resultant goal is an under approximation and is useul for finding models.", "mk_nla2bv_tactic(m, p)")
-*/
+Z3_ADD_TACTIC(nla2bv, "nla2bv", "convert a nonlinear arithmetic problem into a bit-vector problem, in most cases the resultant goal is an under approximation and is useul for finding models.", mk_nla2bv_tactic(m, p));
 
-#endif
 

@@ -15,19 +15,22 @@ several API header files. It can also optionally
 emit some of the files required for Z3's different
 language bindings.
 """
-import mk_util
-import mk_exception
+
 import argparse
 import logging
 import re
 import os
 import sys
 
+VERBOSE = False
+def is_verbose():
+    return VERBOSE
+
 ##########################################################
 # TODO: rewrite this file without using global variables.
 # This file is a big HACK.
 # It started as small simple script.
-# Now, it is too big, and is invoked from mk_make.py
+# Now, it is too big, and is invoked from CMake
 #
 ##########################################################
 
@@ -38,6 +41,7 @@ IN_ARRAY    = 3
 OUT_ARRAY   = 4
 INOUT_ARRAY = 5
 OUT_MANAGED_ARRAY  = 6
+FN_PTR = 7
 
 # Primitive Types
 VOID       = 0
@@ -54,64 +58,95 @@ PRINT_MODE = 10
 ERROR_CODE = 11
 DOUBLE     = 12
 FLOAT      = 13
+CHAR       = 14
+CHAR_PTR   = 15
+LBOOL      = 16
+
+FIRST_FN_ID = 50
 
 FIRST_OBJ_ID = 100
 
 def is_obj(ty):
     return ty >= FIRST_OBJ_ID
 
+def is_fn(ty):
+    return FIRST_FN_ID <= ty and ty < FIRST_OBJ_ID
+
 Type2Str = { VOID : 'void', VOID_PTR : 'void*', INT : 'int', UINT : 'unsigned', INT64 : 'int64_t', UINT64 : 'uint64_t', DOUBLE : 'double',
-             FLOAT : 'float', STRING : 'Z3_string', STRING_PTR : 'Z3_string_ptr', BOOL : 'Z3_bool', SYMBOL : 'Z3_symbol',
-             PRINT_MODE : 'Z3_ast_print_mode', ERROR_CODE : 'Z3_error_code'
+             FLOAT : 'float', STRING : 'Z3_string', STRING_PTR : 'Z3_string_ptr', BOOL : 'bool', SYMBOL : 'Z3_symbol',
+             PRINT_MODE : 'Z3_ast_print_mode', ERROR_CODE : 'Z3_error_code', CHAR: 'char', CHAR_PTR: 'Z3_char_ptr', LBOOL : 'Z3_lbool'
              }
 
 Type2PyStr = { VOID_PTR : 'ctypes.c_void_p', INT : 'ctypes.c_int', UINT : 'ctypes.c_uint', INT64 : 'ctypes.c_longlong',
                UINT64 : 'ctypes.c_ulonglong', DOUBLE : 'ctypes.c_double', FLOAT : 'ctypes.c_float',
                STRING : 'ctypes.c_char_p', STRING_PTR : 'ctypes.POINTER(ctypes.c_char_p)', BOOL : 'ctypes.c_bool', SYMBOL : 'Symbol',
-               PRINT_MODE : 'ctypes.c_uint', ERROR_CODE : 'ctypes.c_uint'
+               PRINT_MODE : 'ctypes.c_uint', ERROR_CODE : 'ctypes.c_uint', CHAR : 'ctypes.c_char', CHAR_PTR: 'ctypes.POINTER(ctypes.c_char)', LBOOL : 'ctypes.c_int'
                }
 
 # Mapping to .NET types
 Type2Dotnet = { VOID : 'void', VOID_PTR : 'IntPtr', INT : 'int', UINT : 'uint', INT64 : 'Int64', UINT64 : 'UInt64', DOUBLE : 'double',
                 FLOAT : 'float', STRING : 'string', STRING_PTR : 'byte**', BOOL : 'byte', SYMBOL : 'IntPtr',
-                PRINT_MODE : 'uint', ERROR_CODE : 'uint' }
+                PRINT_MODE : 'uint', ERROR_CODE : 'uint', CHAR : 'char', CHAR_PTR : 'IntPtr', LBOOL : 'int' }
 
-# Mapping to Java types
-Type2Java = { VOID : 'void', VOID_PTR : 'long', INT : 'int', UINT : 'int', INT64 : 'long', UINT64 : 'long', DOUBLE : 'double',
-              FLOAT : 'float', STRING : 'String', STRING_PTR : 'StringPtr',
-              BOOL : 'boolean', SYMBOL : 'long', PRINT_MODE : 'int', ERROR_CODE : 'int'}
-
-Type2JavaW = { VOID : 'void', VOID_PTR : 'jlong', INT : 'jint', UINT : 'jint', INT64 : 'jlong', UINT64 : 'jlong', DOUBLE : 'jdouble',
-               FLOAT : 'jfloat', STRING : 'jstring', STRING_PTR : 'jobject',
-               BOOL : 'jboolean', SYMBOL : 'jlong', PRINT_MODE : 'jint', ERROR_CODE : 'jint'}
 
 # Mapping to ML types
-Type2ML = { VOID : 'unit', VOID_PTR : 'VOIDP', INT : 'int', UINT : 'int', INT64 : 'int', UINT64 : 'int', DOUBLE : 'float',
+Type2ML = { VOID : 'unit', VOID_PTR : 'ptr', INT : 'int', UINT : 'int', INT64 : 'int64', UINT64 : 'int64', DOUBLE : 'float',
             FLOAT : 'float', STRING : 'string', STRING_PTR : 'char**',
-            BOOL : 'bool', SYMBOL : 'z3_symbol', PRINT_MODE : 'int', ERROR_CODE : 'int' }
+            BOOL : 'bool', SYMBOL : 'z3_symbol', PRINT_MODE : 'int', ERROR_CODE : 'int', CHAR : 'char', CHAR_PTR : 'string', LBOOL : 'int' }
 
-next_type_id = FIRST_OBJ_ID
+Closures = []
 
-def def_Type(var, c_type, py_type):
-    global next_type_id
-    exec('%s = %s' % (var, next_type_id), globals())
-    Type2Str[next_type_id] = c_type
-    Type2PyStr[next_type_id] = py_type
-    next_type_id    = next_type_id + 1
+class APITypes:
+    def __init__(self):
+        self.next_type_id = FIRST_OBJ_ID
+        self.next_fntype_id = FIRST_FN_ID
 
-def def_Types(api_files):
-    pat1 = re.compile(" *def_Type\(\'(.*)\',[^\']*\'(.*)\',[^\']*\'(.*)\'\)[ \t]*")
-    for api_file in api_files:
-        api = open(api_file, 'r')
-        for line in api:
-            m = pat1.match(line)
-            if m:
-                def_Type(m.group(1), m.group(2), m.group(3))
-    for k in Type2Str:
-        v = Type2Str[k]
-        if is_obj(k):
-            Type2Dotnet[k] = v
-            Type2ML[k] = v.lower()
+    def def_Type(self, var, c_type, py_type):
+        """Process type definitions of the form def_Type(var, c_type, py_type)
+        The variable 'var' is set to a unique number and recorded globally using exec
+        It is used by 'def_APIs' to that uses the unique numbers to access the
+        corresponding C and Python types.
+        """
+        id = self.next_type_id
+        exec('%s = %s' % (var, id), globals())
+        Type2Str[id] = c_type
+        Type2PyStr[id] = py_type
+        self.next_type_id += 1
+
+        
+    def def_Types(self, api_files):
+        global Closures
+        pat1 = re.compile(r" *def_Type\(\'(.*)\',[^\']*\'(.*)\',[^\']*\'(.*)\'\)[ \t]*")
+        pat2 = re.compile(r"Z3_DECLARE_CLOSURE\((.*),(.*), \((.*)\)\)")
+        for api_file in api_files:
+            with open(api_file, 'r') as api:
+                for line in api:
+                    m = pat1.match(line)
+                    if m:
+                        self.def_Type(m.group(1), m.group(2), m.group(3))
+                        continue
+                    m = pat2.match(line)
+                    if m:
+                        self.fun_Type(m.group(1))
+                        Closures += [(m.group(1), m.group(2), m.group(3))]
+                        continue
+        #
+        # Populate object type entries in dotnet and ML bindings.
+        # 
+        for k in Type2Str:
+            v = Type2Str[k]
+            if is_obj(k) or is_fn(k):
+                Type2Dotnet[k] = v
+                Type2ML[k] = v.lower()
+
+    def fun_Type(self, var):
+        """Process function type definitions"""
+        id = self.next_fntype_id
+        exec('%s = %s' % (var, id), globals())
+        Type2Str[id] = var
+        Type2PyStr[id] = var
+        self.next_fntype_id += 1
+
 
 def type2str(ty):
     global Type2Str
@@ -124,20 +159,6 @@ def type2pystr(ty):
 def type2dotnet(ty):
     global Type2Dotnet
     return Type2Dotnet[ty]
-
-def type2java(ty):
-    global Type2Java
-    if (ty >= FIRST_OBJ_ID):
-        return 'long'
-    else:
-        return Type2Java[ty]
-
-def type2javaw(ty):
-    global Type2JavaW
-    if (ty >= FIRST_OBJ_ID):
-        return 'jlong'
-    else:
-        return Type2JavaW[ty]
 
 def type2ml(ty):
     global Type2ML
@@ -152,6 +173,9 @@ def _in(ty):
 
 def _in_array(sz, ty):
     return (IN_ARRAY, ty, sz)
+
+def _fnptr(ty):
+    return (FN_PTR, ty)
 
 def _out(ty):
     return (OUT, ty)
@@ -185,11 +209,13 @@ def param_array_size_pos(p):
 
 def param2str(p):
     if param_kind(p) == IN_ARRAY:
-        return "%s const *" % type2str(param_type(p))
+        return "%s const *" % (type2str(param_type(p)))
     elif param_kind(p) == OUT_ARRAY or param_kind(p) == IN_ARRAY or param_kind(p) == INOUT_ARRAY:
-        return "%s*" % type2str(param_type(p))
+        return "%s*" % (type2str(param_type(p))) 
     elif param_kind(p) == OUT:
-        return "%s*" % type2str(param_type(p))
+        return "%s*" % (type2str(param_type(p))) 
+    elif param_kind(p) == FN_PTR:
+        return "%s*" % (type2str(param_type(p))) 
     else:
         return type2str(param_type(p))
 
@@ -212,42 +238,8 @@ def param2dotnet(p):
     else:
         return type2dotnet(param_type(p))
 
-def param2java(p):
-    k = param_kind(p)
-    if k == OUT:
-        if param_type(p) == INT or param_type(p) == UINT:
-            return "IntPtr"
-        elif param_type(p) == INT64 or param_type(p) == UINT64 or param_type(p) == VOID_PTR or param_type(p) >= FIRST_OBJ_ID:
-            return "LongPtr"
-        elif param_type(p) == STRING:
-            return "StringPtr"
-        else:
-            print("ERROR: unreachable code")
-            assert(False)
-            exit(1)
-    elif k == IN_ARRAY or k == INOUT_ARRAY or k == OUT_ARRAY:
-        return "%s[]" % type2java(param_type(p))
-    elif k == OUT_MANAGED_ARRAY:
-        if param_type(p) == UINT:
-            return "UIntArrayPtr"
-        else:
-            return "ObjArrayPtr"
-    else:
-        return type2java(param_type(p))
 
-def param2javaw(p):
-    k = param_kind(p)
-    if k == OUT:
-        return "jobject"
-    elif k == IN_ARRAY or k == INOUT_ARRAY or k == OUT_ARRAY:
-        if param_type(p) == INT or param_type(p) == UINT or param_type(p) == BOOL:
-            return "jintArray"
-        else:
-            return "jlongArray"
-    elif k == OUT_MANAGED_ARRAY:
-        return "jlong"
-    else:
-        return type2javaw(param_type(p))
+# --------------
 
 def param2pystr(p):
     if param_kind(p) == IN_ARRAY or param_kind(p) == OUT_ARRAY or param_kind(p) == IN_ARRAY or param_kind(p) == INOUT_ARRAY or param_kind(p) == OUT:
@@ -255,11 +247,16 @@ def param2pystr(p):
     else:
         return type2pystr(param_type(p))
 
+# --------------
+# ML
+
 def param2ml(p):
     k = param_kind(p)
     if k == OUT:
-        if param_type(p) == INT or param_type(p) == UINT or param_type(p) == BOOL or param_type(p) == INT64 or param_type(p) == UINT64:
+        if param_type(p) == INT or param_type(p) == UINT or param_type(p) == BOOL:
             return "int"
+        elif param_type(p) == INT64 or param_type(p) == UINT64:
+            return "int64"
         elif param_type(p) == STRING:
             return "string"
         else:
@@ -306,13 +303,20 @@ def display_args_to_z3(params):
         if i > 0:
             core_py.write(", ")
         if param_type(p) == STRING:
-            core_py.write("_to_ascii(a%s)" % i)
+            core_py.write("_str_to_bytes(a%s)" % i)
         else:
             core_py.write("a%s" % i)
         i = i + 1
 
-NULLWrapped = [ 'Z3_mk_context', 'Z3_mk_context_rc', 'Z3_mk_interpolation_context' ]
+NULLWrapped = [ 'Z3_mk_context', 'Z3_mk_context_rc' ]
 Unwrapped = [ 'Z3_del_context', 'Z3_get_error_code' ]
+Unchecked = frozenset([ 'Z3_dec_ref', 'Z3_params_dec_ref', 'Z3_model_dec_ref',
+                        'Z3_func_interp_dec_ref', 'Z3_func_entry_dec_ref',
+                        'Z3_goal_dec_ref', 'Z3_tactic_dec_ref', 'Z3_simplifier_dec_ref', 'Z3_probe_dec_ref',
+                        'Z3_fixedpoint_dec_ref', 'Z3_param_descrs_dec_ref',
+                        'Z3_ast_vector_dec_ref', 'Z3_ast_map_dec_ref', 
+                        'Z3_apply_result_dec_ref', 'Z3_solver_dec_ref',
+                        'Z3_stats_dec_ref', 'Z3_optimize_dec_ref'])
 
 def mk_py_wrappers():
     core_py.write("""
@@ -335,29 +339,64 @@ def Z3_set_error_handler(ctx, hndlr, _elems=Elementaries(_lib.Z3_set_error_handl
   _elems.Check(ctx)
   return ceh
 
+def Z3_solver_register_on_clause(ctx, s, user_ctx, on_clause_eh, _elems = Elementaries(_lib.Z3_solver_register_on_clause)):
+    _elems.f(ctx, s, user_ctx, on_clause_eh)
+    _elems.Check(ctx)
+    
+def Z3_solver_propagate_init(ctx, s, user_ctx, push_eh, pop_eh, fresh_eh, _elems = Elementaries(_lib.Z3_solver_propagate_init)):
+    _elems.f(ctx, s, user_ctx, push_eh, pop_eh, fresh_eh)
+    _elems.Check(ctx)
+
+def Z3_solver_propagate_final(ctx, s, final_eh, _elems = Elementaries(_lib.Z3_solver_propagate_final)):
+    _elems.f(ctx, s, final_eh)
+    _elems.Check(ctx)
+
+def Z3_solver_propagate_fixed(ctx, s, fixed_eh, _elems = Elementaries(_lib.Z3_solver_propagate_fixed)):
+    _elems.f(ctx, s, fixed_eh)
+    _elems.Check(ctx)
+
+def Z3_solver_propagate_eq(ctx, s, eq_eh, _elems = Elementaries(_lib.Z3_solver_propagate_eq)):
+    _elems.f(ctx, s, eq_eh)
+    _elems.Check(ctx)
+
+def Z3_solver_propagate_diseq(ctx, s, diseq_eh, _elems = Elementaries(_lib.Z3_solver_propagate_diseq)):
+    _elems.f(ctx, s, diseq_eh)
+    _elems.Check(ctx)
+
+def Z3_optimize_register_model_eh(ctx, o, m, user_ctx, on_model_eh, _elems = Elementaries(_lib.Z3_optimize_register_model_eh)):
+    _elems.f(ctx, o, m, user_ctx, on_model_eh)
+    _elems.Check(ctx)
+
 """)
 
     for sig in _API2PY:
-        name   = sig[0]
-        result = sig[1]
-        params = sig[2]
-        num    = len(params)
-        core_py.write("def %s(" % name)
-        display_args(num)
-        comma = ", " if num != 0 else ""
-        core_py.write("%s_elems=Elementaries(_lib.%s)):\n" % (comma, name))
-        lval = "r = " if result != VOID else ""
-        core_py.write("  %s_elems.f(" % lval)
-        display_args_to_z3(params)
-        core_py.write(")\n")
-        if len(params) > 0 and param_type(params[0]) == CONTEXT and not name in Unwrapped:
-            core_py.write("  _elems.Check(a0)\n")
-        if result == STRING:
-            core_py.write("  return _to_pystr(r)\n")
-        elif result != VOID:
-            core_py.write("  return r\n")
-        core_py.write("\n")
-    core_py
+        mk_py_wrapper_single(sig)
+        if sig[1] == STRING:
+            mk_py_wrapper_single(sig, decode_string=False)
+
+def mk_py_wrapper_single(sig, decode_string=True):
+    name    = sig[0]
+    result  = sig[1]
+    params  = sig[2]
+    num     = len(params)
+    def_name = name
+    if not decode_string:
+        def_name += '_bytes'
+    core_py.write("def %s(" % def_name)
+    display_args(num)
+    comma = ", " if num != 0 else ""
+    core_py.write("%s_elems=Elementaries(_lib.%s)):\n" % (comma, name))
+    lval = "r = " if result != VOID else ""
+    core_py.write("  %s_elems.f(" % lval)
+    display_args_to_z3(params)
+    core_py.write(")\n")
+    if len(params) > 0 and param_type(params[0]) == CONTEXT and not name in Unwrapped and not name in Unchecked:
+        core_py.write("  _elems.Check(a0)\n")
+    if result == STRING and decode_string:
+        core_py.write("  return _to_pystr(r)\n")
+    elif result != VOID:
+        core_py.write("  return r\n")
+    core_py.write("\n")
 
 
 ## .NET API native interface
@@ -380,11 +419,22 @@ def mk_dotnet(dotnet):
         v = Type2Str[k]
         if is_obj(k):
             dotnet.write('    using %s = System.IntPtr;\n' % v)
+
+    dotnet.write('       using voidp = System.IntPtr;\n')
     dotnet.write('\n')
     dotnet.write('    public class Native\n')
     dotnet.write('    {\n\n')
-    dotnet.write('        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]\n')
-    dotnet.write('        public delegate void Z3_error_handler(Z3_context c, Z3_error_code e);\n\n')
+
+    for name, ret, sig in Closures:
+        sig = sig.replace("unsigned const*","uint[]")
+        sig = sig.replace("void*","voidp").replace("unsigned","uint")
+        sig = sig.replace("Z3_ast*","ref IntPtr").replace("uint*","ref uint").replace("Z3_lbool*","ref int")
+        ret = ret.replace("void*","voidp").replace("unsigned","uint").replace("Z3_string", "IntPtr")
+        if "*" in sig or "*" in ret:
+            continue
+        dotnet.write('        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]\n')
+        dotnet.write('        public delegate %s %s(%s);\n' % (ret,name,sig))
+    
     dotnet.write('        public class LIB\n')
     dotnet.write('        {\n')
     dotnet.write('            const string Z3_DLL_NAME = \"libz3\";\n'
@@ -462,7 +512,7 @@ def mk_dotnet_wrappers(dotnet):
                 dotnet.write("            if (r == IntPtr.Zero)\n")
                 dotnet.write("                throw new Z3Exception(\"Object allocation failed.\");\n")
             else:
-                if len(params) > 0 and param_type(params[0]) == CONTEXT:
+                if len(params) > 0 and param_type(params[0]) == CONTEXT and name not in Unchecked:
                     dotnet.write("            Z3_error_code err = (Z3_error_code)LIB.Z3_get_error_code(a0);\n")
                     dotnet.write("            if (err != Z3_error_code.Z3_OK)\n")
                     dotnet.write("                throw new Z3Exception(Marshal.PtrToStringAnsi(LIB.Z3_get_error_msg(a0, (uint)err)));\n")
@@ -473,6 +523,70 @@ def mk_dotnet_wrappers(dotnet):
         dotnet.write("        }\n\n")
     dotnet.write("    }\n\n")
     dotnet.write("}\n\n")
+
+# ----------------------
+# Java
+
+Type2Java = { VOID : 'void', VOID_PTR : 'long', INT : 'int', UINT : 'int', INT64 : 'long', UINT64 : 'long', DOUBLE : 'double',
+              FLOAT : 'float', STRING : 'String', STRING_PTR : 'StringPtr',
+              BOOL : 'boolean', SYMBOL : 'long', PRINT_MODE : 'int', ERROR_CODE : 'int', CHAR : 'char', CHAR_PTR : 'long', LBOOL : 'int' }
+
+Type2JavaW = { VOID : 'void', VOID_PTR : 'jlong', INT : 'jint', UINT : 'jint', INT64 : 'jlong', UINT64 : 'jlong', DOUBLE : 'jdouble',
+               FLOAT : 'jfloat', STRING : 'jstring', STRING_PTR : 'jobject',
+               BOOL : 'jboolean', SYMBOL : 'jlong', PRINT_MODE : 'jint', ERROR_CODE : 'jint', CHAR : 'jchar', CHAR_PTR : 'jlong', LBOOL : 'jint'}
+
+def type2java(ty):
+    global Type2Java
+    if (ty >= FIRST_FN_ID):
+        return 'long'
+    else:
+        return Type2Java[ty]
+
+def type2javaw(ty):
+    global Type2JavaW
+    if (ty >= FIRST_FN_ID):
+        return 'jlong'
+    else:
+        return Type2JavaW[ty]
+
+def param2java(p):
+    k = param_kind(p)
+    if k == OUT:
+        if param_type(p) == INT or param_type(p) == UINT:
+            return "IntPtr"
+        elif param_type(p) == INT64 or param_type(p) == UINT64 or param_type(p) == VOID_PTR or param_type(p) >= FIRST_OBJ_ID:
+            return "LongPtr"
+        elif param_type(p) == STRING:
+            return "StringPtr"
+        elif param_type(p) == BOOL:
+            return "BoolPtr"
+        else:
+            raise ValueError(f"ERROR: unreachable code - unexpected param_type: {param_type(p)}")
+    elif k == IN_ARRAY or k == INOUT_ARRAY or k == OUT_ARRAY:
+        return "%s[]" % type2java(param_type(p))
+    elif k == OUT_MANAGED_ARRAY:
+        if param_type(p) == UINT:
+            return "UIntArrayPtr"
+        else:
+            return "ObjArrayPtr"
+    elif k == FN_PTR:
+        return "LongPtr"
+    else:
+        return type2java(param_type(p))
+
+def param2javaw(p):
+    k = param_kind(p)
+    if k == OUT:
+        return "jobject"
+    elif k == IN_ARRAY or k == INOUT_ARRAY or k == OUT_ARRAY:
+        if param_type(p) == INT or param_type(p) == UINT or param_type(p) == BOOL:
+            return "jintArray"
+        else:
+            return "jlongArray"
+    elif k == OUT_MANAGED_ARRAY:
+        return "jlong"
+    else:
+        return type2javaw(param_type(p))
 
 def java_method_name(name):
     result = ''
@@ -496,7 +610,7 @@ def java_array_element_type(p):
     else:
         return 'jlong'
 
-def mk_java(java_dir, package_name):
+def mk_java(java_src, java_dir, package_name):
     java_nativef  = os.path.join(java_dir, 'Native.java')
     java_wrapperf = os.path.join(java_dir, 'Native.cpp')
     java_native   = open(java_nativef, 'w')
@@ -509,13 +623,89 @@ def mk_java(java_dir, package_name):
     java_native.write('  public static class StringPtr { public String value; }\n')
     java_native.write('  public static class ObjArrayPtr { public long[] value; }\n')
     java_native.write('  public static class UIntArrayPtr { public int[] value; }\n')
+    java_native.write('  public static class BoolPtr { public boolean value; }\n')
     java_native.write('  public static native void setInternalErrorHandler(long ctx);\n\n')
 
     java_native.write('  static {\n')
-    java_native.write('    try { System.loadLibrary("z3java"); }\n')
-    java_native.write('    catch (UnsatisfiedLinkError ex) { System.loadLibrary("libz3java"); }\n')
+    java_native.write('    NativeLibraryLoader.load();\n')
     java_native.write('  }\n')
+    java_native.write("""
+  public static native long propagateInit(Object o, long ctx, long solver);
+  public static native void propagateRegisterCreated(Object o, long ctx, long solver);
+  public static native void propagateRegisterFixed(Object o, long ctx, long solver);
+  public static native void propagateRegisterEq(Object o, long ctx, long solver);
+  public static native void propagateRegisterDecide(Object o, long ctx, long solver);
+  public static native void propagateRegisterFinal(Object o, long ctx, long solver);
+  public static native void propagateRegisterOnBinding(Object o, long ctx, long solver);
+  public static native void propagateAdd(Object o, long ctx, long solver, long javainfo, long e);
+  public static native boolean propagateConsequence(Object o, long ctx, long solver, long javainfo, int num_fixed, long[] fixed, long num_eqs, long[] eq_lhs, long[] eq_rhs, long conseq);
+  public static native boolean propagateNextSplit(Object o, long ctx, long solver, long javainfo, long e, long idx, int phase);
+  public static native void propagateDestroy(Object o, long ctx, long solver, long javainfo);
+  public static native long onClauseInit(Object o, long ctx, long solver);
+  public static native void onClauseDestroy(long javainfo);
 
+  public static abstract class UserPropagatorBase implements AutoCloseable {
+    protected long ctx;
+    protected long solver;
+    protected long javainfo;
+
+    public UserPropagatorBase(long _ctx, long _solver) {
+        ctx = _ctx;
+        solver = _solver;
+        javainfo = propagateInit(this, ctx, solver);
+    }
+
+    @Override
+    public void close() {
+        Native.propagateDestroy(this, ctx, solver, javainfo);
+        javainfo = 0;
+        solver = 0;
+        ctx = 0;
+    }
+
+    protected final void registerCreated() {
+        Native.propagateRegisterCreated(this, ctx, solver);
+    }
+
+    protected final void registerFixed() {
+        Native.propagateRegisterFixed(this, ctx, solver);
+    }
+
+    protected final void registerEq() {
+        Native.propagateRegisterEq(this, ctx, solver);
+    }
+
+    protected final void registerDecide() {
+        Native.propagateRegisterDecide(this, ctx, solver);
+    }
+
+    protected final void registerFinal() {
+        Native.propagateRegisterFinal(this, ctx, solver);
+    }
+    
+    protected final void registerOnBinding() {
+        Native.propagateRegisterOnBinding(this, ctx, solver);
+    }
+
+    protected abstract void pushWrapper();
+
+    protected abstract void popWrapper(int number);
+
+    protected abstract void finWrapper();
+
+    protected abstract void eqWrapper(long lx, long ly);
+
+    protected abstract UserPropagatorBase freshWrapper(long lctx);
+
+    protected abstract void createdWrapper(long le);
+
+    protected abstract void fixedWrapper(long lvar, long lvalue);
+
+    protected abstract void decideWrapper(long lvar, int bit, boolean is_pos);
+
+    protected abstract boolean onBindingWrapper(long q, long inst);
+  }
+    """)
     java_native.write('\n')
     for name, result, params in _dotnet_decls:
         java_native.write('  protected static native %s INTERNAL%s(' % (type2java(result), java_method_name(name)))
@@ -566,7 +756,7 @@ def mk_java(java_dir, package_name):
                 java_native.write("      if (res == 0)\n")
                 java_native.write("          throw new Z3Exception(\"Object allocation failed.\");\n")
             else:
-                if len(params) > 0 and param_type(params[0]) == CONTEXT:
+                if len(params) > 0 and param_type(params[0]) == CONTEXT and name not in Unchecked:
                     java_native.write('      Z3_error_code err = Z3_error_code.fromInt(INTERNALgetErrorCode(a0));\n')
                     java_native.write('      if (err != Z3_error_code.Z3_OK)\n')
                     java_native.write('          throw new Z3Exception(INTERNALgetErrorMsg(a0, err.toInt()));\n')
@@ -576,68 +766,13 @@ def mk_java(java_dir, package_name):
     java_native.write('}\n')
     java_wrapper = open(java_wrapperf, 'w')
     pkg_str = package_name.replace('.', '_')
-    java_wrapper.write('// Automatically generated file\n')
-    java_wrapper.write('#include<jni.h>\n')
-    java_wrapper.write('#include<stdlib.h>\n')
-    java_wrapper.write('#include"z3.h"\n')
-    java_wrapper.write('#ifdef __cplusplus\n')
-    java_wrapper.write('extern "C" {\n')
-    java_wrapper.write('#endif\n\n')
-    java_wrapper.write('#ifdef __GNUC__\n#if __GNUC__ >= 4\n#define DLL_VIS __attribute__ ((visibility ("default")))\n#else\n#define DLL_VIS\n#endif\n#else\n#define DLL_VIS\n#endif\n\n')
-    java_wrapper.write('#if defined(_M_X64) || defined(_AMD64_)\n\n')
-    java_wrapper.write('#define GETLONGAELEMS(T,OLD,NEW)                                   \\\n')
-    java_wrapper.write('  T * NEW = (OLD == 0) ? 0 : (T*) jenv->GetLongArrayElements(OLD, NULL);\n')
-    java_wrapper.write('#define RELEASELONGAELEMS(OLD,NEW)                                 \\\n')
-    java_wrapper.write('  if (OLD != 0) jenv->ReleaseLongArrayElements(OLD, (jlong *) NEW, JNI_ABORT);     \n\n')
-    java_wrapper.write('#define GETLONGAREGION(T,OLD,Z,SZ,NEW)                               \\\n')
-    java_wrapper.write('  jenv->GetLongArrayRegion(OLD,Z,(jsize)SZ,(jlong*)NEW);             \n')
-    java_wrapper.write('#define SETLONGAREGION(OLD,Z,SZ,NEW)                               \\\n')
-    java_wrapper.write('  jenv->SetLongArrayRegion(OLD,Z,(jsize)SZ,(jlong*)NEW)              \n\n')
-    java_wrapper.write('#else\n\n')
-    java_wrapper.write('#define GETLONGAELEMS(T,OLD,NEW)                                   \\\n')
-    java_wrapper.write('  T * NEW = 0; {                                                   \\\n')
-    java_wrapper.write('  jlong * temp = (OLD == 0) ? 0 : jenv->GetLongArrayElements(OLD, NULL); \\\n')
-    java_wrapper.write('  unsigned int size = (OLD == 0) ? 0 :jenv->GetArrayLength(OLD);     \\\n')
-    java_wrapper.write('  if (OLD != 0) {                                                    \\\n')
-    java_wrapper.write('    NEW = (T*) (new int[size]);                                      \\\n')
-    java_wrapper.write('    for (unsigned i=0; i < size; i++)                                \\\n')
-    java_wrapper.write('      NEW[i] = reinterpret_cast<T>(temp[i]);                         \\\n')
-    java_wrapper.write('    jenv->ReleaseLongArrayElements(OLD, temp, JNI_ABORT);            \\\n')
-    java_wrapper.write('  }                                                                  \\\n')
-    java_wrapper.write('  }                                                                    \n\n')
-    java_wrapper.write('#define RELEASELONGAELEMS(OLD,NEW)                                   \\\n')
-    java_wrapper.write('  delete [] NEW;                                                     \n\n')
-    java_wrapper.write('#define GETLONGAREGION(T,OLD,Z,SZ,NEW)                              \\\n')
-    java_wrapper.write('  {                                                                 \\\n')
-    java_wrapper.write('    jlong * temp = new jlong[SZ];                                   \\\n')
-    java_wrapper.write('    jenv->GetLongArrayRegion(OLD,Z,(jsize)SZ,(jlong*)temp);         \\\n')
-    java_wrapper.write('    for (int i = 0; i < (SZ); i++)                                  \\\n')
-    java_wrapper.write('      NEW[i] = reinterpret_cast<T>(temp[i]);                        \\\n')
-    java_wrapper.write('    delete [] temp;                                                 \\\n')
-    java_wrapper.write('  }\n\n')
-    java_wrapper.write('#define SETLONGAREGION(OLD,Z,SZ,NEW)                                \\\n')
-    java_wrapper.write('  {                                                                 \\\n')
-    java_wrapper.write('    jlong * temp = new jlong[SZ];                                   \\\n')
-    java_wrapper.write('    for (int i = 0; i < (SZ); i++)                                  \\\n')
-    java_wrapper.write('      temp[i] = reinterpret_cast<jlong>(NEW[i]);                    \\\n')
-    java_wrapper.write('    jenv->SetLongArrayRegion(OLD,Z,(jsize)SZ,temp);                 \\\n')
-    java_wrapper.write('    delete [] temp;                                                 \\\n')
-    java_wrapper.write('  }\n\n')
-    java_wrapper.write('#endif\n\n')
-    java_wrapper.write('void Z3JavaErrorHandler(Z3_context c, Z3_error_code e)\n')
-    java_wrapper.write('{\n')
-    java_wrapper.write('  // Internal do-nothing error handler. This is required to avoid that Z3 calls exit()\n')
-    java_wrapper.write('  // upon errors, but the actual error handling is done by throwing exceptions in the\n')
-    java_wrapper.write('  // wrappers below.\n')
-    java_wrapper.write('}\n\n')
-    java_wrapper.write('DLL_VIS JNIEXPORT void JNICALL Java_%s_Native_setInternalErrorHandler(JNIEnv * jenv, jclass cls, jlong a0)\n' % pkg_str)
-    java_wrapper.write('{\n')
-    java_wrapper.write('  Z3_set_error_handler((Z3_context)a0, Z3JavaErrorHandler);\n')
-    java_wrapper.write('}\n\n')
-    java_wrapper.write('')
+    java_wrapper.write("// Automatically generated file\n")
+    with open(java_src + "/NativeStatic.txt") as ins:
+        for line in ins:
+            java_wrapper.write(line)            
     for name, result, params in _dotnet_decls:
         java_wrapper.write('DLL_VIS JNIEXPORT %s JNICALL Java_%s_Native_INTERNAL%s(JNIEnv * jenv, jclass cls' % (type2javaw(result), pkg_str, java_method_name(name)))
-        i = 0
+        i = 0        
         for param in params:
             java_wrapper.write(', ')
             java_wrapper.write('%s a%d' % (param2javaw(param), i))
@@ -711,11 +846,24 @@ def mk_java(java_dir, package_name):
                     java_wrapper.write('  RELEASELONGAELEMS(a%s, _a%s);\n' % (i, i))
 
             elif k == OUT or k == INOUT:
-                if param_type(param) == INT or param_type(param) == UINT or param_type(param) == BOOL:
+                if param_type(param) == INT or param_type(param) == UINT:
                     java_wrapper.write('  {\n')
                     java_wrapper.write('     jclass mc    = jenv->GetObjectClass(a%s);\n' % i)
                     java_wrapper.write('     jfieldID fid = jenv->GetFieldID(mc, "value", "I");\n')
                     java_wrapper.write('     jenv->SetIntField(a%s, fid, (jint) _a%s);\n' % (i, i))
+                    java_wrapper.write('  }\n')
+                elif param_type(param) == BOOL:
+                    java_wrapper.write('  {\n')
+                    java_wrapper.write('     jclass mc    = jenv->GetObjectClass(a%s);\n' % i)
+                    java_wrapper.write('     jfieldID fid = jenv->GetFieldID(mc, "value", "Z");\n')
+                    java_wrapper.write('     jenv->SetBooleanField(a%s, fid, (jboolean) _a%s);\n' % (i, i))
+                    java_wrapper.write('  }\n')
+                elif param_type(param) == STRING:
+                    java_wrapper.write('  {\n')
+                    java_wrapper.write('     jclass mc    = jenv->GetObjectClass(a%s);\n' % i)
+                    java_wrapper.write('     jfieldID fid = jenv->GetFieldID(mc, "value", "Ljava/lang/String;");')
+                    java_wrapper.write('     jstring fval = jenv->NewStringUTF(_a%s);\n' % i)
+                    java_wrapper.write('     jenv->SetObjectField(a%s, fid, fval);\n' % i)
                     java_wrapper.write('  }\n')
                 else:
                     java_wrapper.write('  {\n')
@@ -730,6 +878,10 @@ def mk_java(java_dir, package_name):
                 java_wrapper.write('  jenv->ReleaseStringUTFChars(a%s, _a%s);\n' % (i, i));
             i = i + 1
         # return
+        if name == 'Z3_mk_context' or name == 'Z3_mk_context_rc':
+            # Z3JavaErrorHandler is defined in NativeStatic.txt which is prepended to Native.cpp
+            java_wrapper.write('  if (result != 0)\n')
+            java_wrapper.write('      Z3_set_error_handler((Z3_context) result, Z3JavaErrorHandler); // Defined in NativeStatic.txt\n')
         if result == STRING:
             java_wrapper.write('  return jenv->NewStringUTF(result);\n')
         elif result != VOID:
@@ -738,7 +890,7 @@ def mk_java(java_dir, package_name):
     java_wrapper.write('#ifdef __cplusplus\n')
     java_wrapper.write('}\n')
     java_wrapper.write('#endif\n')
-    if mk_util.is_verbose():
+    if is_verbose():
         print("Generated '%s'" % java_nativef)
 
 def mk_log_header(file, name, params):
@@ -750,6 +902,10 @@ def mk_log_header(file, name, params):
         file.write("%s a%s" % (param2str(p), i))
         i = i + 1
     file.write(")")
+
+# ---------------------------------
+# Logging
+
 
 def log_param(p):
     kind = param_kind(p)
@@ -829,9 +985,9 @@ def mk_log_result_macro(file, name, result, params):
                 cap = param_array_capacity_pos(p)
                 sz  = param_array_size_pos(p)
                 if cap == sz:
-                    file.write("for (unsigned i = 0; i < Z3ARG%s; i++) { SetAO(Z3ARG%s[i], %s, i); } " % (sz, i, i))
+                    file.write("for (unsigned i = 0; i < Z3ARG%s; ++i) { SetAO(Z3ARG%s[i], %s, i); } " % (sz, i, i))
                 else:
-                    file.write("for (unsigned i = 0; Z3ARG%s && i < *Z3ARG%s; i++) { SetAO(Z3ARG%s[i], %s, i); } " % (sz, sz, i, i))
+                    file.write("for (unsigned i = 0; Z3ARG%s && i < *Z3ARG%s; ++i) { SetAO(Z3ARG%s[i], %s, i); } " % (sz, sz, i, i))
             if kind == OUT or kind == INOUT:
                 file.write("SetO((Z3ARG%s == 0 ? 0 : *Z3ARG%s), %s); " % (i, i, i))
         i = i + 1
@@ -905,6 +1061,12 @@ def def_API(name, result, params):
             elif ty == BOOL:
                 log_c.write("  I(a%s);\n" % i)
                 exe_c.write("in.get_bool(%s)" % i)
+            elif ty == VOID_PTR:
+                log_c.write("  P(0);\n")
+                exe_c.write("in.get_obj_addr(%s)" % i)
+            elif ty == LBOOL:
+                log_c.write("  I(static_cast<signed>(a%s));\n" % i)
+                exe_c.write("static_cast<%s>(in.get_int(%s))" % (type2str(ty), i))
             elif ty == PRINT_MODE or ty == ERROR_CODE:
                 log_c.write("  U(static_cast<unsigned>(a%s));\n" % i)
                 exe_c.write("static_cast<%s>(in.get_uint(%s))" % (type2str(ty), i))
@@ -931,6 +1093,9 @@ def def_API(name, result, params):
             elif ty == INT64:
                 log_c.write("  I(0);\n")
                 exe_c.write("in.get_int64_addr(%s)" % i)
+            elif ty == BOOL:
+                log_c.write("  I(0);\n")
+                exe_c.write("in.get_bool_addr(%s)" % i)
             elif ty == VOID_PTR:
                 log_c.write("  P(0);\n")
                 exe_c.write("in.get_obj_addr(%s)" % i)
@@ -938,7 +1103,7 @@ def def_API(name, result, params):
                 error("unsupported parameter for %s, %s" % (name, p))
         elif kind == IN_ARRAY or kind == INOUT_ARRAY:
             sz   = param_array_capacity_pos(p)
-            log_c.write("  for (unsigned i = 0; i < a%s; i++) { " % sz)
+            log_c.write("  for (unsigned i = 0; i < a%s; ++i) { " % sz)
             if is_obj(ty):
                 log_c.write("P(a%s[i]);" % i)
                 log_c.write(" }\n")
@@ -955,9 +1120,9 @@ def def_API(name, result, params):
                 log_c.write("  Au(a%s);\n" % sz)
                 exe_c.write("in.get_uint_array(%s)" % i)
             elif ty == INT:
-                log_c.write("U(a%s[i]);" % i)
+                log_c.write("I(a%s[i]);" % i)
                 log_c.write(" }\n")
-                log_c.write("  Au(a%s);\n" % sz)
+                log_c.write("  Ai(a%s);\n" % sz)
                 exe_c.write("in.get_int_array(%s)" % i)
             elif ty == BOOL:
                 log_c.write("U(a%s[i]);" % i)
@@ -975,7 +1140,7 @@ def def_API(name, result, params):
                 sz_e = ("(*a%s)" % sz)
             else:
                 sz_e = ("a%s" % sz)
-            log_c.write("  for (unsigned i = 0; i < %s; i++) { " % sz_e)
+            log_c.write("  for (unsigned i = 0; i < %s; ++i) { " % sz_e)
             if is_obj(ty):
                 log_c.write("P(0);")
                 log_c.write(" }\n")
@@ -997,11 +1162,14 @@ def def_API(name, result, params):
                 sz_e = ("(*a%s)" % sz)
             else:
                 sz_e = ("a%s" % sz)
-            log_c.write("  for (unsigned i = 0; i < %s; i++) { " % sz_e)
+            log_c.write("  for (unsigned i = 0; i < %s; ++i) { " % sz_e)
             log_c.write("P(0);")
             log_c.write(" }\n")
             log_c.write("  Ap(%s);\n" % sz_e)
             exe_c.write("reinterpret_cast<%s**>(in.get_obj_array(%s))" % (tstr, i))
+        elif kind == FN_PTR:
+            log_c.write("//  P(a%s);\n" % i)
+            exe_c.write("reinterpret_cast<%s>(in.get_obj(%s))" % (param2str(p), i))
         else:
             error ("unsupported parameter for %s, %s" % (name, p))
         i = i + 1
@@ -1093,6 +1261,8 @@ def ml_plus_type(ts):
         return 'Z3_goal_plus'
     elif ts == 'Z3_tactic':
         return 'Z3_tactic_plus'
+    elif ts == 'Z3_simplifier':
+        return 'Z3_simplifier_plus'
     elif ts == 'Z3_probe':
         return 'Z3_probe_plus'
     elif ts == 'Z3_apply_result':
@@ -1137,6 +1307,8 @@ def ml_minus_type(ts):
         return 'Z3_goal'
     elif ts == 'Z3_tactic_plus':
         return 'Z3_tactic'
+    elif ts == 'Z3_simplifier_plus':
+        return 'Z3_simplifier'
     elif ts == 'Z3_probe_plus':
         return 'Z3_probe'
     elif ts == 'Z3_apply_result_plus':
@@ -1174,16 +1346,16 @@ def ml_has_plus_type(ts):
 def ml_unwrap(t, ts, s):
     if t == STRING:
         return '(' + ts + ') String_val(' + s + ')'
-    elif t == BOOL or (type2str(t) == 'Z3_bool'):
+    elif t == BOOL or (type2str(t) == 'bool'):
         return '(' + ts + ') Bool_val(' + s + ')'
-    elif t == INT or t == PRINT_MODE or t == ERROR_CODE:
+    elif t == INT or t == PRINT_MODE or t == ERROR_CODE or t == LBOOL:
         return '(' + ts + ') Int_val(' + s + ')'
     elif t == UINT:
         return '(' + ts + ') Unsigned_int_val(' + s + ')'
     elif t == INT64:
-        return '(' + ts + ') Long_val(' + s + ')'
+        return '(' + ts + ') Int64_val(' + s + ')'
     elif t == UINT64:
-        return '(' + ts + ') Unsigned_long_val(' + s + ')'
+        return '(' + ts + ') Int64_val(' + s + ')'
     elif t == DOUBLE:
         return '(' + ts + ') Double_val(' + s + ')'
     elif ml_has_plus_type(ts):
@@ -1195,12 +1367,12 @@ def ml_unwrap(t, ts, s):
 def ml_set_wrap(t, d, n):
     if t == VOID:
         return d + ' = Val_unit;'
-    elif t == BOOL or (type2str(t) == 'Z3_bool'):
+    elif t == BOOL or (type2str(t) == 'bool'):
         return d + ' = Val_bool(' + n + ');'
-    elif t == INT or t == UINT or t == PRINT_MODE or t == ERROR_CODE:
+    elif t == INT or t == UINT or t == PRINT_MODE or t == ERROR_CODE or t == LBOOL:
         return d + ' = Val_int(' + n + ');'
     elif t == INT64 or t == UINT64:
-        return d + ' = Val_long(' + n + ');'
+        return d + ' = caml_copy_int64(' + n + ');'
     elif t == DOUBLE:
         return d + '= caml_copy_double(' + n + ');'
     elif t == STRING:
@@ -1210,13 +1382,43 @@ def ml_set_wrap(t, d, n):
         return '*(' + pts + '*)Data_custom_val(' + d + ') = ' + n + ';'
 
 def ml_alloc_and_store(t, lhs, rhs):
-    if t == VOID or t == BOOL or t == INT or t == UINT or t == PRINT_MODE or t == ERROR_CODE or t == INT64 or t == UINT64 or t == DOUBLE or t == STRING or (type2str(t) == 'Z3_bool'):
+    if t == VOID or t == BOOL or t == INT or t == UINT or t == PRINT_MODE or t == ERROR_CODE or t == INT64 or t == UINT64 or t == DOUBLE or t == STRING or t == LBOOL or (type2str(t) == 'bool'):
         return ml_set_wrap(t, lhs, rhs)
     else:
         pts = ml_plus_type(type2str(t))
         pops = ml_plus_ops_type(type2str(t))
         alloc_str = '%s = caml_alloc_custom(&%s, sizeof(%s), 0, 1); ' % (lhs, pops, pts)
         return alloc_str + ml_set_wrap(t, lhs, rhs)
+
+
+z3_long_funs = frozenset([
+    'Z3_solver_check',
+    'Z3_solver_check_assumptions',
+    'Z3_simplify',
+    'Z3_simplify_ex',
+    'Z3_fixedpoint_query',
+    'Z3_fixedpoint_query_relations',
+    'Z3_optimize_check',
+    'Z3_tactic_apply',
+    'Z3_tactic_apply_ex',
+    ])
+
+z3_ml_overrides = frozenset([
+    'Z3_mk_config',
+    'Z3_eval_smtlib2_string'])
+
+z3_ml_callbacks = frozenset([
+    'Z3_set_proof_check_callback',
+    'Z3_solver_propagate_init',
+    'Z3_solver_propagate_fixed',
+    'Z3_solver_propagate_final',
+    'Z3_solver_propagate_eq',
+    'Z3_solver_propagate_diseq',
+    'Z3_solver_propagate_created',
+    'Z3_solver_propagate_decide',
+    'Z3_solver_propagate_on_binding',
+    'Z3_solver_register_on_clause'
+    ])
 
 def mk_ml(ml_src_dir, ml_output_dir):
     global Type2Str
@@ -1231,6 +1433,8 @@ def mk_ml(ml_src_dir, ml_output_dir):
 
     ml_native.write('\n')
     for name, result, params in _dotnet_decls:
+        if name in z3_ml_callbacks:
+            continue
         ml_native.write('external %s : ' % ml_method_name(name))
         ip = inparams(params)
         op = outparams(params)
@@ -1270,7 +1474,7 @@ def mk_ml(ml_src_dir, ml_output_dir):
     ml_native.write('(**/**)\n')
     ml_native.close()
 
-    if mk_util.is_verbose():
+    if is_verbose():
         print ('Generated "%s"' % ml_nativef)
 
     mk_z3native_stubs_c(ml_src_dir, ml_output_dir)
@@ -1286,6 +1490,12 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
     ml_pref.close()
 
     for name, result, params in _dotnet_decls:
+
+        if name in z3_ml_overrides:
+            continue
+        if name in z3_ml_callbacks:
+            continue
+
         ip = inparams(params)
         op = outparams(params)
         ap = arrayparams(params)
@@ -1350,7 +1560,7 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
         # determine if the function has a context as parameter.
         have_context = (len(params) > 0) and (param_type(params[0]) == CONTEXT)
 
-        if have_context and name not in Unwrapped:
+        if have_context and name not in Unwrapped and name not in Unchecked:
             ml_wrapper.write('  Z3_error_code ec;\n')
 
         if result != VOID:
@@ -1430,13 +1640,17 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
                 t = param_type(param)
                 ts = type2str(t)
                 ml_wrapper.write('  _iter = a' + str(i) + ';\n')
-                ml_wrapper.write('  for (_i = 0; _i < _a%s; _i++) {\n' % param_array_capacity_pos(param))
+                ml_wrapper.write('  for (_i = 0; _i < _a%s; ++_i) {\n' % param_array_capacity_pos(param))
                 ml_wrapper.write('    assert(_iter != Val_emptylist);\n')
                 ml_wrapper.write('    _a%s[_i] = %s;\n' % (i, ml_unwrap(t, ts, 'Field(_iter, 0)')))
                 ml_wrapper.write('    _iter = Field(_iter, 1);\n')
                 ml_wrapper.write('  }\n')
                 ml_wrapper.write('  assert(_iter == Val_emptylist);\n\n')
             i = i + 1
+
+        release_caml_gc= name in z3_long_funs
+        if release_caml_gc:
+            ml_wrapper.write('\n  caml_release_runtime_system();\n')
 
         ml_wrapper.write('\n  /* invoke Z3 function */\n  ')
         if result != VOID:
@@ -1445,6 +1659,7 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
                 ml_wrapper.write('z3rv_m = ')
             else:
                 ml_wrapper.write('z3rv = ')
+
 
         # invoke procedure
         ml_wrapper.write('%s(' % name)
@@ -1463,7 +1678,15 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
             i = i + 1
         ml_wrapper.write(');\n')
 
-        if have_context and name not in Unwrapped:
+        if name in NULLWrapped:
+            ml_wrapper.write('  if (z3rv_m == NULL) {\n')
+            ml_wrapper.write('    caml_raise_with_string(*caml_named_value("Z3EXCEPTION"), "Object allocation failed");\n')
+            ml_wrapper.write('  }\n')
+
+        if release_caml_gc:
+            ml_wrapper.write('\n  caml_acquire_runtime_system();\n')
+
+        if have_context and name not in Unwrapped and name not in Unchecked:
             ml_wrapper.write('  ec = Z3_get_error_code(ctx_p->ctx);\n')
             ml_wrapper.write('  if (ec != Z3_OK) {\n')
             ml_wrapper.write('    const char * msg = Z3_get_error_msg(ctx_p->ctx, ec);\n')
@@ -1477,7 +1700,12 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
                 if name in NULLWrapped:
                     ml_wrapper.write('  z3rv = %s_mk(z3rv_m);\n' % pts)
                 else:
-                    ml_wrapper.write('  z3rv = %s_mk(ctx_p, (%s) z3rv_m);\n' % (pts, ml_minus_type(ts)))
+                    result_ctx = 'ctx_p'
+                    if name in ('Z3_translate', 'Z3_model_translate', 'Z3_ast_vector_translate',
+                                'Z3_goal_translate', 'Z3_solver_translate', 'Z3_optimize_translate'):
+                        # Translated objects belong to the target, not the source context.
+                        result_ctx = '*(Z3_context_plus*) Data_custom_val(a2)'
+                    ml_wrapper.write('  z3rv = %s_mk(%s, (%s) z3rv_m);\n' % (pts, result_ctx, ml_minus_type(ts)))
 
         # convert output params
         if len(op) > 0:
@@ -1567,7 +1795,7 @@ def mk_z3native_stubs_c(ml_src_dir, ml_output_dir): # C interface
     ml_wrapper.write('}\n')
     ml_wrapper.write('#endif\n')
 
-    if mk_util.is_verbose():
+    if is_verbose():
         print ('Generated "%s"' % ml_wrapperf)
 
 # Collect API(...) commands from
@@ -1585,30 +1813,28 @@ def def_APIs(api_files):
                 m = pat2.match(line)
                 if m:
                     eval(line)
-            except Exception:
-                raise mk_exec_header.MKException("Failed to process API definition: %s" % line)
+            except Exception as e:
+                error('ERROR: While processing: %s: %s\n' % (e, line))
 
 def write_log_h_preamble(log_h):
   log_h.write('// Automatically generated file\n')
   log_h.write('#include\"api/z3.h\"\n')
-  log_h.write('#ifdef __GNUC__\n')
+  log_h.write('#if defined(__GNUC__) || defined(__clang__)\n')
   log_h.write('#define _Z3_UNUSED __attribute__((unused))\n')
   log_h.write('#else\n')
   log_h.write('#define _Z3_UNUSED\n')
   log_h.write('#endif\n')
   #
-  log_h.write('#include<iostream>\n')
-  log_h.write('extern std::ostream * g_z3_log;\n')
-  log_h.write('extern bool           g_z3_log_enabled;\n')
-  log_h.write('class z3_log_ctx { bool m_prev; public: z3_log_ctx():m_prev(g_z3_log_enabled) { g_z3_log_enabled = false; } ~z3_log_ctx() { g_z3_log_enabled = m_prev; } bool enabled() const { return m_prev; } };\n')
-  log_h.write('inline void SetR(void * obj) { *g_z3_log << "= " << obj << "\\n"; }\ninline void SetO(void * obj, unsigned pos) { *g_z3_log << "* " << obj << " " << pos << "\\n"; } \ninline void SetAO(void * obj, unsigned pos, unsigned idx) { *g_z3_log << "@ " << obj << " " << pos << " " << idx << "\\n"; }\n')
-  log_h.write('#define RETURN_Z3(Z3RES) if (_LOG_CTX.enabled()) { SetR(Z3RES); } return Z3RES\n')
-  log_h.write('void _Z3_append_log(char const * msg);\n')
+  log_h.write('#include "util/mutex.h"\n')
+  log_h.write('extern atomic<bool> g_z3_log_enabled;\n')
+  log_h.write('void ctx_enable_logging();\n')
+  log_h.write('class z3_log_ctx { bool m_prev; public: z3_log_ctx() { ATOMIC_EXCHANGE(m_prev, g_z3_log_enabled, false); } ~z3_log_ctx() { if (m_prev) [[unlikely]] g_z3_log_enabled = true; } bool enabled() const { return m_prev; } };\n')
+  log_h.write('void SetR(const void * obj);\nvoid SetO(void * obj, unsigned pos);\nvoid SetAO(void * obj, unsigned pos, unsigned idx);\n')
+  log_h.write('#define RETURN_Z3(Z3RES) do { auto tmp_ret = Z3RES; if (_LOG_CTX.enabled()) [[unlikely]] { SetR(tmp_ret); } return tmp_ret; } while (0)\n')
 
 
 def write_log_c_preamble(log_c):
   log_c.write('// Automatically generated file\n')
-  log_c.write('#include<iostream>\n')
   log_c.write('#include\"api/z3.h\"\n')
   log_c.write('#include\"api/api_log_macros.h\"\n')
   log_c.write('#include\"api/z3_logger.h\"\n')
@@ -1624,29 +1850,52 @@ def write_core_py_post(core_py):
   core_py.write("""
 # Clean up
 del _lib
+del _lib_name
+del _lib_names
 del _default_dirs
 del _all_dirs
 del _ext
+del _sover
 """)
-    
-def write_core_py_preamble(core_py):
+
+def write_core_py_preamble(core_py, z3py_soversion=None):
   core_py.write(
 """
 # Automatically generated file
+import atexit
 import sys, os
+import contextlib
 import ctypes
-import pkg_resources
+if sys.version_info >= (3, 9):
+    import importlib.resources as importlib_resources
+else:
+    import importlib_resources
 from .z3types import *
 from .z3consts import *
 
+_file_manager = contextlib.ExitStack()
+atexit.register(_file_manager.close)
+""")
+  core_py.write(f"_sover = {z3py_soversion!r}\n")
+  core_py.write(
+"""
 _ext = 'dll' if sys.platform in ('win32', 'cygwin') else 'dylib' if sys.platform == 'darwin' else 'so'
+_lib_name = 'libz3.%s.%s' % (_ext, _sover) if sys.platform.startswith('linux') and _sover else 'libz3.%s' % _ext
+# On Linux with a soversion, also try the unversioned name as a fallback (e.g. build directories)
+_lib_names = ['libz3.%s.%s' % (_ext, _sover), 'libz3.%s' % _ext] if sys.platform.startswith('linux') and _sover else ['libz3.%s' % _ext]
 _lib = None
+_z3_lib_resource = importlib_resources.files('z3').joinpath('lib')
+_z3_lib_resource_path = _file_manager.enter_context(
+    importlib_resources.as_file(_z3_lib_resource)
+)
 _default_dirs = ['.',
                  os.path.dirname(os.path.abspath(__file__)),
-                 pkg_resources.resource_filename('z3', 'lib'),
+                 _z3_lib_resource_path,
                  os.path.join(sys.prefix, 'lib'),
                  None]
 _all_dirs = []
+# search the default dirs first
+_all_dirs.extend(_default_dirs)
 
 if sys.version < '3':
   import __builtin__
@@ -1663,58 +1912,64 @@ for v in ('Z3_LIBRARY_PATH', 'PATH', 'PYTHONPATH'):
     lds = lp.split(';') if sys.platform in ('win32') else lp.split(':')
     _all_dirs.extend(lds)
 
-_all_dirs.extend(_default_dirs)
-
-for d in _all_dirs:
-  try:
-    d = os.path.realpath(d)
-    if os.path.isdir(d):
-      d = os.path.join(d, 'libz3.%s' % _ext)
-      if os.path.isfile(d):
-        _lib = ctypes.CDLL(d)
-        break
-  except:
-    pass
+_failures = []
+for _name in _lib_names:
+  for d in _all_dirs:
+    try:
+      d = os.path.realpath(d)
+      if os.path.isdir(d):
+        d = os.path.join(d, _name)
+        if os.path.isfile(d):
+          _lib = ctypes.CDLL(d)
+          break
+    except Exception as e:
+      _failures += [e]
+      pass
+  if _lib is not None:
+    break
 
 if _lib is None:
   # If all else failed, ask the system to find it.
-  try:
-    _lib = ctypes.CDLL('libz3.%s' % _ext)
-  except:
-    pass
+  for _name in _lib_names:
+    try:
+      _lib = ctypes.CDLL(_name)
+      break
+    except Exception as e:
+      _failures += [e]
+      pass
 
 if _lib is None:
-  print("Could not find libz3.%s; consider adding the directory containing it to" % _ext)
+  print("Could not find %s; consider adding the directory containing it to" % ' or '.join(_lib_names))
   print("  - your system's PATH environment variable,")
   print("  - the Z3_LIBRARY_PATH environment variable, or ")
-  print("  - to the custom Z3_LIBRARY_DIRS Python-builtin before importing the z3 module, e.g. via")
+  print("  - to the custom Z3_LIB_DIRS Python-builtin before importing the z3 module, e.g. via")
   if sys.version < '3':
     print("    import __builtin__")
-    print("    __builtin__.Z3_LIB_DIRS = [ '/path/to/libz3.%s' ] " % _ext)
+    print("    __builtin__.Z3_LIB_DIRS = [ '/path/to/z3/lib/dir' ] # directory containing %s" % _lib_name)
   else:
     print("    import builtins")
-    print("    builtins.Z3_LIB_DIRS = [ '/path/to/libz3.%s' ] " % _ext)
-  raise Z3Exception("libz3.%s not found." % _ext)
+    print("    builtins.Z3_LIB_DIRS = [ '/path/to/z3/lib/dir' ] # directory containing %s" % _lib_name)
+  print(_failures)
+  raise Z3Exception("%s not found." % _lib_name)
 
-def _to_ascii(s):
-  if isinstance(s, str):
-    try: 
-      return s.encode('ascii')
-    except:
-      # kick the bucket down the road.  :-J
-      return s
-  else:
-    return s
 
 if sys.version < '3':
+  def _str_to_bytes(s):
+    return s
   def _to_pystr(s):
      return s
 else:
+  def _str_to_bytes(s):
+    if isinstance(s, str):
+        enc = sys.getdefaultencoding()
+        return s.encode(enc if enc != None else 'latin-1')
+    else:
+        return s
+
   def _to_pystr(s):
      if s != None:
-        enc = sys.stdout.encoding
-        if enc != None: return s.decode(enc)
-        else: return s.decode('ascii')
+        enc = sys.getdefaultencoding()
+        return s.decode(enc if enc != None else 'latin-1')
      else:
         return ""
 
@@ -1722,6 +1977,32 @@ _error_handler_type  = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint)
 
 _lib.Z3_set_error_handler.restype  = None
 _lib.Z3_set_error_handler.argtypes = [ContextObj, _error_handler_type]
+
+Z3_on_clause_eh = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_uint), ctypes.c_void_p)
+Z3_proof_check_eh = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+Z3_push_eh  = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+Z3_pop_eh   = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint)
+Z3_fresh_eh = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+
+Z3_fixed_eh = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+Z3_final_eh = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+Z3_eq_eh    = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+
+Z3_created_eh = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+Z3_decide_eh = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_int)
+Z3_on_binding_eh = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+
+_lib.Z3_solver_register_on_clause.restype = None
+_lib.Z3_solver_propagate_init.restype = None
+_lib.Z3_solver_propagate_final.restype = None
+_lib.Z3_solver_propagate_fixed.restype = None
+_lib.Z3_solver_propagate_eq.restype = None
+_lib.Z3_solver_propagate_diseq.restype = None
+_lib.Z3_solver_propagate_decide.restype = None
+
+on_model_eh_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+_lib.Z3_optimize_register_model_eh.restype = None
+_lib.Z3_optimize_register_model_eh.argtypes = [ContextObj, OptimizeObj, ModelObj, ctypes.c_void_p, on_model_eh_type]
 
 """
   )
@@ -1736,7 +2017,9 @@ core_py = None
 def generate_files(api_files,
                    api_output_dir=None,
                    z3py_output_dir=None,
+                   z3py_soversion=None,
                    dotnet_output_dir=None,
+                   java_input_dir=None,
                    java_output_dir=None,
                    java_package_name=None,
                    ml_output_dir=None,
@@ -1774,14 +2057,15 @@ def generate_files(api_files,
   # existing code is designed to always emit these files.
   def mk_file_or_temp(output_dir, file_name, mode='w'):
     if output_dir != None:
-      assert os.path.exists(output_dir) and os.path.isdir(output_dir)
+      if not (os.path.exists(output_dir) and os.path.isdir(output_dir)):
+        raise ValueError(f"Output directory '{output_dir}' does not exist or is not a directory")
       return open(os.path.join(output_dir, file_name), mode)
     else:
       # Return a file that we can write to without caring
-      print("Faking emission of '{}'".format(file_name))
       import tempfile
       return tempfile.TemporaryFile(mode=mode)
 
+  apiTypes = APITypes()
   with mk_file_or_temp(api_output_dir, 'api_log_macros.h') as log_h:
     with mk_file_or_temp(api_output_dir, 'api_log_macros.cpp') as log_c:
       with mk_file_or_temp(api_output_dir, 'api_commands.cpp') as exe_c:
@@ -1790,34 +2074,36 @@ def generate_files(api_files,
           write_log_h_preamble(log_h)
           write_log_c_preamble(log_c)
           write_exe_c_preamble(exe_c)
-          write_core_py_preamble(core_py)
+          write_core_py_preamble(core_py, z3py_soversion)
 
           # FIXME: these functions are awful
-          def_Types(api_files)
+          apiTypes.def_Types(api_files)
           def_APIs(api_files)
           mk_bindings(exe_c)
           mk_py_wrappers()
           write_core_py_post(core_py)
 
-          if mk_util.is_verbose():
+          if is_verbose():
             print("Generated '{}'".format(log_h.name))
             print("Generated '{}'".format(log_c.name))
             print("Generated '{}'".format(exe_c.name))
-            print("Generated '{}'".format(core_py.name))
+            if z3py_output_dir:
+              print("Generated '{}'".format(core_py.name))
 
   if dotnet_output_dir:
     with open(os.path.join(dotnet_output_dir, 'Native.cs'), 'w') as dotnet_file:
       mk_dotnet(dotnet_file)
       mk_dotnet_wrappers(dotnet_file)
-      if mk_util.is_verbose():
+      if is_verbose():
         print("Generated '{}'".format(dotnet_file.name))
 
   if java_output_dir:
-    mk_java(java_output_dir, java_package_name)
+    mk_java(java_input_dir, java_output_dir, java_package_name)
 
   if ml_output_dir:
     assert not ml_src_dir is None
     mk_ml(ml_src_dir, ml_output_dir)
+
 
 def main(args):
   logging.basicConfig(level=logging.INFO)
@@ -1832,10 +2118,18 @@ def main(args):
                       dest="z3py_output_dir",
                       default=None,
                       help="Directory to emit z3py files. If not specified no files are emitted.")
+  parser.add_argument("--z3py-soversion",
+                      dest="z3py_soversion",
+                      default=None,
+                      help="SOVERSION for loading libz3 on supported platforms.")
   parser.add_argument("--dotnet-output-dir",
                       dest="dotnet_output_dir",
                       default=None,
                       help="Directory to emit dotnet files. If not specified no files are emitted.")
+  parser.add_argument("--java-input-dir",
+                      dest="java_input_dir",
+                      default=None,
+                      help="Directory where Java sources reside.")
   parser.add_argument("--java-output-dir",
                       dest="java_output_dir",
                       default=None,
@@ -1858,6 +2152,9 @@ def main(args):
     if pargs.java_package_name == None:
       logging.error('--java-package-name must be specified')
       return 1
+    if pargs.java_input_dir is None:
+      logging.error('--java-input-dir must be specified')
+      return 1
 
   if pargs.ml_output_dir:
     if pargs.ml_src_dir is None:
@@ -1872,7 +2169,9 @@ def main(args):
   generate_files(api_files=pargs.api_files,
                  api_output_dir=pargs.api_output_dir,
                  z3py_output_dir=pargs.z3py_output_dir,
+                 z3py_soversion=pargs.z3py_soversion,
                  dotnet_output_dir=pargs.dotnet_output_dir,
+                 java_input_dir=pargs.java_input_dir,
                  java_output_dir=pargs.java_output_dir,
                  java_package_name=pargs.java_package_name,
                  ml_output_dir=pargs.ml_output_dir,

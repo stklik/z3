@@ -16,20 +16,20 @@ Author:
 Notes:
 
 --*/
-#ifndef NAME_EXPRS_H_
-#define NAME_EXPRS_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/normal_forms/defined_names.h"
 
 class expr_predicate {
 public:
+    virtual ~expr_predicate() = default;
     virtual bool operator()(expr * t) = 0;
 };
 
 class name_exprs {
 public:
-    virtual ~name_exprs() {}
+    virtual ~name_exprs() = default;
     virtual void operator()(expr * n,                          // [IN] expression that contain the sub-expressions to be named
                             expr_ref_vector & new_defs,        // [OUT] new definitions
                             proof_ref_vector & new_def_proofs, // [OUT] proofs of the new definitions 
@@ -59,4 +59,3 @@ name_exprs * mk_nested_formula_namer(ast_manager & m, defined_names & n);
 
 void del_name_exprs(name_exprs * functor);
 
-#endif

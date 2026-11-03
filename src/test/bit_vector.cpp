@@ -23,9 +23,9 @@ Revision History:
 
 static void tst1() {
     bit_vector     v1;
-    svector<bool> v2;
+    bool_vector v2;
     unsigned n = rand()%10000;
-    for (unsigned i = 0; i < n; i++) {
+    for (unsigned i = 0; i < n; ++i) {
         int op = rand()%6;
     if (op <= 1) {
         bool val = (rand()%2) != 0;
@@ -35,7 +35,7 @@ static void tst1() {
     }
     else if (op <= 3) {
         ENSURE(v1.size() == v2.size());
-        if (v1.size() > 0) {
+        if (!v1.empty()) {
         bool val = (rand()%2) != 0;
         unsigned idx = rand()%v1.size();
         ENSURE(v1.get(idx) == v2[idx]);
@@ -46,14 +46,14 @@ static void tst1() {
     }
     else if (op <= 4) {
         ENSURE(v1.size() == v2.size());
-        if (v1.size() > 0) {
+        if (!v1.empty()) {
         unsigned idx = rand()%v1.size();
         VERIFY(v1.get(idx) == v2[idx]);
         }
     }
     else if (op <= 5) {
         ENSURE(v1.size() == v2.size());
-        for (unsigned j = 0; j < v1.size(); j++) {
+        for (unsigned j = 0; j < v1.size(); ++j) {
         ENSURE(v1.get(j) == v2[j]);
         }
     }
@@ -307,7 +307,7 @@ void tst_bit_vector() {
     tst_eq();
     return;
     tst2();
-    for (unsigned i = 0; i < 20; i++) {
+    for (unsigned i = 0; i < 20; ++i) {
         std::cerr << i << std::endl;
     tst1();
     }

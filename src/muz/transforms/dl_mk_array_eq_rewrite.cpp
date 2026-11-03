@@ -38,14 +38,14 @@ namespace datalog {
     rule_set * mk_array_eq_rewrite::operator()(rule_set const & source)
     {
         m_src_set = &source;
-        rule_set * result = alloc(rule_set, m_ctx);
+        scoped_ptr<rule_set> result = alloc(rule_set, m_ctx);
         result->inherit_predicates(source);
-        m_dst = result;
+        m_dst = result.get();
         m_src_manager = &source.get_rule_manager();
         for (rule * rp : source) {
             instantiate_rule(*rp, *result);
         }
-        return result;
+        return result.detach();
     }
 
     void mk_array_eq_rewrite::instantiate_rule(const rule& r, rule_set & dest)
@@ -57,15 +57,15 @@ namespace datalog {
         expr_ref_vector new_tail(m);
         unsigned nb_predicates = r.get_uninterpreted_tail_size();
         unsigned tail_size = r.get_tail_size();
-        for (unsigned i = 0; i < nb_predicates; i++) {
+        for (unsigned i = 0; i < nb_predicates; ++i) {
             new_tail.push_back(r.get_tail(i));
         }
 
         expr_equiv_class array_eq_classes(m);
-        for(unsigned i = nb_predicates; i < tail_size; i++) {
+        for(unsigned i = nb_predicates; i < tail_size; ++i) {
             expr* cond = r.get_tail(i);
             expr* e1, *e2;
-            if (m.is_eq(cond, e1, e2) && m_a.is_array(get_sort(e1))) {
+            if (m.is_eq(cond, e1, e2) && m_a.is_array(e1->get_sort())) {
                 array_eq_classes.merge(e1, e2);
             }
             else {
@@ -82,7 +82,7 @@ namespace datalog {
                 }
             }
             for (expr * v : c_eq) {
-                for (unsigned i = 0; i < new_tail.size(); i++)
+                for (unsigned i = 0; i < new_tail.size(); ++i)
                     new_tail[i] = replace(new_tail[i].get(), representative, v);
             }
             for (expr * v : c_eq) {
@@ -99,7 +99,7 @@ namespace datalog {
             res_conjs.push_back(tmp);
         }
         proof_ref pr(m);
-        m_src_manager->mk_rule(m.mk_implies(m.mk_and(res_conjs.size(), res_conjs.c_ptr()), r.get_head()), pr, dest, r.name());
+        m_src_manager->mk_rule(m.mk_implies(m.mk_and(res_conjs), r.get_head()), pr, dest, r.name());
     }
 
     // NSB Code review: use substitution facility, such as expr_safe_replace or expr_replacer.
@@ -115,7 +115,7 @@ namespace datalog {
         for (expr * arg : *f) {
             n_args.push_back(replace(arg, new_val, old_val));
         }
-        return m.mk_app(f->get_decl(), n_args.size(), n_args.c_ptr());
+        return m.mk_app(f->get_decl(), n_args.size(), n_args.data());
     }
 
 }

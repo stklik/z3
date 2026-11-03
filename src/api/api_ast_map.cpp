@@ -15,7 +15,6 @@ Author:
 Revision History:
 
 --*/
-#include<iostream>
 #include "api/z3.h"
 #include "api/api_log_macros.h"
 #include "api/api_context.h"
@@ -52,17 +51,17 @@ extern "C" {
     void Z3_API Z3_ast_map_dec_ref(Z3_context c, Z3_ast_map m) {
         Z3_TRY;
         LOG_Z3_ast_map_dec_ref(c, m);
-        RESET_ERROR_CODE();
-        to_ast_map(m)->dec_ref();
+        if (m)
+            to_ast_map(m)->dec_ref();
         Z3_CATCH;
     }
 
-    Z3_bool Z3_API Z3_ast_map_contains(Z3_context c, Z3_ast_map m, Z3_ast k) {
+    bool Z3_API Z3_ast_map_contains(Z3_context c, Z3_ast_map m, Z3_ast k) {
         Z3_TRY;
         LOG_Z3_ast_map_contains(c, m, k);
         RESET_ERROR_CODE();
         return to_ast_map_ref(m).contains(to_ast(k));
-        Z3_CATCH_RETURN(Z3_FALSE);
+        Z3_CATCH_RETURN(false);
     }
 
     Z3_ast Z3_API Z3_ast_map_find(Z3_context c, Z3_ast_map m, Z3_ast k) {
@@ -86,18 +85,18 @@ extern "C" {
         LOG_Z3_ast_map_insert(c, m, k, v);
         RESET_ERROR_CODE();
         ast_manager & mng = to_ast_map(m)->m;
-        obj_map<ast, ast*>::obj_map_entry * entry = to_ast_map_ref(m).insert_if_not_there2(to_ast(k), 0);
-        if (entry->get_data().m_value == 0) {
+        auto& value = to_ast_map_ref(m).insert_if_not_there(to_ast(k), 0);
+        if (!value) {
             // new entry
             mng.inc_ref(to_ast(k));
             mng.inc_ref(to_ast(v));
-            entry->get_data().m_value = to_ast(v);            
+            value = to_ast(v);            
         }
         else {
             // replacing entry
             mng.inc_ref(to_ast(v));
-            mng.dec_ref(entry->get_data().m_value);
-            entry->get_data().m_value = to_ast(v);
+            mng.dec_ref(value);
+            value = to_ast(v);
         }
         Z3_CATCH;
     }
@@ -139,10 +138,8 @@ extern "C" {
         RESET_ERROR_CODE();
         Z3_ast_vector_ref * v = alloc(Z3_ast_vector_ref, *mk_c(c), to_ast_map(m)->m);
         mk_c(c)->save_object(v);
-        obj_map<ast, ast*>::iterator it  = to_ast_map_ref(m).begin();
-        obj_map<ast, ast*>::iterator end = to_ast_map_ref(m).end();
-        for (; it != end; ++it) {
-            v->m_ast_vector.push_back(it->m_key);
+        for (auto const& kv : to_ast_map_ref(m)) {
+            v->m_ast_vector.push_back(kv.m_key);
         }
         Z3_ast_vector r       = of_ast_vector(v);
         RETURN_Z3(r);
@@ -156,14 +153,12 @@ extern "C" {
         std::ostringstream buffer;
         ast_manager & mng = to_ast_map(m)->m;
         buffer << "(ast-map";
-        obj_map<ast, ast*>::iterator it  = to_ast_map_ref(m).begin();
-        obj_map<ast, ast*>::iterator end = to_ast_map_ref(m).end();
-        for (; it != end; ++it) {
-            buffer << "\n  (" << mk_ismt2_pp(it->m_key, mng, 3) << "\n   " << mk_ismt2_pp(it->m_value, mng, 3) << ")";
+        for (auto const& kv : to_ast_map_ref(m)) {
+            buffer << "\n  (" << mk_ismt2_pp(kv.m_key, mng, 3) << "\n   " << mk_ismt2_pp(kv.m_value, mng, 3) << ")";
         }
-        buffer << ")";
-        return mk_c(c)->mk_external_string(buffer.str());
+        buffer << ')';
+        return mk_c(c)->mk_external_string(std::move(buffer).str());
         Z3_CATCH_RETURN(nullptr);
     }
 
-};
+}

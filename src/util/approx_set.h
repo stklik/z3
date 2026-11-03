@@ -16,9 +16,8 @@ Author:
 Revision History:
 
 --*/
-#ifndef APPROX_SET_H_
-#define APPROX_SET_H_
-#include<iostream>
+#pragma once
+#include<ostream>
 #include "util/debug.h"
 
 template<typename T> class approx_set_traits;
@@ -42,7 +41,7 @@ static_assert(sizeof(unsigned) == 4, "unsigned are 4 bytes");
 template<typename T, typename T2U_Proc, typename R=unsigned long long>
 class approx_set_tpl : private T2U_Proc {
 protected:
-    R m_set;
+    R m_set = approx_set_traits<R>::zero;
 
     unsigned e2u(T const & e) const { return T2U_Proc::operator()(e); }
 
@@ -53,23 +52,20 @@ protected:
     static approx_set_tpl r2s(R const & s) { approx_set_tpl r; r.m_set = s; return r; }
 
 public:
-    approx_set_tpl():
-        m_set(approx_set_traits<R>::zero) {
-    }
+    approx_set_tpl() = default;
 
     explicit approx_set_tpl(T const & e):
         m_set(e2s(e)) {
     }
 
-    approx_set_tpl(unsigned sz, T const * es):
-        m_set(approx_set_traits<R>::zero) {
-        for (unsigned i = 0; i < sz; i++)
+    approx_set_tpl(unsigned sz, T const * es) {
+        for (unsigned i = 0; i < sz; ++i)
             insert(es[i]);
     }
 
-    approx_set_tpl(approx_set_tpl const & s):
-        m_set(s.m_set) {
-    }
+    void set(R s) { m_set = s; }
+
+    R get() const { return m_set; }
 
     void insert(T const & e) {
         m_set |= e2s(e);
@@ -161,21 +157,30 @@ typedef approx_set_tpl<unsigned, u2u> u_approx_set;
 
 class approx_set : public u_approx_set {
 public:
-    approx_set():u_approx_set() {}
+    approx_set() = default;
     approx_set(unsigned e):u_approx_set(e) {}
-
+    
     class iterator {
         unsigned long long m_set;
         unsigned           m_val;
         void move_to_next() {
-            // TODO: this code can be optimized in platforms with special
-            // instructions to count leading (trailing) zeros in a word.
-            while (m_set > 0) {
-                if ((m_set & 1ull) != 0) {
-                    return;
+            if (m_set > 0) {
+#ifdef __GNUC__
+                // Use compiler builtin for trailing zero count (optimized)
+                // After shift, LSB will be set to 1 (same as fallback behavior)
+                unsigned tz = __builtin_ctzll(m_set);
+                m_val += tz;
+                m_set >>= tz;
+#else
+                // Fallback to loop-based approach
+                while (m_set > 0) {
+                    if ((m_set & 1ull) != 0) {
+                        return;
+                    }
+                    m_val++;
+                    m_set = m_set >> 1;
                 }
-                m_val ++;
-                m_set = m_set >> 1;
+#endif
             }
         }
     public:
@@ -200,10 +205,6 @@ public:
             iterator tmp = *this; 
             ++*this; 
             return tmp; 
-        }
-
-        bool operator==(iterator const & it) const { 
-            return m_set == it.m_set;
         }
         
         bool operator!=(iterator const & it) const { 
@@ -232,5 +233,4 @@ inline std::ostream & operator<<(std::ostream & out, approx_set const & s) {
     return out;
 }
 
-#endif /* APPROX_SET_H_ */
 

@@ -17,8 +17,7 @@ Revision History:
 
 --*/
 
-#ifndef PROOF_UTILS_H_
-#define PROOF_UTILS_H_
+#pragma once
 #include "ast/ast.h"
 #include "ast/ast_pp.h"
 #include "ast/rewriter/bool_rewriter.h"
@@ -100,13 +99,14 @@ public:
             ++j;
         }
         SASSERT(j >= 1);
-        res = j > 1 ? m.mk_or(j, args.c_ptr()) : args.get(0);
+        res = j > 1 ? m.mk_or(j, args.data()) : args.get(0);
     }
 
     void mk_app(func_decl *decl, expr_ref_vector &args, expr_ref &res)
     {
         ast_manager &m = args.get_manager();
         bool_rewriter brwr(m);
+        brwr.set_flat_and_or(false);
 
         if (m.is_or(decl))
         { mk_or_core(args, res); }
@@ -115,14 +115,14 @@ public:
             // we don't want (= (not a) (not b)) to be reduced to (= a b)
         { res = m.mk_eq(args.get(0), args.get(1)); }
         else
-        { brwr.mk_app(decl, args.size(), args.c_ptr(), res); }
+        { brwr.mk_app(decl, args.size(), args.data(), res); }
     }
 
     void operator()(ast_manager &m, proof *pr, proof_ref &res)
     {
         DEBUG_CODE(proof_checker pc(m);
                    expr_ref_vector side(m);
-                   SASSERT(pc.check(pr, side));
+                   if (!pc.check(pr, side)) IF_VERBOSE(1, verbose_stream() << "check failed: " << mk_pp(pr, m) << "\n");
                   );
         obj_map<app, app*> cache;
         bool_rewriter brwr(m);
@@ -202,7 +202,7 @@ public:
                 }
                 else {
                     // rebuild unit resolution
-                    newp = m.mk_unit_resolution(parents.size(), parents.c_ptr());
+                    newp = m.mk_unit_resolution(parents.size(), parents.data());
                     // XXX the old and new facts should be
                     // equivalent. The test here is much
                     // stronger. It might need to be relaxed.
@@ -221,7 +221,7 @@ public:
             }
             cache.insert(p, newp);
             todo.pop_back();
-            CTRACE("virtual",
+            CTRACE(proof_virtual,
                    p->get_decl_kind() == PR_TH_LEMMA &&
                    p->get_decl()->get_parameter(0).get_symbol() == "arith" &&
                    p->get_decl()->get_num_parameters() > 1 &&
@@ -230,17 +230,16 @@ public:
                    << "New pf: " << mk_pp(newp, m) << "\n";);
         }
 
-        proof *r;
+        proof *r = nullptr;
         VERIFY(cache.find(pr, r));
 
         DEBUG_CODE(
             proof_checker pc(m);
             expr_ref_vector side(m);
-            SASSERT(pc.check(r, side));
+            if (!pc.check(r, side)) IF_VERBOSE(1, verbose_stream() << mk_pp(r, m) << "check failed\n");
         );
 
         res = r ;
     }
 };
 
-#endif

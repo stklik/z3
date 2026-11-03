@@ -18,11 +18,10 @@ Revision History:
 
 --*/
 
-#ifndef QE_QSAT_H__
-#define QE_QSAT_H__
+#pragma once
 
 #include "tactic/tactic.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "qe/qe_mbp.h"
 
 namespace qe {
@@ -97,7 +96,9 @@ namespace qe {
         void push();
         void pop(unsigned num_scopes);
         void insert(app* a, max_level const& lvl);
+        void insert_var(app* v, max_level const& lvl);
         void get_assumptions(model* mdl, expr_ref_vector& asms);
+        void ensure_expr_level(app* v, unsigned lvl);
         void set_expr_level(app* v, max_level const& lvl);
         void set_decl_level(func_decl* v, max_level const& lvl);
         void abstract_atoms(expr* fml, max_level& level, expr_ref_vector& defs);
@@ -137,13 +138,7 @@ tactic * mk_qe2_tactic(ast_manager & m, params_ref const& p = params_ref());
 tactic * mk_qe_rec_tactic(ast_manager & m, params_ref const& p = params_ref());
 
 
-/*
-  ADD_TACTIC("qsat", "apply a QSAT solver.", "mk_qsat_tactic(m, p)") 
+Z3_ADD_TACTIC(qsat, "qsat", "apply a QSAT solver.", mk_qsat_tactic(m, p));
+Z3_ADD_TACTIC(qe2, "qe2", "apply a QSAT based quantifier elimination.", mk_qe2_tactic(m, p));
+Z3_ADD_TACTIC(qe_rec, "qe_rec", "apply a QSAT based quantifier elimination recursively.", mk_qe_rec_tactic(m, p));
 
-  ADD_TACTIC("qe2", "apply a QSAT based quantifier elimination.", "mk_qe2_tactic(m, p)") 
-
-  ADD_TACTIC("qe_rec", "apply a QSAT based quantifier elimination recursively.", "mk_qe_rec_tactic(m, p)") 
-
-*/
-
-#endif 

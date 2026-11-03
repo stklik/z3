@@ -41,14 +41,10 @@ namespace datalog {
 
     execution_context::~execution_context() {
         reset();
-        dealloc(m_stopwatch);
     }
 
     void execution_context::reset() {
-        reg_vector::iterator it=m_registers.begin();
-        reg_vector::iterator end=m_registers.end();
-        for(; it != end; ++it) {
-            relation_base * rel = *it;
+        for (relation_base * rel : m_registers) {
             if (rel) {
                 rel->deallocate();
             }
@@ -77,7 +73,7 @@ namespace datalog {
         unsigned n = register_count();
         svector<std::pair<unsigned, unsigned> > sizes;
         size_t total_bytes = 0;
-        for(unsigned i = 0; i < n; i++) {
+        for(unsigned i = 0; i < n; ++i) {
             unsigned sz = reg(i) ? reg(i)->get_size_estimate_bytes() : 0;
             total_bytes += sz;
             sizes.push_back(std::make_pair(i, sz));
@@ -86,7 +82,7 @@ namespace datalog {
 
         out << "bytes " << total_bytes << "\n";
         out << "bytes\trows\tannotation\n";
-        for(unsigned i = 0; i < n; i++) {
+        for(unsigned i = 0; i < n; ++i) {
             unsigned sz = sizes[i].second;
             unsigned rg = sizes[i].first;
             unsigned rows = reg(rg) ? reg(rg)->get_size_estimate_rows() : 0;
@@ -104,15 +100,15 @@ namespace datalog {
         m_timelimit_ms = time_in_ms;
         if (!m_stopwatch) {
             m_stopwatch = alloc(stopwatch);
+        } else {
+            m_stopwatch->stop();
+            m_stopwatch->reset();
         }
-        m_stopwatch->stop();
-        m_stopwatch->reset();
         m_stopwatch->start();
     }
     void execution_context::reset_timelimit() {
-        if (m_stopwatch) {
-            m_stopwatch->stop();
-        }
+        dealloc(m_stopwatch);
+        m_stopwatch = nullptr;
         m_timelimit_ms = 0;
     }
 
@@ -149,10 +145,8 @@ namespace datalog {
     // -----------------------------------
 
     instruction::~instruction() {
-        fn_cache::iterator it = m_fn_cache.begin();
-        fn_cache::iterator end = m_fn_cache.end();
-        for(; it != end; ++it) {
-            dealloc(it->m_value);
+        for (auto& p : m_fn_cache) {
+            dealloc(p.m_value);
         }
     }
 
@@ -219,15 +213,15 @@ namespace datalog {
             return true;
         }
         void make_annotations(execution_context & ctx) override {
-            ctx.set_register_annotation(m_reg, m_pred->get_name().bare_str());
+            ctx.set_register_annotation(m_reg, m_pred->get_name().str().c_str());
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            const char * rel_name = m_pred->get_name().bare_str();
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            auto rel_name = m_pred->get_name();            
             if (m_store) {
-                out << "store " << m_reg << " into " << rel_name;
+                return out << "store " << m_reg << " into " << rel_name;
             }
             else {
-                out << "load " << rel_name << " into " << m_reg;
+                return out << "load " << rel_name << " into " << m_reg;
             }
         }
     };
@@ -252,8 +246,8 @@ namespace datalog {
         void make_annotations(execution_context & ctx) override {
             ctx.set_register_annotation(m_reg, "alloc");
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "dealloc " << m_reg;
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << "dealloc " << m_reg;
         }
     };
 
@@ -287,8 +281,8 @@ namespace datalog {
                 ctx.set_register_annotation(m_src, str);
             }
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << (m_clone ? "clone " : "move ") << m_src << " into " << m_tgt;
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << (m_clone ? "clone " : "move ") << m_src << " into " << m_tgt;
         }
     };
 
@@ -306,10 +300,7 @@ namespace datalog {
         instruction_block * m_body;
 
         bool control_is_empty(execution_context & ctx) {
-            idx_vector::const_iterator it=m_controls.begin();
-            idx_vector::const_iterator end=m_controls.end();
-            for(; it != end; ++it) {
-                reg_idx r = *it;
+            for (reg_idx r : m_controls) {
                 if (ctx.reg(r) && !ctx.reg(r)->fast_empty()) {
                     return false;
                 }
@@ -329,24 +320,25 @@ namespace datalog {
         }
         bool perform(execution_context & ctx) override {
             log_verbose(ctx);            
-            TRACE("dl", tout << "loop entered\n";);
+            TRACE(dl, tout << "loop entered\n";);
             unsigned count = 0;
             while (!control_is_empty(ctx)) {
                 IF_VERBOSE(10, verbose_stream() << "looping ... " << count++ << "\n";);
                 if (!m_body->perform(ctx)) {
-                    TRACE("dl", tout << "while loop terminated before completion\n";);
+                    TRACE(dl, tout << "while loop terminated before completion\n";);
                     return false;
                 }
             }
-            TRACE("dl", tout << "while loop exited\n";);
+            TRACE(dl, tout << "while loop exited\n";);
             return true;
         }
         void make_annotations(execution_context & ctx) override {
             m_body->make_annotations(ctx);
         }
-        void display_head_impl(execution_context const & ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const & ctx, std::ostream & out) const override {
             out << "while";
             print_container(m_controls, out);
+            return out;
         }
         void display_body_impl(execution_context const & ctx, std::ostream & out, const std::string & indentation) const override {
             m_body->display_indented(ctx, out, indentation+"    ");
@@ -386,12 +378,12 @@ namespace datalog {
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                                             "trying to perform unsupported join operation on relations of kinds %s and %s",
-                                            r1.get_plugin().get_name().bare_str(), r2.get_plugin().get_name().bare_str());
+                                            r1.get_plugin().get_name().str().c_str(), r2.get_plugin().get_name().str().c_str());
                 }
                 store_fn(r1, r2, fn);
             }
 
-            TRACE("dl",
+            TRACE(dl,
                 r1.get_signature().output(ctx.get_rel_context().get_manager(), tout);
                 tout<<":"<<r1.get_size_estimate_rows()<<" x ";
                 r2.get_signature().output(ctx.get_rel_context().get_manager(), tout);
@@ -399,7 +391,7 @@ namespace datalog {
 
             ctx.set_reg(m_res, (*fn)(r1, r2));
 
-            TRACE("dl", 
+            TRACE(dl, 
                 ctx.reg(m_res)->get_signature().output(ctx.get_rel_context().get_manager(), tout);
                 tout<<":"<<ctx.reg(m_res)->get_size_estimate_rows()<<"\n";);
 
@@ -414,12 +406,12 @@ namespace datalog {
             ctx.get_register_annotation(m_rel1, a1);
             ctx.set_register_annotation(m_res, "join " + a1 + " " + a2);
         }
-        void display_head_impl(execution_context const & ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const & ctx, std::ostream & out) const override {
             out << "join " << m_rel1;
             print_container(m_cols1, out);
             out << " and " << m_rel2;
             print_container(m_cols2, out);
-            out << " into " << m_res;
+            return out << " into " << m_res;
         }
     };
 
@@ -449,7 +441,7 @@ namespace datalog {
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                         "trying to perform unsupported filter_equal operation on a relation of kind %s",
-                        r.get_plugin().get_name().bare_str());
+                        r.get_plugin().get_name().str().c_str());
                 }
                 store_fn(r, fn);
             }
@@ -465,9 +457,9 @@ namespace datalog {
             a << "filter_equal " << m_col << " val: " << ctx.get_rel_context().get_rmanager().to_nice_string(m_value);
             ctx.set_register_annotation(m_reg, a.str());
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "filter_equal " << m_reg << " col: " << m_col << " val: "
-                << ctx.get_rel_context().get_rmanager().to_nice_string(m_value);
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << "filter_equal " << m_reg << " col: " << m_col << " val: "
+                       << ctx.get_rel_context().get_rmanager().to_nice_string(m_value);
         }
     };
 
@@ -494,11 +486,11 @@ namespace datalog {
             relation_mutator_fn * fn;
             relation_base & r = *ctx.reg(m_reg);
             if (!find_fn(r, fn)) {
-                fn = r.get_manager().mk_filter_identical_fn(r, m_cols.size(), m_cols.c_ptr());
+                fn = r.get_manager().mk_filter_identical_fn(r, m_cols.size(), m_cols.data());
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                         "trying to perform unsupported filter_identical operation on a relation of kind %s",
-                        r.get_plugin().get_name().bare_str());
+                        r.get_plugin().get_name().str().c_str());
                 }
                 store_fn(r, fn);
             }
@@ -509,9 +501,10 @@ namespace datalog {
             }
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             out << "filter_identical " << m_reg << " ";
             print_container(m_cols, out);
+            return out;
         }
         void make_annotations(execution_context & ctx) override {
             ctx.set_register_annotation(m_reg, "filter_identical");
@@ -538,13 +531,13 @@ namespace datalog {
 
             relation_mutator_fn * fn;
             relation_base & r = *ctx.reg(m_reg);
-            TRACE("dl_verbose", r.display(tout <<"pre-filter-interpreted:\n"););
+            TRACE(dl_verbose, r.display(tout <<"pre-filter-interpreted:\n"););
             if (!find_fn(r, fn)) {
                 fn = r.get_manager().mk_filter_interpreted_fn(r, m_cond);
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                         "trying to perform unsupported filter_interpreted operation on a relation of kind %s",
-                        r.get_plugin().get_name().bare_str());
+                        r.get_plugin().get_name().str().c_str());
                 }
                 store_fn(r, fn);
             }
@@ -553,13 +546,14 @@ namespace datalog {
             if (r.fast_empty()) {
                 ctx.make_empty(m_reg);
             }            
-            //TRACE("dl_verbose", r.display(tout <<"post-filter-interpreted:\n"););
+            //TRACE(dl_verbose, r.display(tout <<"post-filter-interpreted:\n"););
 
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "filter_interpreted " << m_reg << " using "
-                << mk_pp(m_cond, m_cond.get_manager());
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return 
+                out << "filter_interpreted " << m_reg << " using "
+                    << mk_pp(m_cond, m_cond.get_manager());
         }
         void make_annotations(execution_context & ctx) override {
             std::stringstream a;
@@ -594,13 +588,13 @@ namespace datalog {
 
             relation_transformer_fn * fn;
             relation_base & reg = *ctx.reg(m_src);
-            TRACE("dl_verbose", reg.display(tout <<"pre-filter-interpreted-and-project:\n"););
+            TRACE(dl_verbose, reg.display(tout <<"pre-filter-interpreted-and-project:\n"););
             if (!find_fn(reg, fn)) {
-                fn = reg.get_manager().mk_filter_interpreted_and_project_fn(reg, m_cond, m_cols.size(), m_cols.c_ptr());
+                fn = reg.get_manager().mk_filter_interpreted_and_project_fn(reg, m_cond, m_cols.size(), m_cols.data());
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                         "trying to perform unsupported filter_interpreted_and_project operation on a relation of kind %s",
-                        reg.get_plugin().get_name().bare_str());
+                        reg.get_plugin().get_name().str().c_str());
                 }
                 store_fn(reg, fn);
             }
@@ -610,15 +604,16 @@ namespace datalog {
             if (ctx.reg(m_res)->fast_empty()) {
                 ctx.make_empty(m_res);
             }
-            //TRACE("dl_verbose", reg.display(tout << "post-filter-interpreted-and-project:\n"););
+            // TRACE(dl_verbose, reg.display(tout << "post-filter-interpreted-and-project:\n"););
             return true;
         }
 
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             out << "filter_interpreted_and_project " << m_src << " into " << m_res;
             out << " using " << mk_pp(m_cond, m_cond.get_manager());
             out << " deleting columns ";
             print_container(m_cols, out);
+            return out;
         }
 
         void make_annotations(execution_context & ctx) override {
@@ -640,12 +635,12 @@ namespace datalog {
         reg_idx m_src;
         reg_idx m_tgt;
         reg_idx m_delta;
-        bool m_widen; //if true, widening is performed intead of an union
+        bool m_widen; //if true, widening is performed instead of an union
     public:
         instr_union(reg_idx src, reg_idx tgt, reg_idx delta, bool widen)
             : m_src(src), m_tgt(tgt), m_delta(delta), m_widen(widen) {}
         bool perform(execution_context & ctx) override {
-            TRACE("dl", tout << "union " << m_src << " into " << m_tgt 
+            TRACE(dl, tout << "union " << m_src << " into " << m_tgt 
                   << " " << ctx.reg(m_src) << " " << ctx.reg(m_tgt) << "\n";);
             if (!ctx.reg(m_src)) {
                 return true;
@@ -704,11 +699,11 @@ namespace datalog {
             }
 
             SASSERT(r_src.get_signature().size() == r_tgt.get_signature().size());
-            TRACE("dl_verbose", r_tgt.display(tout <<"pre-union:"););
+            TRACE(dl_verbose, r_tgt.display(tout <<"pre-union:"););
 
             (*fn)(r_tgt, r_src, r_delta);
 
-            TRACE("dl_verbose", 
+            TRACE(dl_verbose, 
                 r_src.display(tout <<"src:");
                 r_tgt.display(tout <<"post-union:");
                 if (r_delta) {
@@ -731,11 +726,12 @@ namespace datalog {
             }
             ctx.set_register_annotation(m_delta, str);            
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             out << (m_widen ? "widen " : "union ") << m_src << " into " << m_tgt;
             if (m_delta!=execution_context::void_register) {
                 out << " with delta " << m_delta;
             }
+            return out;
         }
     };
 
@@ -770,10 +766,10 @@ namespace datalog {
             relation_base & r_src = *ctx.reg(m_src);
             if (!find_fn(r_src, fn)) {
                 if (m_projection) {
-                    fn = r_src.get_manager().mk_project_fn(r_src, m_cols.size(), m_cols.c_ptr());
+                    fn = r_src.get_manager().mk_project_fn(r_src, m_cols.size(), m_cols.data());
                 }
                 else {
-                    fn = r_src.get_manager().mk_rename_fn(r_src, m_cols.size(), m_cols.c_ptr());
+                    fn = r_src.get_manager().mk_rename_fn(r_src, m_cols.size(), m_cols.data());
                 }
                 if (!fn) {
                     std::stringstream sstm;
@@ -787,10 +783,11 @@ namespace datalog {
 
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             out << (m_projection ? "project " : "rename ") << m_src << " into " << m_tgt;
             out << (m_projection ? " deleting columns " : " with cycle ");
             print_container(m_cols, out);
+            return out;
         }
         void make_annotations(execution_context & ctx) override {
             std::stringstream s;
@@ -840,19 +837,19 @@ namespace datalog {
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                                             "trying to perform unsupported join-project operation on relations of kinds %s and %s",
-                        r1.get_plugin().get_name().bare_str(), r2.get_plugin().get_name().bare_str());
+                        r1.get_plugin().get_name().str().c_str(), r2.get_plugin().get_name().str().c_str());
                 }
                 store_fn(r1, r2, fn);
             }
-            TRACE("dl", tout<<r1.get_size_estimate_rows()<<" x "<<r2.get_size_estimate_rows()<<" jp->\n";);
+            TRACE(dl, tout<<r1.get_size_estimate_rows()<<" x "<<r2.get_size_estimate_rows()<<" jp->\n";);
             ctx.set_reg(m_res, (*fn)(r1, r2));
-            TRACE("dl",  tout<<ctx.reg(m_res)->get_size_estimate_rows()<<"\n";);
+            TRACE(dl,  tout<<ctx.reg(m_res)->get_size_estimate_rows()<<"\n";);
             if (ctx.reg(m_res)->fast_empty()) {
                 ctx.make_empty(m_res);
             }
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             relation_base const* r1 = ctx.reg(m_rel1);
             relation_base const* r2 = ctx.reg(m_rel2);
             out << "join_project " << m_rel1;            
@@ -869,6 +866,7 @@ namespace datalog {
             print_container(m_cols2, out);
             out << " into " << m_res << " removing columns ";
             print_container(m_removed_cols, out);
+            return out;
         }
         void make_annotations(execution_context & ctx) override {
             std::string s1 = "rel1", s2 = "rel2";
@@ -895,7 +893,7 @@ namespace datalog {
             unsigned col, reg_idx result)
             : m_src(src), m_result(result), m_value(value, m), m_col(col) {
             // [Leo]: does not compile on gcc
-            // TRACE("dl", tout << "src:"  << m_src << " result: " << m_result << " value:" << m_value << " column:" << m_col << "\n";);
+            // TRACE(dl, tout << "src:"  << m_src << " result: " << m_result << " value:" << m_value << " column:" << m_col << "\n";);
         }
 
         bool perform(execution_context & ctx) override {
@@ -912,7 +910,7 @@ namespace datalog {
                 if (!fn) {
                     throw default_exception(default_exception::fmt(), 
                         "trying to perform unsupported select_equal_and_project operation on a relation of kind %s",
-                        r.get_plugin().get_name().bare_str());
+                        r.get_plugin().get_name().str().c_str());
                 }
                 store_fn(r, fn);
             }
@@ -923,9 +921,9 @@ namespace datalog {
             }
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "select_equal_and_project " << m_src <<" into " << m_result << " col: " << m_col 
-                << " val: " << ctx.get_rel_context().get_rmanager().to_nice_string(m_value);
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << "select_equal_and_project " << m_src <<" into " << m_result << " col: " << m_col 
+                      << " val: " << ctx.get_rel_context().get_rmanager().to_nice_string(m_value);
         }
         void make_annotations(execution_context & ctx) override {
             std::stringstream s;
@@ -964,7 +962,7 @@ namespace datalog {
             relation_base & r1 = *ctx.reg(m_tgt);
             const relation_base & r2 = *ctx.reg(m_neg_rel);
             if (!find_fn(r1, r2, fn)) {
-                fn = r1.get_manager().mk_filter_by_negation_fn(r1, r2, m_cols1.size(), m_cols1.c_ptr(), m_cols2.c_ptr());
+                fn = r1.get_manager().mk_filter_by_negation_fn(r1, r2, m_cols1.size(), m_cols1.data(), m_cols2.data());
                 if (!fn) {
                     std::stringstream sstm;
                     sstm << "trying to perform unsupported filter_by_negation on relations of kinds ";
@@ -980,12 +978,12 @@ namespace datalog {
             }
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             out << "filter_by_negation on " << m_tgt;
             print_container(m_cols1, out);
             out << " with " << m_neg_rel;
             print_container(m_cols2, out);
-            out << " as the negated table";
+            return out << " as the negated table";
         }
         void make_annotations(execution_context & ctx) override {
             std::string s = "negated relation";
@@ -1019,10 +1017,10 @@ namespace datalog {
             ctx.set_reg(m_tgt, rel);
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "mk_unary_singleton into " << m_tgt << " sort:" 
-                << ctx.get_rel_context().get_rmanager().to_nice_string(m_sig[0]) << " val:" 
-                << ctx.get_rel_context().get_rmanager().to_nice_string(m_sig[0], m_fact[0]);
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << "mk_unary_singleton into " << m_tgt << " sort:" 
+                       << ctx.get_rel_context().get_rmanager().to_nice_string(m_sig[0]) << " val:" 
+                       << ctx.get_rel_context().get_rmanager().to_nice_string(m_sig[0], m_fact[0]);
         }
         void make_annotations(execution_context & ctx) override {
             std::string s;
@@ -1050,10 +1048,10 @@ namespace datalog {
             ctx.set_reg(m_tgt, ctx.get_rel_context().get_rmanager().mk_full_relation(m_sig, m_pred));
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "mk_total into " << m_tgt << " sort:" 
-                << ctx.get_rel_context().get_rmanager().to_nice_string(m_sig)
-                << " " << m_pred->get_name();
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << "mk_total into " << m_tgt << " sort:" 
+                       << ctx.get_rel_context().get_rmanager().to_nice_string(m_sig)
+                       << " " << m_pred->get_name();
         }
         void make_annotations(execution_context & ctx) override {
             std::string s;
@@ -1077,8 +1075,8 @@ namespace datalog {
             ctx.get_rel_context().get_rmanager().mark_saturated(m_pred);
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
-            out << "mark_saturated " << m_pred->get_name().bare_str();
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+            return out << "mark_saturated " << m_pred->get_name();
         }
         void make_annotations(execution_context & ctx) override {
         }
@@ -1101,9 +1099,10 @@ namespace datalog {
             }
             return true;
         }
-        void display_head_impl(execution_context const& ctx, std::ostream & out) const override {
+        std::ostream& display_head_impl(execution_context const& ctx, std::ostream & out) const override {
             out << "instr_assert_signature of " << m_tgt << " signature:";
             print_container(m_sig, out);
+            return out;
         }
         void make_annotations(execution_context & ctx) override {
             std::string s;
@@ -1129,10 +1128,8 @@ namespace datalog {
     }
 
     void instruction_block::reset() {
-        instr_seq_type::iterator it = m_data.begin();
-        instr_seq_type::iterator end = m_data.end();
-        for(; it!=end; ++it) {
-            dealloc(*it);
+        for (auto* t : m_data) {
+            dealloc(t);
         }
         m_data.reset();
         m_observer = nullptr;
@@ -1140,54 +1137,40 @@ namespace datalog {
 
     bool instruction_block::perform(execution_context & ctx) const {
         cost_recorder crec;
-        instr_seq_type::const_iterator it = m_data.begin();
-        instr_seq_type::const_iterator end = m_data.end();
-        bool success = true;
-        for(; it!=end && success; ++it) {
-
-            instruction * instr=(*it);
+        for (instruction * instr : m_data) {
             crec.start(instr); //finish is performed by the next start() or by the destructor of crec
 
-            TRACE("dl",      
-                tout <<"% ";
-                  instr->display_head_impl(ctx, tout);
-                tout <<"\n";);
-            success = !ctx.should_terminate() && instr->perform(ctx);
+            TRACE(dl, instr->display_head_impl(ctx, tout << "% ") << "\n";);
+
+            if (ctx.should_terminate() || !instr->perform(ctx)) {
+                return false;
+            }
         }
-        return success;
+        return true;
     }
 
     void instruction_block::process_all_costs() {
-        instr_seq_type::iterator it = m_data.begin();
-        instr_seq_type::iterator end = m_data.end();
-        for(; it!=end; ++it) {
-            (*it)->process_all_costs();
+        for (auto* t : m_data) {
+            t->process_all_costs();
         }
     }
 
 
     void instruction_block::collect_statistics(statistics& st) const {
-        instr_seq_type::const_iterator it = m_data.begin();
-        instr_seq_type::const_iterator end = m_data.end();
-        for(; it!=end; ++it) {
-            (*it)->collect_statistics(st);
+        for (auto* t : m_data) {
+            t->collect_statistics(st);
         }
     }
 
     void instruction_block::make_annotations(execution_context & ctx) {
-        instr_seq_type::iterator it = m_data.begin();
-        instr_seq_type::iterator end = m_data.end();
-        for(; it!=end; ++it) {
-            (*it)->make_annotations(ctx);
+        for (auto* t : m_data) {
+            t->make_annotations(ctx);
         }
     }
 
     void instruction_block::display_indented(execution_context const& _ctx, std::ostream & out, const std::string & indentation) const {
         rel_context const& ctx = _ctx.get_rel_context();
-        instr_seq_type::const_iterator it = m_data.begin();
-        instr_seq_type::const_iterator end = m_data.end();
-        for(; it!=end; ++it) {
-            instruction * i = (*it);
+        for (auto* i : m_data) {
             if (i->passes_output_thresholds(ctx.get_context()) || i->being_recorded()) {
                 i->display_indented(_ctx, out, indentation);
             }

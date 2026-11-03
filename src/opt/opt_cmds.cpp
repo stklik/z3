@@ -56,33 +56,30 @@ public:
         m_opt(opt)
     {}
 
-    virtual ~assert_soft_cmd() {
-    }
-
-    virtual void reset(cmd_context & ctx) { 
+    void reset(cmd_context & ctx) override {
         m_idx = 0; 
         m_formula = nullptr;
     }
 
-    virtual char const * get_usage() const { return "<formula> [:weight <rational-weight>] [:id <symbol>]"; }
-    virtual char const * get_main_descr() const { return "assert soft constraint with optional weight and identifier"; }
+    char const * get_usage() const override { return "<formula> [:weight <rational-weight>] [:id <symbol>]"; }
+    char const * get_main_descr() const override { return "assert soft constraint with optional weight and identifier"; }
 
     // command invocation
-    virtual void prepare(cmd_context & ctx) {
+    void prepare(cmd_context & ctx) override {
         reset(ctx);
     }
 
-    virtual cmd_arg_kind next_arg_kind(cmd_context & ctx) const { 
+    cmd_arg_kind next_arg_kind(cmd_context & ctx) const override {
         if (m_idx == 0) return CPK_EXPR;
         return parametric_cmd::next_arg_kind(ctx);
     }
 
-    virtual void init_pdescrs(cmd_context & ctx, param_descrs & p) {
+    void init_pdescrs(cmd_context & ctx, param_descrs & p) override {
         p.insert("weight", CPK_NUMERAL, "(default: 1) penalty of not satisfying constraint.");
         p.insert("id", CPK_SYMBOL, "(default: null) partition identifier for soft constraints.");
     }
 
-    virtual void set_next_arg(cmd_context & ctx, expr * t) {
+    void set_next_arg(cmd_context & ctx, expr * t) override {
         SASSERT(m_idx == 0);
         if (!ctx.m().is_bool(t)) {
             throw cmd_exception("Invalid type for expression. Expected Boolean type.");
@@ -91,11 +88,11 @@ public:
         ++m_idx;
     }
 
-    virtual void failure_cleanup(cmd_context & ctx) {
+    void failure_cleanup(cmd_context & ctx) override {
         reset(ctx);
     }
 
-    virtual void execute(cmd_context & ctx) {
+    void execute(cmd_context & ctx) override {
         if (!m_formula) {
             throw cmd_exception("assert-soft requires a formulas as argument.");
         }
@@ -105,9 +102,10 @@ public:
         get_opt(ctx, m_opt).add_soft_constraint(m_formula, weight, id);
         ctx.print_success();
         reset(ctx);
+        reset_params();
     }
 
-    virtual void finalize(cmd_context & ctx) { 
+    void finalize(cmd_context & ctx) override {
     }
 
 };
@@ -123,14 +121,14 @@ public:
         m_opt(opt)
     {}
 
-    virtual void reset(cmd_context & ctx) { }
-    virtual char const * get_usage() const { return "<term>"; }
-    virtual char const * get_descr(cmd_context & ctx) const { return "check sat modulo objective function";}
-    virtual unsigned get_arity() const { return 1; }
-    virtual void prepare(cmd_context & ctx) {}
-    virtual cmd_arg_kind next_arg_kind(cmd_context & ctx) const { return CPK_EXPR; }
+    void reset(cmd_context &) override { }
+    char const * get_usage() const override { return "<term>"; }
+    char const * get_descr(cmd_context & ctx) const override { return "check sat modulo objective function";}
+    unsigned get_arity() const override { return 1; }
+    void prepare(cmd_context &) override { }
+    cmd_arg_kind next_arg_kind(cmd_context & ctx) const override { return CPK_EXPR; }
 
-    virtual void set_next_arg(cmd_context & ctx, expr * t) {
+    void set_next_arg(cmd_context & ctx, expr * t) override {
         if (!is_app(t)) {
             throw cmd_exception("malformed objective term: it cannot be a quantifier or bound variable");
         }
@@ -138,11 +136,11 @@ public:
         ctx.print_success();
     }
 
-    virtual void failure_cleanup(cmd_context & ctx) {
+    void failure_cleanup(cmd_context & ctx) override {
         reset(ctx);
     }
 
-    virtual void execute(cmd_context & ctx) {
+    void execute(cmd_context & ctx) override {
     }
 };
 
@@ -154,18 +152,18 @@ public:
         m_opt(opt)
     {}
     
-    virtual void reset(cmd_context & ctx) { }
-    virtual char const * get_usage() const { return "(get-objectives)"; }
-    virtual char const * get_descr(cmd_context & ctx) const { return "retrieve the objective values (after optimization)"; }
-    virtual unsigned get_arity() const { return 0; }
-    virtual void prepare(cmd_context & ctx) {}
+    void reset(cmd_context &) override { }
+    char const * get_usage() const override { return "(get-objectives)"; }
+    char const * get_descr(cmd_context & ctx) const override { return "retrieve the objective values (after optimization)"; }
+    unsigned get_arity() const override { return 0; }
+    void prepare(cmd_context &) override { }
 
 
-    virtual void failure_cleanup(cmd_context & ctx) {
+    void failure_cleanup(cmd_context & ctx) override {
         reset(ctx);
     }
 
-    virtual void execute(cmd_context & ctx) {
+    void execute(cmd_context & ctx) override {
         if (!ctx.ignore_check()) {
             get_opt(ctx, m_opt).display_assignment(ctx.regular_stream());        
         }

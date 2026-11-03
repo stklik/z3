@@ -16,12 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef EXPR_CONTEXT_SIMPLIFIER_H_
-#define EXPR_CONTEXT_SIMPLIFIER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "smt/smt_kernel.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/rewriter/bool_rewriter.h"
@@ -79,5 +78,4 @@ public:
     void reset_statistics() { m_solver.reset_statistics(); }
 };
 
-#endif /* EXPR_CONTEXT_SIMPLIFIER_H_ */
 

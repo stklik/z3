@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MATCHER_H_
-#define MATCHER_H_
+#pragma once
 
 #include "ast/substitution/substitution.h"
 #include "util/hashtable.h"
@@ -37,8 +36,6 @@ class matcher {
     void reset();
 
 public:
-    matcher() {}
-
     /**
        \brief Return true if e2 is an instance of e1.
        In case of success (result is true), it will store the substitution that makes e1 equals to e2 into s.
@@ -59,5 +56,4 @@ public:
     bool operator()(expr * e1, expr * e2, substitution & s);
 };
 
-#endif /* MATCHER_H_ */
 

@@ -16,10 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_THEORY_H_
-#define SMT_THEORY_H_
+#pragma once
 
+#include "ast/ast_pp.h"
 #include "smt/smt_enode.h"
+#include "smt/smt_quantifier.h"
 #include "util/obj_hashtable.h"
 #include "util/statistics.h"
 #include<typeinfo>
@@ -28,16 +29,25 @@ namespace smt {
     class model_generator;
     class model_value_proc;
 
+    struct solution {
+        expr* var;
+        expr_ref term;
+        expr_ref guard;
+    };
+
     class theory {
+    protected:
         theory_id       m_id;
-        context *       m_context;
-        ast_manager *   m_manager;
+        context &       ctx;
+        ast_manager &   m;
         enode_vector    m_var2enode;
         unsigned_vector m_var2enode_lim;
+        unsigned        m_lazy_scopes;
+        bool            m_lazy;
 
         friend class context;
+        friend class arith_value;
     protected:
-        virtual void init(context * ctx);
 
         /* ---------------------------------------------------
         
@@ -64,10 +74,20 @@ namespace smt {
             m_var2enode.push_back(n);
             return v;
         }
+
+        theory_var get_th_var(expr* e) const;
+
+        theory_var get_th_var(enode* n) const {
+            return n->get_th_var(get_id());
+        }
+
+        bool lazy_push();
+        bool lazy_pop(unsigned& num_scopes);
+        void force_push();
         
     public:
         /**
-           \brief Return ture if the given enode is attached to a
+           \brief Return true if the given enode is attached to a
            variable of the theory.
            
            \remark The result is not equivalent to
@@ -81,6 +101,82 @@ namespace smt {
             theory_var v = n->get_th_var(get_id());
             return v != null_theory_var && get_enode(v) == n;
         }
+
+        struct scoped_trace_stream {
+            ast_manager& m;
+            
+            scoped_trace_stream(ast_manager& m, std::function<void (void)>& fn): m(m) {
+                if (m.has_trace_stream()) {
+                    fn();
+                }
+            }
+
+            scoped_trace_stream(theory& th, std::function<expr* (void)>& fn): m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    expr_ref body(fn(), m);
+                    th.log_axiom_instantiation(body);
+                }
+            }
+
+            scoped_trace_stream(theory& th, std::function<literal_vector(void)>& fn): m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    th.log_axiom_instantiation(fn());
+                }
+            }
+
+            scoped_trace_stream(theory& th, literal_vector const& lits): m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    th.log_axiom_instantiation(lits);
+                }
+            }
+
+            scoped_trace_stream(theory& th, literal_buffer const& lits) : m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    th.log_axiom_instantiation(lits);
+                }
+            }
+
+            scoped_trace_stream(theory& th, literal lit): m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    literal_vector lits;
+                    lits.push_back(lit);
+                    th.log_axiom_instantiation(lits);
+                }
+            }
+
+            scoped_trace_stream(theory& th, literal lit1, literal lit2): m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    literal_vector lits;
+                    lits.push_back(lit1);
+                    lits.push_back(lit2);
+                    th.log_axiom_instantiation(lits);
+                }
+            }
+
+            scoped_trace_stream(theory& th, std::function<literal(void)>& fn): m(th.get_manager()) {
+                if (m.has_trace_stream()) {
+                    literal_vector ls;
+                    ls.push_back(fn());
+                    th.log_axiom_instantiation(ls);
+                }
+            }
+            
+            ~scoped_trace_stream() {
+                if (m.has_trace_stream()) {
+                    m.trace_stream() << "[end-of-instance]\n";
+                }
+            }
+        };
+
+        struct if_trace_stream {
+            ast_manager& m;
+            
+            if_trace_stream(ast_manager& m, std::function<void (void)>& fn): m(m) {
+                if (m.has_trace_stream()) {
+                    fn();
+                }
+            }
+        };        
 
     protected:
         /**
@@ -135,6 +231,13 @@ namespace smt {
         }
 
         /**
+           \brief use the theory to determine phase of the variable.
+         */
+        virtual lbool get_phase(bool_var v) {
+            return l_undef;
+        }
+
+        /**
            \brief Equality propagation (v1 = v2): Core -> Theory
         */
         virtual void new_eq_eh(theory_var v1, theory_var v2) = 0;
@@ -156,7 +259,7 @@ namespace smt {
            \brief This method is invoked when the theory application n
            is marked as relevant.
          */
-        virtual void relevant_eh(app * n) {
+        virtual void relevant_eh(expr * n) {
         }
         
         /**
@@ -180,7 +283,6 @@ namespace smt {
         /**
            \brief This method is called by smt_context before the search starts
            to get any extra assumptions the theory wants to use.
-           (See theory_str for an example)
         */
         virtual void add_theory_assumptions(expr_ref_vector & assumptions) {
         }
@@ -194,6 +296,15 @@ namespace smt {
         }
 
         /**
+           \brief This method is called from the smt_context when an unsat core is generated.
+           The theory may tell the solver to perform iterative deepening by invalidating
+           this unsat core and increasing some resource constraints.
+        */
+        virtual bool should_research(expr_ref_vector & unsat_core) {
+            return false;
+        }
+
+        /**
            \brief This method is invoked before the search starts.
         */
         virtual void init_search_eh() {
@@ -204,8 +315,19 @@ namespace smt {
            a truth value to all boolean variables and no inconsistency was 
            detected.
         */
-        virtual final_check_status final_check_eh() {
+        virtual final_check_status final_check_eh(unsigned level) {
             return FC_DONE;
+        }
+
+        /**
+        * \brief This method signals the number of priority levels a theory supports for final checks.
+        * The first level are for the cheapest final check invocations.
+        * The levels after that are for more expensive final checks.
+        * This approach emulates a priority queue of actions taken at final check where the expensive
+        * checks are deferred.
+        */
+        virtual unsigned num_final_check_levels() const {
+            return 1;
         }
 
         /**
@@ -213,6 +335,13 @@ namespace smt {
            See example in context::is_shared
         */
         virtual bool is_shared(theory_var v) const {
+            return false;
+        }
+
+        /**
+           \brief Determine if node \c n under parent \c p is in a beta redex position.
+        */
+        virtual bool is_beta_redex(enode* p, enode* n) const {
             return false;
         }
     
@@ -251,13 +380,12 @@ namespace smt {
 
         // ----------------------------------------------------
         //
-        // Model validation (-vldt flag)
+        // Model validation 
         //
         // ----------------------------------------------------
 
-        virtual bool validate_eq_in_model(theory_var v1, theory_var v2, bool is_true) const {
-            return true;
-        }
+        virtual void validate_model(proto_model& mdl) {}
+
 
         // ----------------------------------------------------
         //
@@ -275,11 +403,12 @@ namespace smt {
 
 
     public:
-        theory(family_id fid);
-        virtual ~theory();
+        theory(context& ctx, family_id fid);
+        virtual ~theory() = default;
         
-        virtual void setup() {
-        }
+        virtual void setup() {}
+
+        virtual void init() {}
 
         theory_id get_id() const {
             return m_id;
@@ -290,18 +419,24 @@ namespace smt {
         }
 
         context & get_context() const {
-            SASSERT(m_context);
-            return *m_context;
+            return ctx;
         }
         
         ast_manager & get_manager() const {
-            SASSERT(m_manager);
-            return *m_manager;
+            return m;
         }
+
+        smt_params const& get_fparams() const;
+
+        virtual void updt_params() {}
 
         enode * get_enode(theory_var v) const {
             SASSERT(v < static_cast<int>(m_var2enode.size()));
             return m_var2enode[v];
+        }
+
+        expr * get_expr(theory_var v) const {
+            return get_enode(v)->get_expr();
         }
 
         /**
@@ -322,6 +457,8 @@ namespace smt {
         bool is_representative(theory_var v) const {
             return get_representative(v) == v;
         }
+
+        virtual bool is_safe_to_copy(bool_var v) const { return true; }
         
         unsigned get_num_vars() const {
             return m_var2enode.size();
@@ -342,10 +479,37 @@ namespace smt {
         
         std::ostream& display_flat_app(std::ostream & out, app * n) const;
         
-        std::ostream& display_var_def(std::ostream & out, theory_var v) const { return display_app(out, get_enode(v)->get_owner()); }
-        
-        std::ostream& display_var_flat_def(std::ostream & out, theory_var v) const { return display_flat_app(out, get_enode(v)->get_owner());  }
 
+    protected:
+        void log_axiom_instantiation(app * r, unsigned axiom_id = UINT_MAX, unsigned num_bindings = 0, 
+                                     expr * const * bindings = nullptr, unsigned pattern_id = UINT_MAX, 
+                                     const vector<std::tuple<enode *, enode *>> & used_enodes = vector<std::tuple<enode *, enode*>>());
+
+        void log_axiom_instantiation(expr * r, unsigned axiom_id = UINT_MAX, unsigned num_bindings = 0, 
+                                     expr * const * bindings = nullptr, unsigned pattern_id = UINT_MAX, 
+                                     const vector<std::tuple<enode *, enode *>> & used_enodes = vector<std::tuple<enode *, enode*>>()) { 
+            log_axiom_instantiation(to_app(r), axiom_id, num_bindings, bindings, pattern_id, used_enodes); 
+        }
+
+        void log_axiom_instantiation(literal_vector const& ls);
+
+        void log_axiom_instantiation(literal_buffer const& ls);
+
+        void log_axiom_instantiation(app * r, unsigned num_blamed_enodes, enode ** blamed_enodes) {
+            vector<std::tuple<enode *, enode *>> used_enodes;
+            for (unsigned i = 0; i < num_blamed_enodes; ++i) {
+                used_enodes.push_back(std::make_tuple(nullptr, blamed_enodes[i]));
+            }
+            log_axiom_instantiation(r, UINT_MAX, 0, nullptr, UINT_MAX, used_enodes);
+        }
+
+        void log_axiom_unit(app* r) {
+            expr_ref _r(r, m);
+            log_axiom_instantiation(r);
+            m.trace_stream() << "[end-of-instance]\n";
+        }
+
+    public:
         /**
            \brief Assume eqs between variable that are equal with respect to the given table.
            Table is a hashtable indexed by the variable value.
@@ -360,22 +524,22 @@ namespace smt {
         */
         template<typename VarValueTable>
         bool assume_eqs(VarValueTable & table) {
-            TRACE("assume_eqs", tout << "starting...\n";);
+            TRACE(assume_eqs, tout << "starting...\n";);
             table.reset();
             bool result   = false;
             int num       = get_num_vars();
-            for (theory_var v = 0; v < num; v++) {
+            for (theory_var v = 0; v < num; ++v) {
                 enode * n        = get_enode(v);
                 theory_var other = null_theory_var;
-                TRACE("assume_eqs",
+                TRACE(assume_eqs,
                       tout << "#" << n->get_owner_id() << " is_relevant_and_shared: " << is_relevant_and_shared(n) << "\n";);
                 if (n != nullptr && is_relevant_and_shared(n)) {
                     other = table.insert_if_not_there(v);
                     if (other != v) {
                         enode * n2 = get_enode(other);
-                        TRACE("assume_eqs", tout << "value(#" << n->get_owner_id() << ") = value(#" << n2->get_owner_id() << ")\n";);
+                        TRACE(assume_eqs, tout << "value(#" << n->get_owner_id() << ") = value(#" << n2->get_owner_id() << ")\n";);
                         if (assume_eq(n, n2)) {
-                            TRACE("assume_eqs", tout << "new assumed eq\n";);
+                            TRACE(assume_eqs, tout << "new assumed eq\n";);
                             result = true;
                         }
                     }
@@ -388,17 +552,34 @@ namespace smt {
            \brief When an eq atom n is created during the search, the default behavior is 
            to make sure that the n->get_arg(0)->get_id() < n->get_arg(1)->get_id().
            This may create some redundant atoms, since some theories/families use different
-           convetions in their simplifiers. For example, arithmetic always force a numeral
+           conventions in their simplifiers. For example, arithmetic always force a numeral
            to be in the right hand side. So, this method should be redefined if the default
            behavior conflicts with a convention used by the theory/family.
         */
         virtual app * mk_eq_atom(expr * lhs, expr * rhs) {
+            ast_manager& m = get_manager();
             if (lhs->get_id() > rhs->get_id())
                 std::swap(lhs, rhs);
+            if (m.are_distinct(lhs, rhs))                
+                return m.mk_false();
+            if (m.are_equal(lhs, rhs))
+                return m.mk_true();
             return get_manager().mk_eq(lhs, rhs);
         }
 
+        virtual void initialize_value(expr* var, expr* value) {
+            IF_VERBOSE(5, verbose_stream() << "no default initialization associated with " << mk_pp(var, m) << " := " << mk_pp(value, m) << "\n");
+        }
+
         literal mk_eq(expr * a, expr * b, bool gate_ctx);
+
+        literal mk_preferred_eq(expr* a, expr* b);
+
+        literal mk_literal(expr* e);
+
+        enode* ensure_enode(expr* e);
+
+        enode* get_root(expr* e) { return ensure_enode(e)->get_root(); }
 
         // -----------------------------------
         //
@@ -442,6 +623,8 @@ namespace smt {
 
         virtual char const * get_name() const { return "unknown"; }
 
+        virtual void solve_for(vector<solution>& s) {}
+
         // -----------------------------------
         //
         // Return a fresh new instance of the given theory.
@@ -464,9 +647,14 @@ namespace smt {
         bool is_relevant_and_shared(enode * n) const;
 
         bool assume_eq(enode * n1, enode * n2);
+
+
+        /**
+         * \brief theory plugin for fixed values.
+         */
+        virtual bool is_fixed_propagated(theory_var v, expr_ref& val, literal_vector & explain) { return false; }
     };
     
-};
+}
 
-#endif /* SMT_THEORY_H_ */
 

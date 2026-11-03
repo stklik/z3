@@ -1,3 +1,4 @@
+
 /*++
 Copyright (c) 2006 Microsoft Corporation
 
@@ -12,24 +13,26 @@ Abstract:
 Author:
 
     Leonardo de Moura (leonardo) 2006-10-16.
+    Daniel Schemmel 2019-2-23
 
 Revision History:
 
---*/
-#ifndef BUFFER_H_
-#define BUFFER_H_
 
-#include<string.h>
+--*/
+#pragma once
+
+#include <cstddef>
+#include <span>
 #include "util/memory_manager.h"
 
 template<typename T, bool CallDestructors=true, unsigned INITIAL_SIZE=16>
 class buffer {
 protected:
-    T *      m_buffer;
-    unsigned m_pos;
-    unsigned m_capacity;
-    char     m_initial_buffer[INITIAL_SIZE * sizeof(T)];
-    
+    T *      m_buffer = reinterpret_cast<T*>(m_initial_buffer);
+    unsigned m_pos = 0;
+    unsigned m_capacity = INITIAL_SIZE;
+    alignas(T) std::byte m_initial_buffer[INITIAL_SIZE * sizeof(T)];
+
     void free_memory() {
         if (m_buffer != reinterpret_cast<T*>(m_initial_buffer)) {
             dealloc_svect(m_buffer);
@@ -37,9 +40,15 @@ protected:
     }
 
     void expand() {
+        static_assert(std::is_nothrow_move_constructible<T>::value);
         unsigned new_capacity = m_capacity << 1;
         T * new_buffer        = reinterpret_cast<T*>(memory::allocate(sizeof(T) * new_capacity));
-        memcpy(new_buffer, m_buffer, m_pos * sizeof(T));
+        for (unsigned i = 0; i < m_pos; ++i) {
+            new (&new_buffer[i]) T(std::move(m_buffer[i]));
+            if (CallDestructors) {
+                m_buffer[i].~T();
+            }
+        }
         free_memory();
         m_buffer              = new_buffer;
         m_capacity            = new_capacity;
@@ -61,31 +70,35 @@ protected:
     }
 
 public:
-    typedef T data;
+    typedef T data_t;
     typedef T * iterator;
     typedef const T * const_iterator;
 
-    buffer():
-        m_buffer(reinterpret_cast<T *>(m_initial_buffer)),
-        m_pos(0),
-        m_capacity(INITIAL_SIZE) {
-    }
+    buffer() = default;
     
-    buffer(const buffer & source):
-        m_buffer(reinterpret_cast<T *>(m_initial_buffer)),
-        m_pos(0),
-        m_capacity(INITIAL_SIZE) {
-        unsigned sz = source.size();
-        for(unsigned i = 0; i < sz; i++) {
+    buffer(const buffer & source) {
+        for (unsigned i = 0, sz = source.size(); i < sz; ++i) {
             push_back(source.m_buffer[i]);
         }
     }
-    
-    buffer(unsigned sz, const T & elem):
-        m_buffer(reinterpret_cast<T *>(m_initial_buffer)),
-        m_pos(0),
-        m_capacity(INITIAL_SIZE) {
-        for (unsigned i = 0; i < sz; i++) {
+
+    buffer(buffer && source) noexcept {
+        if (source.m_buffer == reinterpret_cast<T*>(source.m_initial_buffer)) {
+            for (unsigned i = 0, sz = source.size(); i < sz; ++i) {
+                push_back(std::move(source.m_buffer[i]));
+            }
+        } else {
+            m_buffer          = source.m_buffer;
+            m_pos             = source.m_pos;
+            m_capacity        = source.m_capacity;
+            source.m_buffer   = reinterpret_cast<T*>(source.m_initial_buffer);
+            source.m_pos      = 0;
+            source.m_capacity = INITIAL_SIZE;
+        }
+    }
+
+    buffer(unsigned sz, const T & elem) {
+        for (unsigned i = 0; i < sz; ++i) {
             push_back(elem);
         }
         SASSERT(size() == sz);
@@ -165,29 +178,32 @@ public:
     }
 
     const T & back() const { 
-        SASSERT(!empty()); 
-        SASSERT(m_pos > 0);
+        SASSERT(!empty());
         return m_buffer[m_pos - 1]; 
     }
 
     T & back() { 
-        SASSERT(!empty()); 
-        SASSERT(m_pos > 0);
+        SASSERT(!empty());
         return m_buffer[m_pos - 1]; 
     }
     
-    T * c_ptr() const {
+    T * data() const {
         return m_buffer;
     }
 
-    void append(unsigned n, T const * elems) {
-        for (unsigned i = 0; i < n; i++) {
-            push_back(elems[i]);
+    void append(std::span<T const> elems) {
+        for (auto const& elem : elems) {
+            push_back(elem);
         }
     }
 
+    // Backward compatibility overload
+    void append(unsigned n, T const * elems) {
+        append(std::span<T const>(elems, n));
+    }
+
     void append(const buffer& source) {
-        append(source.size(), source.c_ptr());
+        append(source.size(), source.data());
     }
 
     T & operator[](unsigned idx) { 
@@ -218,12 +234,12 @@ public:
     void resize(unsigned nsz, const T & elem=T()) {
         unsigned sz = size();
         if (nsz > sz) {
-            for (unsigned i = sz; i < nsz; i++) {
+            for (unsigned i = sz; i < nsz; ++i) {
                 push_back(elem);
             }
         }
         else if (nsz < sz) {
-            for (unsigned i = nsz; i < sz; i++) {
+            for (unsigned i = nsz; i < sz; ++i) {
                 pop_back();
             }
         }
@@ -233,7 +249,7 @@ public:
     void shrink(unsigned nsz) {
         unsigned sz = size();
         SASSERT(nsz <= sz);
-        for (unsigned i = nsz; i < sz; i++)
+        for (unsigned i = nsz; i < sz; ++i)
             pop_back();
         SASSERT(size() == nsz);
     }
@@ -247,22 +263,27 @@ public:
     }
 };
 
+// note that the append added is actually not an addition over its base class buffer,
+// which already has an append function with the same signature and implementation
+
 template<typename T, unsigned INITIAL_SIZE=16>
 class ptr_buffer : public buffer<T *, false, INITIAL_SIZE> {
 public:
-    void append(unsigned n, T * const * elems) {
-        for (unsigned i = 0; i < n; i++) {
-            this->push_back(elems[i]);
+    void append(std::span<T * const> elems) {
+        for (auto elem : elems) {
+            this->push_back(elem);
         }
+    }
+
+    // Backward compatibility overload
+    void append(unsigned n, T * const * elems) {
+        append(std::span<T * const>(elems, n));
     }
 };
 
 template<typename T, unsigned INITIAL_SIZE=16>
 class sbuffer : public buffer<T, false, INITIAL_SIZE> {
 public:
-    sbuffer(): buffer<T, false, INITIAL_SIZE>() {}
+    sbuffer() = default;
     sbuffer(unsigned sz, const T& elem) : buffer<T, false, INITIAL_SIZE>(sz,elem) {}
 };
-
-#endif /* BUFFER_H_ */
-

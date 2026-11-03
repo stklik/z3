@@ -24,20 +24,18 @@ Notes:
 
 
 solver_na2as::solver_na2as(ast_manager & m):
-    m(m), 
+    solver(m), 
     m_assumptions(m) {
 }
 
-solver_na2as::~solver_na2as() {}
-
 void solver_na2as::assert_expr_core2(expr * t, expr * a) {
-    if (a == 0) {
+    if (a == nullptr) {
         assert_expr_core(t);
     }
     else {
         SASSERT(is_uninterp_const(a));
         SASSERT(m.is_bool(a));
-        TRACE("solver_na2as", tout << "asserting\n" << mk_ismt2_pp(t, m) << "\n" << mk_ismt2_pp(a, m) << "\n";);
+        TRACE(solver_na2as, tout << "asserting\n" << mk_ismt2_pp(t, m) << "\n" << mk_ismt2_pp(a, m) << "\n";);
         m_assumptions.push_back(a);
         expr_ref new_t(m);
         new_t = m.mk_implies(a, t);
@@ -61,20 +59,20 @@ struct append_assumptions {
     }
 };
 
-lbool solver_na2as::check_sat(unsigned num_assumptions, expr * const * assumptions) {
+lbool solver_na2as::check_sat_core(unsigned num_assumptions, expr * const * assumptions) {
     append_assumptions app(m_assumptions, num_assumptions, assumptions);
-    TRACE("solver_na2as", display(tout););
-    return check_sat_core(m_assumptions.size(), m_assumptions.c_ptr());
+    TRACE(solver_na2as, display(tout, m_assumptions.size(), m_assumptions.data()););
+    return check_sat_core2(m_assumptions.size(), m_assumptions.data());
 }
 
 lbool solver_na2as::check_sat_cc(const expr_ref_vector &assumptions, vector<expr_ref_vector> const &clauses) {
-    if (clauses.empty()) return check_sat(assumptions.size(), assumptions.c_ptr());
-    append_assumptions app(m_assumptions, assumptions.size(), assumptions.c_ptr());
+    if (clauses.empty()) return check_sat(assumptions.size(), assumptions.data());
+    append_assumptions app(m_assumptions, assumptions.size(), assumptions.data());
     return check_sat_cc_core(m_assumptions, clauses);
 }
 
 lbool solver_na2as::get_consequences(expr_ref_vector const& asms, expr_ref_vector const& vars, expr_ref_vector& consequences) {
-    append_assumptions app(m_assumptions, asms.size(), asms.c_ptr());
+    append_assumptions app(m_assumptions, asms.size(), asms.data());
     return get_consequences_core(m_assumptions, vars, consequences);
 }
 
@@ -83,16 +81,17 @@ lbool solver_na2as::find_mutexes(expr_ref_vector const& vars, vector<expr_ref_ve
 }
 
 
-void solver_na2as::push() {
-    m_scopes.push_back(m_assumptions.size());
+void solver_na2as::push() {    
+    unsigned n = m_assumptions.size();
     push_core();
+    m_scopes.push_back(n);
 }
 
 void solver_na2as::pop(unsigned n) {
-    if (n > 0) {
-        pop_core(n);
+    if (n > 0 && !m_scopes.empty()) { 
         unsigned lvl = m_scopes.size();
-        SASSERT(n <= lvl);
+        n = std::min(lvl, n);
+        pop_core(n);
         unsigned new_lvl = lvl - n;
         restore_assumptions(m_scopes[new_lvl]);
         m_scopes.shrink(new_lvl);

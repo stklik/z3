@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef AST_UTIL_H_
-#define AST_UTIL_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -28,8 +27,8 @@ void remove_duplicates(C & v) {
     if (!v.empty()) {
         unsigned sz = v.size();
         unsigned j = 0;
-        for (unsigned i = 0; i < sz; i++) {
-            typename C::data curr = v.get(i);
+        for (unsigned i = 0; i < sz; ++i) {
+            auto curr = v.get(i);
             if (!visited.is_marked(curr)) {
                 visited.mark(curr);
                 if (i != j)
@@ -48,7 +47,7 @@ bool is_well_formed_vars(ptr_vector<sort>& bound, expr* n);
 
 inline bool args_are_vars(app const * n) {
     unsigned sz = n->get_num_args();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         if (!is_var(n->get_arg(i)))
             return false;
     }
@@ -57,7 +56,7 @@ inline bool args_are_vars(app const * n) {
 
 inline bool depth_leq_one(app * n) {
     unsigned sz = n->get_num_args();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         expr * arg = n->get_arg(i);
         if (is_app(arg) && to_app(arg)->get_num_args() > 0)
             return false;
@@ -67,20 +66,14 @@ inline bool depth_leq_one(app * n) {
 
 template<typename AST>
 void dec_ref(ast_manager & m, obj_hashtable<AST> & s) {
-    typename obj_hashtable<AST>::iterator it  = s.begin();
-    typename obj_hashtable<AST>::iterator end = s.end();
-    for (;it != end; ++it) {
-        m.dec_ref(*it);
-    }
+    for (auto a : s)
+        m.dec_ref(a);
 }
 
 template<typename AST>
 void inc_ref(ast_manager & m, obj_hashtable<AST> & s) {
-    typename obj_hashtable<AST>::iterator it  = s.begin();
-    typename obj_hashtable<AST>::iterator end = s.end();
-    for (;it != end; ++it) {
-        m.inc_ref(*it);
-    }
+    for (auto a : s) 
+        m.inc_ref(a);
 }
 
 // -----------------------------------
@@ -108,8 +101,22 @@ expr * get_clause_literal(ast_manager & m, expr * cls, unsigned idx);
  */
 expr * mk_and(ast_manager & m, unsigned num_args, expr * const * args);
 app  * mk_and(ast_manager & m, unsigned num_args, app * const * args);
-inline app_ref mk_and(app_ref_vector const& args) { return app_ref(mk_and(args.get_manager(), args.size(), args.c_ptr()), args.get_manager()); }
-inline expr_ref mk_and(expr_ref_vector const& args) { return expr_ref(mk_and(args.get_manager(), args.size(), args.c_ptr()), args.get_manager()); }
+inline expr * mk_and(ast_manager & m, ptr_vector<expr> const& args) { return mk_and(m, args.size(), args.data()); }
+inline expr * mk_and(ast_manager & m, ptr_buffer<expr> const& args) { return mk_and(m, args.size(), args.data()); }
+inline expr * mk_and(ast_manager & m, expr* a, expr* b) { expr* args[2] = { a, b }; return mk_and(m, 2, args); }
+inline app_ref mk_and(app_ref_vector const& args) { return app_ref(mk_and(args.get_manager(), args.size(), args.data()), args.get_manager()); }
+inline expr_ref mk_and(expr_ref_vector const& args) { return expr_ref(mk_and(args.get_manager(), args.size(), args.data()), args.get_manager()); }
+
+inline app_ref operator&(expr_ref& a, expr* b) { return app_ref(a.m().mk_and(a, b), a.m()); }
+inline app_ref operator&(app_ref& a,  expr* b) { return app_ref(a.m().mk_and(a, b), a.m()); }
+inline app_ref operator&(var_ref& a,  expr* b) { return app_ref(a.m().mk_and(a, b), a.m()); }
+inline app_ref operator&(quantifier_ref& a,  expr* b) { return app_ref(a.m().mk_and(a, b), a.m()); }
+
+inline app_ref operator|(expr_ref& a, expr* b) { return app_ref(a.m().mk_or(a, b), a.m()); }
+inline app_ref operator|(app_ref& a,  expr* b) { return app_ref(a.m().mk_or(a, b), a.m()); }
+inline app_ref operator|(var_ref& a,  expr* b) { return app_ref(a.m().mk_or(a, b), a.m()); }
+inline app_ref operator|(quantifier_ref& a,  expr* b) { return app_ref(a.m().mk_or(a, b), a.m()); }
+app_ref operator+(expr_ref& a, expr_ref& b);
 
 /**
    Return (or args[0] ... args[num_args-1]) if num_args >= 2
@@ -118,21 +125,25 @@ inline expr_ref mk_and(expr_ref_vector const& args) { return expr_ref(mk_and(arg
  */
 expr * mk_or(ast_manager & m, unsigned num_args, expr * const * args);
 app  * mk_or(ast_manager & m, unsigned num_args, app * const * args);
-inline app_ref mk_or(app_ref_vector const& args) { return app_ref(mk_or(args.get_manager(), args.size(), args.c_ptr()), args.get_manager()); }
-inline expr_ref mk_or(expr_ref_vector const& args) { return expr_ref(mk_or(args.get_manager(), args.size(), args.c_ptr()), args.get_manager()); }
+inline expr * mk_or(ast_manager & m, expr* a, expr* b) { expr* args[2] = { a, b }; return mk_or(m, 2, args); }
+inline app_ref mk_or(app_ref_vector const& args) { return app_ref(mk_or(args.get_manager(), args.size(), args.data()), args.get_manager()); }
+inline expr_ref mk_or(expr_ref_vector const& args) { return expr_ref(mk_or(args.get_manager(), args.size(), args.data()), args.get_manager()); }
 
 /**
    Return a          if arg = (not a)
-   Retur (not arg)   otherwise
+   Return (not arg)  otherwise
  */
 expr * mk_not(ast_manager & m, expr * arg);
 
 expr_ref mk_not(const expr_ref& e);
 
+inline app_ref mk_not(const app_ref& e) { return app_ref(e.m().mk_not(e), e.m()); }
+
+
 /**
    Negate and push over conjunction or disjunction.
  */
-expr_ref push_not(const expr_ref& arg);
+expr_ref push_not(const expr_ref& arg, unsigned limit = 8);
 
 /**
    Return the expression (and (not (= args[0] args[1])) (not (= args[0] args[2])) ... (not (= args[num_args-2] args[num_args-1])))
@@ -160,5 +171,5 @@ void flatten_or(expr_ref_vector& result);
 
 void flatten_or(expr* fml, expr_ref_vector& result);
 
+bool has_uninterpreted(ast_manager& m, expr* e);
 
-#endif /* AST_UTIL_H_ */

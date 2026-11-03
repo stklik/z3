@@ -46,7 +46,7 @@ class ComplexExpr:
         other = _to_complex(other)
         return ComplexExpr(self.r*other.r - self.i*other.i, self.r*other.i + self.i*other.r)
 
-    def __mul__(self, other):
+    def __rmul__(self, other):
         other = _to_complex(other)
         return ComplexExpr(other.r*self.r - other.i*self.i, other.i*self.r + other.r*self.i)
 
@@ -81,7 +81,7 @@ class ComplexExpr:
         other = _to_complex(other)
         return And(self.r == other.r, self.i == other.i)
 
-    def __neq__(self, other):
+    def __ne__(self, other):
         return Not(self.__eq__(other))
 
     def simplify(self):

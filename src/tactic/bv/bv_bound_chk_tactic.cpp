@@ -16,18 +16,17 @@
 --*/
 #include "tactic/bv/bv_bound_chk_tactic.h"
 #include "ast/ast.h"
+#include "params/rewriter_params.hpp"
 #include "ast/rewriter/rewriter.h"
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/rewriter/bv_bounds.h"
-#include "ast/rewriter/rewriter_params.hpp"
 #include "ast/rewriter/bool_rewriter.h"
-#include "util/cooperate.h"
 
 struct bv_bound_chk_stats {
     unsigned            m_unsats;
     unsigned            m_singletons;
     unsigned            m_reduces;
-    bv_bound_chk_stats() : m_unsats(0), m_singletons(0), m_reduces(0) {};
+    bv_bound_chk_stats() : m_unsats(0), m_singletons(0), m_reduces(0) {}
 };
 
 struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
@@ -42,14 +41,11 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
     bv_bound_chk_rewriter_cfg(ast_manager & m, bv_bound_chk_stats& stats)
         : m_m(m), m_b_rw(m), m_stats(stats) {}
 
-    ~bv_bound_chk_rewriter_cfg() {}
-
     void updt_params(params_ref const & _p) {
         rewriter_params p(_p);
         m_bv_ineq_consistency_test_max = p.bv_ineq_consistency_test_max();        
         m_max_memory = p.max_memory();
         m_max_steps = p.max_steps();
-
     }
 
     ast_manager & m() const { return m_m; }
@@ -60,9 +56,9 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
 
     br_status reduce_app(func_decl * f, unsigned num, expr * const * args, expr_ref & result, proof_ref & result_pr) {
         const br_status st = reduce_app_core(f, num, args, result, result_pr);
-        CTRACE("bv_bound_chk_step", st != BR_FAILED,
+        CTRACE(bv_bound_chk_step, st != BR_FAILED,
             tout << f->get_name() << "\n";
-        for (unsigned i = 0; i < num; i++) tout << mk_ismt2_pp(args[i], m()) << "\n";
+        for (unsigned i = 0; i < num; ++i) tout << mk_ismt2_pp(args[i], m()) << "\n";
         tout << "---------->\n" << mk_ismt2_pp(result, m()) << "\n";);
         return st;
     }
@@ -74,13 +70,12 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
         bv_bounds bvb(m());
         const br_status rv = bvb.rewrite(m_bv_ineq_consistency_test_max, f, num, args, result);
         if (rv != BR_FAILED && (m_m.is_false(result) || m_m.is_true(result))) m_stats.m_unsats++;
-        else if (rv != BR_FAILED && bvb.singletons().size()) m_stats.m_singletons++;
+        else if (rv != BR_FAILED && !bvb.singletons().empty()) m_stats.m_singletons++;
         else if (rv != BR_FAILED && is_app(result) && to_app(result)->get_num_args() < num) m_stats.m_reduces++;
         return rv;
     }
 
     bool max_steps_exceeded(unsigned long long num_steps) const {
-        cooperate("bv-bound-chk");
         if (num_steps > m_max_steps)
             return true;
         if (memory::get_allocation_size() > m_max_memory)
@@ -111,8 +106,6 @@ struct bv_bound_chk_rewriter : public rewriter_tpl<bv_bound_chk_rewriter_cfg> {
         updt_params(p);
     }
 
-    ~bv_bound_chk_rewriter() override {}
-
     void updt_params(params_ref const & _p) {
         m_cfg.updt_params(_p);
     }
@@ -142,6 +135,7 @@ public:
     void cleanup() override;
     void collect_statistics(statistics & st) const override;
     void reset_statistics() override;
+    char const* name() const override { return "bv_bound_chk"; }
 };
 
 class bv_bound_chk_tactic::imp {
@@ -150,17 +144,14 @@ public:
     imp(ast_manager & m, params_ref const & p, bv_bound_chk_stats& stats)
         : m_rw(m, p, stats) {    }
 
-    virtual ~imp() {    }
-
     ast_manager& m() { return m_rw.m(); }
 
     void operator()(goal_ref const & g) {
-        SASSERT(g->is_well_sorted());
         tactic_report report("bv-bound-chk", *g);
         ast_manager& m(g->m());
         expr_ref   new_curr(m);
         const unsigned size = g->size();
-        for (unsigned idx = 0; idx < size; idx++) {
+        for (unsigned idx = 0; idx < size; ++idx) {
             if (g->inconsistent()) break;
             expr * curr = g->form(idx);
             m_rw(curr, new_curr);
@@ -169,7 +160,7 @@ public:
         m_rw.m_cfg.cleanup();
     }
 
-    virtual void updt_params(params_ref const & p) {
+    void updt_params(params_ref const & p) {
         m_rw.updt_params(p);
     }
 
@@ -194,16 +185,12 @@ bv_bound_chk_tactic::~bv_bound_chk_tactic() {
 }
 
 void bv_bound_chk_tactic::operator()(goal_ref const & g, goal_ref_buffer & result) {
-    SASSERT(g->is_well_sorted());
     fail_if_proof_generation("bv-bound-chk", g);
     fail_if_unsat_core_generation("bv-bound-chk", g);
-    TRACE("bv-bound-chk", g->display(tout << "before:"); tout << std::endl;);
     result.reset();
     m_imp->operator()(g);
     g->inc_depth();
     result.push_back(g.get());
-    TRACE("bv-bound-chk", g->display(tout << "after:"););
-    SASSERT(g->is_well_sorted());
 }
 
 tactic * bv_bound_chk_tactic::translate(ast_manager & m) {
@@ -212,8 +199,8 @@ tactic * bv_bound_chk_tactic::translate(ast_manager & m) {
 
 
 void bv_bound_chk_tactic::updt_params(params_ref const & p) {
-    m_params = p;
-    m_imp->updt_params(p);
+    m_params.append(p);
+    m_imp->updt_params(m_params);
 }
 
 void bv_bound_chk_tactic::cleanup() {

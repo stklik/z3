@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef GPARAMS_H_
-#define GPARAMS_H_
+#pragma once
 
 #include "util/params.h"
 
@@ -26,6 +25,9 @@ class gparams {
     static imp * g_imp; 
 public:
     typedef default_exception exception;
+
+    static std::string& g_buffer();
+
 
     /**
        \brief Reset all global and module parameters.
@@ -63,26 +65,47 @@ public:
     static std::string get_value(symbol const & name);
     
     /**
-       \brief Register additional global parameters
-       
-       This is an auxiliary function used by our automatic code generator.
-       Example: the directive REG_PARAMS('collect_param_descrs')
-       "tells" the automatic code generator how to register the additional global parameters.
+       \brief Register additional global parameters.
     */
     static void register_global(param_descrs & d);
 
     /**
        \brief Register parameter descriptions for a Z3 module.
-       The parameters of a given Z3 module can only be set using #set_global_param if 
+       The parameters of a given Z3 module can only be set using #set_global_param if
        they are registered in this module using this function.
-       
-       This is an auxiliary function used by our automatic code generator.
-       Each module will contain directives (in comments) such as
-       Example: the directive REG_MODULE_PARAMS('nlsat', 'nlsat::solver::collect_param_descrs')
-       "tells" the automatic code generator how to register the parameters for the given
-       module.
     */
-    static void register_module(char const * module_name, param_descrs * d); 
+
+    typedef param_descrs* (*lazy_descrs_t)(void);
+    static void register_module(char const* module_name, lazy_descrs_t get_descrs);
+
+    /**
+       \brief Self-registration nodes used by Z3_DEFINE_MODULE_PARAMS / Z3_REGISTER_MODULE_PARAMS /
+       Z3_REGISTER_GLOBAL_PARAMS (see util/params.h). Each is instantiated as an `inline` global
+       directly in a module's header; its constructor prepends itself to one of the two
+       program-wide lists below. This is safe regardless of static-initialization order across
+       translation units: appending only touches this list's own head pointer (itself
+       zero-initialized before any dynamic initialization runs, since nullptr is a constant
+       initializer), and the lists are only ever walked lazily on first actual parameter lookup
+       -- long after every translation unit's static initializers have run.
+    */
+    struct module_registration {
+        char const * module_name;
+        lazy_descrs_t get_descrs;
+        char const * descr; // nullptr if the module has no description
+        module_registration * next;
+        module_registration(char const * module_name, lazy_descrs_t get_descrs, char const * descr);
+    };
+    struct global_registration {
+        typedef void (*collect_descrs_t)(param_descrs &);
+        collect_descrs_t collect;
+        global_registration * next;
+        explicit global_registration(collect_descrs_t collect);
+    };
+
+private:
+    static module_registration * g_module_registrations;
+    static global_registration * g_global_registrations;
+public:
 
     /**
        \brief Add a (small) description to the given module.
@@ -101,8 +124,6 @@ public:
        params_ref const & p = get_module_params("pp")
     */
     static params_ref get_module(char const * module_name);
-    static params_ref get_module(symbol const & module_name);
-
     /**
        \brief Return the global parameter set (i.e., parameters that are not associated with any particular module).
     */
@@ -116,26 +137,29 @@ public:
     
     // Auxiliary APIs for better command line support
     static void display_modules(std::ostream & out);
+    static void display_updated_parameters(std::ostream& out, params_ref const& p);
     static void display_module(std::ostream & out, char const * module_name);
+    static void display_module_markdown(std::ostream & out, char const * module_name);
     static void display_parameter(std::ostream & out, char const * name);
+
+    static param_descrs const& get_global_param_descrs();
 
     /**
        \brief Initialize the global parameter management module.
-       
+
        Remark: I set a priority in the initialization, because this module must be initialized
        after the core modules such as symbol.
-       ADD_INITIALIZER('gparams::init();', 1)
     */
     static void init();
 
     /**
        \brief Finalize the global parameter management module.
-       
-       ADD_FINALIZER('gparams::finalize();');
     */
     static void finalize();
 };
 
+Z3_ADD_INITIALIZER(gparams, gparams::init, 1);
+Z3_ADD_FINALIZER(gparams, gparams::finalize);
 
 
-#endif
+

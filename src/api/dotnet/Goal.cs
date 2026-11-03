@@ -18,7 +18,8 @@ Notes:
 --*/
 
 using System;
-using System.Diagnostics.Contracts;
+using System.Diagnostics;
+using System.Linq;
 
 namespace Microsoft.Z3
 {
@@ -27,7 +28,6 @@ namespace Microsoft.Z3
     /// of formulas, that can be solved and/or transformed using
     /// tactics and solvers.
     /// </summary>
-    [ContractVerification(true)]
     public class Goal : Z3Object
     {
         /// <summary>
@@ -79,13 +79,13 @@ namespace Microsoft.Z3
         /// </summary>   
         public void Assert(params BoolExpr[] constraints)
         {
-            Contract.Requires(constraints != null);
-            Contract.Requires(Contract.ForAll(constraints, c => c != null));
+            Debug.Assert(constraints != null);
+            Debug.Assert(constraints.All(c => c != null));
 
             Context.CheckContextMatch<BoolExpr>(constraints);
             foreach (BoolExpr c in constraints)
             {
-                Contract.Assert(c != null); // It was an assume, now made an assert just to be sure we do not regress
+                Debug.Assert(c != null); // It was an assume, now made an assert just to be sure we do not regress
                 Native.Z3_goal_assert(Context.nCtx, NativeObject, c.NativeObject);
             }
         }
@@ -140,12 +140,11 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<BoolExpr[]>() != null);
 
                 uint n = Size;
                 BoolExpr[] res = new BoolExpr[n];
                 for (uint i = 0; i < n; i++)
-                    res[i] = new BoolExpr(Context, Native.Z3_goal_formula(Context.nCtx, NativeObject, i));
+                    res[i] = (BoolExpr)Expr.Create(Context, Native.Z3_goal_formula(Context.nCtx, NativeObject, i));
                 return res;
             }
         }
@@ -181,7 +180,6 @@ namespace Microsoft.Z3
         /// <returns>A model for <c>g</c></returns>
         public Model ConvertModel(Model m)
         {
-            Contract.Ensures(Contract.Result<Model>() != null);
             if (m != null)
                return new Model(Context, Native.Z3_goal_convert_model(Context.nCtx, NativeObject, m.NativeObject));
             else
@@ -194,7 +192,7 @@ namespace Microsoft.Z3
         /// </summary>
         public Goal Translate(Context ctx)
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
 
             return new Goal(ctx, Native.Z3_goal_translate(Context.nCtx, NativeObject, ctx.nCtx));
         }
@@ -205,8 +203,8 @@ namespace Microsoft.Z3
         /// <remarks>Essentially invokes the `simplify' tactic on the goal.</remarks>
         public Goal Simplify(Params p = null)
         {
-            Tactic t = Context.MkTactic("simplify");
-            ApplyResult res = t.Apply(this, p);
+            using Tactic t = Context.MkTactic("simplify");
+            using ApplyResult res = t.Apply(this, p);
 
             if (res.NumSubgoals == 0)
                 throw new Z3Exception("No subgoals");
@@ -227,9 +225,9 @@ namespace Microsoft.Z3
         /// Goal to DIMACS formatted string conversion.
         /// </summary>
         /// <returns>A string representation of the Goal.</returns>
-        public string ToDimacs()
+        public string ToDimacs(bool include_names = true)
         {
-            return Native.Z3_goal_to_dimacs_string(Context.nCtx, NativeObject);
+            return Native.Z3_goal_to_dimacs_string(Context.nCtx, NativeObject, (byte)(include_names ? 1 : 0));
         }
 
         /// <summary>
@@ -248,39 +246,26 @@ namespace Microsoft.Z3
         }
 
         #region Internal
-        internal Goal(Context ctx, IntPtr obj) : base(ctx, obj) { Contract.Requires(ctx != null); }
+        internal Goal(Context ctx, IntPtr obj) : base(ctx, obj) { Debug.Assert(ctx != null); }
 
         internal Goal(Context ctx, bool models, bool unsatCores, bool proofs)
             : base(ctx, Native.Z3_mk_goal(ctx.nCtx, (byte)(models ? 1 : 0), (byte)(unsatCores ? 1 : 0), (byte)(proofs ? 1 : 0)))
         {
-            Contract.Requires(ctx != null);
-        }
-
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_goal_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_goal_dec_ref(ctx.nCtx, obj);
-            }
-        };        
+            Debug.Assert(ctx != null);
+        }      
 
         internal override void IncRef(IntPtr o)
         {
-            Context.Goal_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_goal_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.Goal_DRQ.Add(o);
-            base.DecRef(o);
+            lock (Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_goal_dec_ref(Context.nCtx, o);
+            }
         }
 
         #endregion

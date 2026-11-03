@@ -14,16 +14,10 @@ Author:
 Notes:
 
 --*/
-#ifndef DICTIONARY_H_
-#define DICTIONARY_H_
+#pragma once
 
 #include "util/map.h"
 #include "util/symbol.h"
 
 template<typename T>
-class dictionary : public map<symbol, T, symbol_hash_proc, symbol_eq_proc> {
-public:
-    dictionary() {}
-};
-
-#endif
+using dictionary = map<symbol, T, symbol_hash_proc, symbol_eq_proc>;

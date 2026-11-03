@@ -21,7 +21,7 @@ Revision History:
 #include "muz/base/dl_context.h"
 #include "muz/base/dl_rule_set.h"
 #include "muz/base/dl_rule_transformer.h"
-#include "tactic/equiv_proof_converter.h"
+#include "ast/converters/equiv_proof_converter.h"
 
 namespace datalog {
     class mk_elim_term_ite : public rule_transformer::plugin {
@@ -32,10 +32,9 @@ namespace datalog {
         expr_ref_vector m_ground;
 
         bool elim(rule &r, rule_set &new_rules);
-        expr_ref ground(expr_ref &e);
+        expr_ref ground(expr* e);
     public:
         mk_elim_term_ite(context &ctx, unsigned priority);
-        ~mk_elim_term_ite() override;
         rule_set * operator()(const rule_set &source) override;
     };
 }

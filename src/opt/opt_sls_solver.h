@@ -17,8 +17,7 @@ Notes:
 
    
 --*/
-#ifndef OPT_SLS_SOLVER_H_
-#define OPT_SLS_SOLVER_H_
+#pragma once
 
 #include "solver/solver_na2as.h"
 #include "tactic/arith/card2bv_tactic.h"
@@ -56,7 +55,7 @@ namespace opt {
         {            
             updt_params(p);
         }
-        virtual ~sls_solver() {}
+        virtual ~sls_solver() = default;
 
         virtual void updt_params(params_ref & p) {
             m_solver->updt_params(p);
@@ -67,7 +66,7 @@ namespace opt {
         virtual void collect_param_descrs(param_descrs & r) {
             m_solver->collect_param_descrs(r);
         }
-        virtual void collect_statistics(statistics & st) const {
+        virtual void collect_statistics_core(statistics & st) const {
             m_solver->collect_statistics(st);
             if (m_bvsls) m_bvsls->collect_statistics(st);
             if (m_pbsls) m_pbsls->collect_statistics(st);
@@ -174,7 +173,7 @@ namespace opt {
                 m_pb2bv(m_solver->get_assertion(i), tmp);                
                 g->assert_expr(tmp);
             }
-            TRACE("opt", g->display(tout););
+            TRACE(opt, g->display(tout););
             tactic_ref simplify = mk_nnf_tactic(m);
             proof_converter_ref pc;
             expr_dependency_ref core(m);
@@ -186,7 +185,7 @@ namespace opt {
             for (unsigned i = 0; i < r->size(); ++i) {
                 m_bvsls->assert_expr(r->form(i));
             }
-            TRACE("opt", m_bvsls->display(tout););
+            TRACE(opt, m_bvsls->display(tout););
         }
 
         void pbsls_opt(model_ref& mdl) {
@@ -213,7 +212,7 @@ namespace opt {
             m_bvsls = alloc(bvsls_opt_engine, m, m_params);            
             assertions2sls();
             expr_ref objective = soft2bv(m_soft, m_weights);
-            TRACE("opt", tout << objective << "\n";);
+            TRACE(opt, tout << objective << "\n";);
             opt_result res(m);
             res.is_sat = l_undef;
             try {
@@ -232,4 +231,3 @@ namespace opt {
     };
 }
 
-#endif

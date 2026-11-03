@@ -17,8 +17,7 @@ Author:
 Notes:
 
 --*/
-#ifndef EXPR2POLYNOMIAL_H_
-#define EXPR2POLYNOMIAL_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "math/polynomial/polynomial.h"
@@ -100,13 +99,11 @@ protected:
 };
 
 class default_expr2polynomial : public expr2polynomial {
-    svector<bool> m_is_int;
+    bool_vector m_is_int;
 public:
     default_expr2polynomial(ast_manager & am, polynomial::manager & pm);
-    ~default_expr2polynomial() override;
     bool is_int(polynomial::var x) const override;
 protected:
     polynomial::var mk_var(bool is_int) override;
 };
 
-#endif

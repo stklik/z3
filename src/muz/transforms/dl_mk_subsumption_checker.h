@@ -18,8 +18,7 @@ Revision History:
 
 --*/
 
-#ifndef DL_MK_SUBSUMPTION_CHECKER_H_
-#define DL_MK_SUBSUMPTION_CHECKER_H_
+#pragma once
 
 #include "muz/base/dl_context.h"
 #include "muz/base/dl_rule_transformer.h"
@@ -87,7 +86,6 @@ namespace datalog {
         rule_set * operator()(rule_set const & source) override;
     };
 
-};
+}
 
-#endif /* DL_MK_SUBSUMPTION_CHECKER_H_ */
 

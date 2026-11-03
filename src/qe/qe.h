@@ -18,11 +18,10 @@ Revision History:
 
 --*/
 
-#ifndef QE_H_
-#define QE_H_
+#pragma once
 
 #include "ast/ast.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "util/statistics.h"
 #include "util/lbool.h"
 #include "ast/expr_functors.h"
@@ -35,6 +34,7 @@ namespace qe {
 
     class i_nnf_atom {
     public:
+        virtual ~i_nnf_atom() = default;
         virtual void operator()(expr* e, bool pol, expr_ref& result) = 0;
     };
 
@@ -123,7 +123,6 @@ namespace qe {
             iterator(conj_enum& c, bool first) : m_super(&c), m_index(first?0:c.m_conjs.size()) {}
             expr* operator*() { return m_super->m_conjs[m_index].get(); }
             iterator& operator++() { m_index++; return *this; }
-            bool operator==(iterator const& it) const { return m_index == it.m_index; }
             bool operator!=(iterator const& it) const { return m_index != it.m_index; }
         };
 
@@ -149,7 +148,7 @@ namespace qe {
             m_ctx(ctx)
         {}
         
-        virtual ~qe_solver_plugin() {}
+        virtual ~qe_solver_plugin() = default;
         
         family_id get_family_id() { return m_fid; }
 
@@ -230,10 +229,8 @@ namespace qe {
     class def_vector {
         func_decl_ref_vector m_vars;
         expr_ref_vector      m_defs;
-        def_vector& operator=(def_vector const& other);
     public:
         def_vector(ast_manager& m): m_vars(m), m_defs(m) {}
-        def_vector(def_vector const& other): m_vars(other.m_vars), m_defs(other.m_defs) {}
         void push_back(func_decl* v, expr* e) {
             m_vars.push_back(v);
             m_defs.push_back(e);
@@ -253,7 +250,7 @@ namespace qe {
     /**
        \brief Guarded definitions.
 
-       A realizer to a an existential quantified formula is a disjunction
+       A realizer to an existential quantified formula is a disjunction
        together with a substitution from the existentially quantified variables
        to terms such that:
        1. The original formula (exists (vars) fml) is equivalent to the disjunction of guards.
@@ -328,6 +325,8 @@ namespace qe {
 
     void mk_exists(unsigned num_vars, app* const* vars, expr_ref& fml);
 
+    bool has_quantified_uninterpreted(ast_manager& m, expr* fml);
+
     void get_nnf(expr_ref& fml, i_expr_pred& pred, i_nnf_atom& mk_atom, atom_set& pos, atom_set& neg); 
 
     class simplify_rewriter_cfg : public default_rewriter_cfg {
@@ -368,7 +367,6 @@ namespace qe {
 
     };
 
-};
+}
 
-#endif
 

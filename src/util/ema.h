@@ -18,15 +18,14 @@ Author:
 Revision History:
 
 --*/
-#ifndef EMA_H_
-#define EMA_H_
+#pragma once
 
 class ema {
-    double m_alpha, m_beta, m_value;
-    unsigned m_period, m_wait;
-    bool invariant() const { return 0 <= m_alpha && m_alpha <= m_beta && m_beta <= 1; }
+    double m_alpha = 0, m_beta = 1, m_value = 0;
+    unsigned m_period = 0, m_wait = 0;
+    bool invariant() const { return 0 <= m_alpha && m_alpha <= m_beta && m_beta <= 1 && m_wait <= m_period; }
  public:
-    ema(): m_alpha(0), m_beta(1), m_value(0), m_period(0), m_wait(0) {
+    ema() {
         SASSERT(invariant());
     }
 
@@ -51,6 +50,9 @@ class ema {
         m_beta *= 0.5;
         if (m_beta < m_alpha) m_beta = m_alpha;        
     }
+
+    void set(double x) {
+        m_value = x;
+    }
 };
 
-#endif

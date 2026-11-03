@@ -33,12 +33,24 @@ namespace opt {
         lbool is_sat = m_solver->check_sat(0, nullptr);
         if (is_sat == l_true) {
             {
+                m_solver->get_model(m_model);
                 solver::scoped_push _s(*m_solver.get());
+                unsigned num_improvements = 0;
                 while (is_sat == l_true) {
-                    if (m.canceled()) {
+                    if (!m.inc()) {
                         return l_undef;
                     }
-                    m_solver->get_model(m_model);
+                    if (!m_model)
+                        return l_undef;
+                    // The first model is dominated; on a continuous front
+                    // single improvements can continue indefinitely.
+                    if (num_improvements++ == 1) {
+                        cb.maximize_in_cone(*m_solver, m_model);
+                        // A timeout or cancel during the step is re-raised
+                        // after it; report it as unknown, not as an error.
+                        if (!m.inc())
+                            return l_undef;
+                    }
                     m_solver->get_labels(m_labels);
                     m_model->set_model_completion(true);
                     IF_VERBOSE(1,
@@ -48,6 +60,7 @@ namespace opt {
                     // TBD: we can also use local search to tune solution coordinate-wise.
                     mk_dominates();
                     is_sat = m_solver->check_sat(0, nullptr);
+                    if (is_sat == l_true) m_solver->get_model(m_model);
                 }
             }
             if (is_sat == l_undef) {
@@ -71,7 +84,7 @@ namespace opt {
         fmls.push_back(mk_or(gt));
         fml = mk_and(fmls);
         IF_VERBOSE(10, verbose_stream() << "dominates: " << fml << "\n";);
-        TRACE("opt", tout << fml << "\n"; model_smt2_pp(tout, m, *m_model, 0););
+        TRACE(opt, model_smt2_pp(tout << fml << "\n", m, *m_model, 0););
         m_solver->assert_expr(fml);        
     }
 
@@ -84,7 +97,7 @@ namespace opt {
         }
         fml = m.mk_not(mk_and(le));
         IF_VERBOSE(10, verbose_stream() << "not dominated by: " << fml << "\n";);
-        TRACE("opt", tout << fml << "\n";);
+        TRACE(opt, tout << fml << "\n";);
         m_solver->assert_expr(fml);        
     }
 
@@ -94,7 +107,7 @@ namespace opt {
     lbool oia_pareto::operator()() {
         solver::scoped_push _s(*m_solver.get());
         lbool is_sat = m_solver->check_sat(0, nullptr);
-        if (m.canceled()) {
+        if (!m.inc()) {
             is_sat = l_undef;
         }
         if (is_sat == l_true) {

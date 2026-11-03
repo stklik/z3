@@ -16,11 +16,19 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT2_PARSER_H_
-#define SMT2_PARSER_H_
+#pragma once
 
 #include "cmd_context/cmd_context.h"
 
-bool parse_smt2_commands(cmd_context & ctx, std::istream & is, bool interactive = false, params_ref const & p = params_ref(), char const * filename = nullptr);
+namespace smt2 {
+    class parser;
+    void free_parser(parser * p);
+}
 
-#endif
+bool parse_smt2_commands(cmd_context & ctx, std::istream & is, bool interactive = false, params_ref const & ps = params_ref(), char const * filename = nullptr);
+
+bool parse_smt2_commands_with_parser(class smt2::parser *& p, cmd_context & ctx, std::istream & is, bool interactive = false, params_ref const & ps = params_ref(), char const * filename = nullptr);
+
+sexpr_ref parse_sexpr(cmd_context& ctx, std::istream& is, params_ref const& ps, char const* filename);
+
+sort_ref parse_smt2_sort(cmd_context & ctx, std::istream & is, bool interactive, params_ref const & ps, char const * filename);

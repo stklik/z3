@@ -29,6 +29,39 @@ ast_translation::~ast_translation() {
     reset_cache();
 }
 
+void ast_translation::seed(expr* src, expr* dst) {
+    // Seed mappings exposed by a solver translated without this translation
+    // object. cache() deliberately retains only shared nodes.
+    svector<std::pair<expr*, expr*>> todo;
+    todo.push_back({ src, dst });
+    while (!todo.empty()) {
+        auto [s, d] = todo.back();
+        todo.pop_back();
+        if (m_cache.contains(s))
+            continue;
+        SASSERT(s->get_kind() == d->get_kind());
+        cache(s, d);
+        if (!m_cache.contains(s->get_sort()))
+            cache(s->get_sort(), d->get_sort());
+        if (is_app(s)) {
+            SASSERT(is_app(d));
+            app* sa = to_app(s);
+            app* da = to_app(d);
+            SASSERT(sa->get_num_args() == da->get_num_args());
+            if (!m_cache.contains(sa->get_decl()))
+                cache(sa->get_decl(), da->get_decl());
+            for (unsigned i = 0; i < sa->get_num_args(); ++i)
+                todo.push_back({ sa->get_arg(i), da->get_arg(i) });
+        }
+        else if (is_quantifier(s)) {
+            SASSERT(is_quantifier(d));
+            quantifier* sq = to_quantifier(s);
+            quantifier* dq = to_quantifier(d);
+            todo.push_back({ sq->get_expr(), dq->get_expr() });
+        }
+    }
+}
+
 void ast_translation::cleanup() {
     reset_cache();
     m_cache.finalize();
@@ -57,7 +90,7 @@ void ast_translation::cache(ast * s, ast * t) {
 
 void ast_translation::collect_decl_extra_children(decl * d) {
     unsigned num_params = d->get_num_parameters();
-    for (unsigned i = 0; i < num_params; i++) {
+    for (unsigned i = 0; i < num_params; ++i) {
         parameter const & p = d->get_parameter(i);
         if (p.is_ast())
             m_extra_children_stack.push_back(p.get_ast());
@@ -65,6 +98,13 @@ void ast_translation::collect_decl_extra_children(decl * d) {
 }
 
 void ast_translation::push_frame(ast * n) {
+    // ensure poly roots are pushed first.
+    if (m_from_manager.has_type_vars() && n->get_kind() == AST_FUNC_DECL && to_func_decl(n)->is_polymorphic()) {
+        func_decl* g = m_from_manager.poly_root(to_func_decl(n));
+        if (n != g && m_cache.contains(g)) {
+            m_frame_stack.push_back(frame(n, 0, m_extra_children_stack.size(), m_result_stack.size()));
+        }
+    }
     m_frame_stack.push_back(frame(n, 0, m_extra_children_stack.size(), m_result_stack.size()));
     switch (n->get_kind()) {
     case AST_SORT:
@@ -95,7 +135,7 @@ bool ast_translation::visit(ast * n) {
 void ast_translation::copy_params(decl * d, unsigned rpos, buffer<parameter> & ps) {
     unsigned num = d->get_num_parameters();
     unsigned j   = rpos;
-    for (unsigned i = 0; i < num; i++) {
+    for (unsigned i = 0; i < num; ++i) {
         parameter const & p = d->get_parameter(i);
         if (p.is_ast()) {
             ps.push_back(parameter(m_result_stack[j]));
@@ -130,7 +170,7 @@ void ast_translation::mk_sort(sort * s, frame & fr) {
                                                               si->get_decl_kind(),
                                                               si->get_num_elements(),
                                                               si->get_num_parameters(),
-                                                              ps.c_ptr(),
+                                                              ps.data(),
                                                               s->private_parameters()));
     }
     m_result_stack.shrink(fr.m_rpos);
@@ -144,7 +184,7 @@ void ast_translation::mk_func_decl(func_decl * f, frame & fr) {
     func_decl_info * fi   = f->get_info();
     SASSERT(fr.m_cpos <= m_extra_children_stack.size());
     unsigned num_extra = m_extra_children_stack.size() - fr.m_cpos;
-    sort ** new_domain = reinterpret_cast<sort**>(m_result_stack.c_ptr() + fr.m_rpos + num_extra);
+    sort ** new_domain = reinterpret_cast<sort**>(m_result_stack.data() + fr.m_rpos + num_extra);
     sort *  new_range  = static_cast<sort*>(m_result_stack.back());  
     func_decl * new_f;
     if (fi == nullptr) {
@@ -153,13 +193,17 @@ void ast_translation::mk_func_decl(func_decl * f, frame & fr) {
                                           new_domain,
                                           new_range);
     }
+    else if (f->is_polymorphic() && m_from_manager.poly_root(f) != f) {
+        func_decl* fr = to_func_decl(m_cache[m_from_manager.poly_root(f)]);
+        new_f = m_to_manager.instantiate_polymorphic(fr, f->get_arity(), new_domain, new_range);
+    }
     else {
         buffer<parameter> ps;
         copy_params(f, fr.m_rpos, ps);
         func_decl_info new_fi(fi->get_family_id(),
                               fi->get_decl_kind(),
                               fi->get_num_parameters(),
-                              ps.c_ptr());
+                              ps.data());
 
         new_fi.set_left_associative(fi->is_left_associative());
         new_fi.set_right_associative(fi->is_right_associative());
@@ -168,7 +212,7 @@ void ast_translation::mk_func_decl(func_decl * f, frame & fr) {
         new_fi.set_chainable(fi->is_chainable());
         new_fi.set_pairwise(fi->is_pairwise());
         new_fi.set_injective(fi->is_injective());
-/// TBD        new_fi.set_skolem(fi->is_skolem()); 
+        new_fi.set_skolem(fi->is_skolem()); 
         new_fi.set_idempotent(fi->is_idempotent());
 
         new_f = m_to_manager.mk_func_decl(f->get_name(),
@@ -177,7 +221,7 @@ void ast_translation::mk_func_decl(func_decl * f, frame & fr) {
                                           new_range,
                                           new_fi);
     }
-    TRACE("ast_translation", 
+    TRACE(ast_translation, 
           tout << f->get_name() << " "; if (fi) tout << *fi; tout << "\n";
           tout << "---->\n";
           tout << new_f->get_name() << " "; if (new_f->get_info()) tout << *(new_f->get_info()); tout << "\n";);
@@ -207,14 +251,14 @@ ast * ast_translation::process(ast const * _n) {
             frame & fr = m_frame_stack.back();
             ast * n = fr.m_n;
             ast * r;         
-            TRACE("ast_translation", tout << mk_ll_pp(n, m_from_manager, false) << "\n";);
+            TRACE(ast_translation, tout << mk_ll_pp(n, m_from_manager, false) << "\n";);
             if (fr.m_idx == 0 && n->get_ref_count() > 1) {
                 if (m_cache.find(n, r)) {
                     SASSERT(m_result_stack.size() == fr.m_rpos);
                     m_result_stack.push_back(r);
                     m_extra_children_stack.shrink(fr.m_cpos);
                     m_frame_stack.pop_back();
-                    TRACE("ast_translation", tout << "hit\n";);
+                    TRACE(ast_translation, tout << "hit\n";);
                     m_hit_count++;
                     continue;
                 }
@@ -251,7 +295,7 @@ ast * ast_translation::process(ast const * _n) {
                         goto loop;
                 }
                 func_decl * new_f   = to_func_decl(m_result_stack[fr.m_rpos]);
-                expr ** new_args    = reinterpret_cast<expr **>(m_result_stack.c_ptr() + fr.m_rpos + 1);
+                expr ** new_args    = reinterpret_cast<expr **>(m_result_stack.data() + fr.m_rpos + 1);
                 expr *  new_app     = m_to_manager.mk_app(new_f, num, new_args);
                 m_result_stack.shrink(fr.m_rpos);
                 m_result_stack.push_back(new_app);
@@ -273,10 +317,10 @@ ast * ast_translation::process(ast const * _n) {
                         goto loop;
                 }
                 symbol const * dnames = to_quantifier(n)->get_decl_names();
-                sort **  dsorts       = reinterpret_cast<sort**>(m_result_stack.c_ptr() + fr.m_rpos);
+                sort **  dsorts       = reinterpret_cast<sort**>(m_result_stack.data() + fr.m_rpos);
                 expr *   body         = static_cast<expr*>(m_result_stack[fr.m_rpos + num_decls]);
                 unsigned num_pats     = to_quantifier(n)->get_num_patterns();
-                expr **  pats         = reinterpret_cast<expr**>(m_result_stack.c_ptr() + fr.m_rpos + num_decls + 1);
+                expr **  pats         = reinterpret_cast<expr**>(m_result_stack.data() + fr.m_rpos + num_decls + 1);
                 unsigned num_no_pats  = to_quantifier(n)->get_num_no_patterns();
                 expr **  no_pats      = pats + num_pats;
                 quantifier * new_q    = m_to_manager.mk_quantifier(to_quantifier(n)->get_kind(),
@@ -327,9 +371,6 @@ ast * ast_translation::process(ast const * _n) {
                 mk_func_decl(to_func_decl(n), fr);
                 break;
             }
-            default:
-                UNREACHABLE();
-                break;
             }
         }
     }
@@ -346,8 +387,8 @@ expr_dependency * expr_dependency_translation::operator()(expr_dependency * d) {
     m_translation.from().linearize(d, m_buffer);
     unsigned sz = m_buffer.size();
     SASSERT(sz >= 1);
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         m_buffer[i] = m_translation(m_buffer[i]);
     }
-    return m_translation.to().mk_join(sz, m_buffer.c_ptr());
+    return m_translation.to().mk_join(sz, m_buffer.data());
 }

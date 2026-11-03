@@ -16,12 +16,19 @@ Author:
 Revision History:
 
 --*/
-#ifndef HAS_FREE_VARS_H_
-#define HAS_FREE_VARS_H_
+#pragma once
 
 class expr;
 
+class contains_vars {
+    class imp;
+    imp* m_imp;
+public:
+    contains_vars();
+    ~contains_vars();
+    bool operator()(expr* n);
+};
+
 bool has_free_vars(expr * n);
 
-#endif /* HAS_FREE_VARS_H_ */
 

@@ -2,21 +2,24 @@ z3_add_component(smt
   SOURCES
     arith_eq_adapter.cpp
     arith_eq_solver.cpp
-    asserted_formulas.cpp
-    cached_var_subst.cpp
-    cost_evaluator.cpp
     dyn_ack.cpp
-    elim_term_ite.cpp
     expr_context_simplifier.cpp
     fingerprints.cpp
     mam.cpp
     old_interval.cpp
     qi_queue.cpp
+    seq_axioms.cpp
+    seq_eq_solver.cpp
+    seq_ne_solver.cpp
+    seq_offset_eq.cpp
+    seq_regex.cpp
     smt_almost_cg_table.cpp
+    smt_arith_value.cpp
     smt_case_split_queue.cpp
     smt_cg_table.cpp
     smt_checker.cpp
     smt_clause.cpp
+    smt_clause_proof.cpp
     smt_conflict_resolution.cpp
     smt_consequences.cpp
     smt_context.cpp
@@ -26,16 +29,18 @@ z3_add_component(smt
     smt_enode.cpp
     smt_farkas_util.cpp
     smt_for_each_relevant_expr.cpp
+    smt_ho_qsolver.cpp
     smt_implied_equalities.cpp
     smt_internalizer.cpp
     smt_justification.cpp
     smt_kernel.cpp
     smt_literal.cpp
+    smt_lookahead.cpp
     smt_model_checker.cpp
     smt_model_finder.cpp
     smt_model_generator.cpp
+    smt_parallel.cpp
     smt_quantifier.cpp
-    smt_quantifier_stat.cpp
     smt_quick_checker.cpp
     smt_relevancy.cpp
     smt_setup.cpp
@@ -49,25 +54,36 @@ z3_add_component(smt
     theory_array.cpp
     theory_array_full.cpp
     theory_bv.cpp
+    theory_char.cpp
     theory_datatype.cpp
     theory_dense_diff_logic.cpp
+    theory_finite_set.cpp
+    theory_finite_set_size.cpp
     theory_diff_logic.cpp
     theory_dl.cpp
     theory_dummy.cpp
     theory_fpa.cpp
+    theory_ff.cpp
+    theory_intblast.cpp
     theory_lra.cpp
     theory_opt.cpp
     theory_pb.cpp
+    theory_recfun.cpp
     theory_seq.cpp
-    theory_str.cpp
+    theory_sls.cpp
+    theory_special_relations.cpp    
+    theory_user_propagator.cpp
     theory_utvpi.cpp
     theory_wmaxsat.cpp
     uses_theory.cpp
     watch_list.cpp
   COMPONENT_DEPENDENCIES
+    seq
+    solver_assertions
     bit_blaster
     cmd_context
-    euclid
+    ff
+    ff_ast
     fpa
     grobner
     nlsat
@@ -76,8 +92,12 @@ z3_add_component(smt
     normal_forms
     parser_util
     pattern
+    polynomial
     proofs
     proto_model
     simplex
     substitution
 )
+
+add_subdirectory(proto_model)
+add_subdirectory(tactic)

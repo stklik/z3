@@ -10,7 +10,7 @@ Copyright (c) 2017 Arie Gurfinkel
 #include "ast/rewriter/bool_rewriter.h"
 #include "muz/base/dl_util.h"
 #include "ast/for_each_expr.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "model/model.h"
 #include "util/ref_vector.h"
 #include "ast/rewriter/rewriter.h"
@@ -23,7 +23,7 @@ Copyright (c) 2017 Arie Gurfinkel
 #include "ast/rewriter/expr_replacer.h"
 #include "model/model_smt2_pp.h"
 #include "ast/scoped_proof.h"
-#include "qe/qe_lite.h"
+#include "qe/lite/qe_lite_tactic.h"
 #include "muz/spacer/spacer_qe_project.h"
 #include "model/model_pp.h"
 #include "ast/rewriter/expr_safe_replace.h"
@@ -51,7 +51,7 @@ void model_evaluator::assign_value(expr* e, expr* val)
         set_value(e, val);
     } else {
         IF_VERBOSE(3, verbose_stream() << "Not evaluated " << mk_pp(e, m) << "\n";);
-        TRACE("old_spacer", tout << "Variable is not tracked: " << mk_pp(e, m) << "\n";);
+        TRACE(old_spacer, tout << "Variable is not tracked: " << mk_pp(e, m) << "\n";);
         set_x(e);
     }
 }
@@ -63,7 +63,7 @@ void model_evaluator::setup_model(const model_ref& model)
     m_model = model.get();
     rational r;
     unsigned sz = model->get_num_constants();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         func_decl * d = model->get_constant(i);
         expr* val = model->get_const_interp(d);
         expr* e = m.mk_const(d);
@@ -88,7 +88,7 @@ void model_evaluator::minimize_literals(ptr_vector<expr> const& formulas,
                                         const model_ref& mdl, expr_ref_vector& result)
 {
 
-    TRACE("old_spacer",
+    TRACE(old_spacer,
           tout << "formulas:\n";
           for (unsigned i = 0; i < formulas.size(); ++i) tout << mk_pp(formulas[i], m) << "\n";
          );
@@ -118,7 +118,7 @@ void model_evaluator::minimize_literals(ptr_vector<expr> const& formulas,
         }
     }
     reset();
-    TRACE("old_spacer",
+    TRACE(old_spacer,
           tout << "minimized model:\n";
           for (unsigned i = 0; i < result.size(); ++i) tout << mk_pp(result[i].get(), m) << "\n";
          );
@@ -363,7 +363,7 @@ void model_evaluator::inherit_value(expr* e, expr* v)
 {
     expr* w;
     SASSERT(!is_unknown(v));
-    SASSERT(m.get_sort(e) == m.get_sort(v));
+    SASSERT(e->get_sort() == v->get_sort());
     if (is_x(v)) {
         set_x(e);
     } else if (m.is_bool(e)) {
@@ -371,7 +371,7 @@ void model_evaluator::inherit_value(expr* e, expr* v)
         if (is_true(v)) { set_true(e); }
         else if (is_false(v)) { set_false(e); }
         else {
-            TRACE("old_spacer", tout << "not inherited:\n" << mk_pp(e, m) << "\n" << mk_pp(v, m) << "\n";);
+            TRACE(old_spacer, tout << "not inherited:\n" << mk_pp(e, m) << "\n" << mk_pp(v, m) << "\n";);
             set_x(e);
         }
     } else if (m_arith.is_int_real(e)) {
@@ -381,7 +381,7 @@ void model_evaluator::inherit_value(expr* e, expr* v)
     } else if (m_values.find(v, w)) {
         set_value(e, w);
     } else {
-        TRACE("old_spacer", tout << "not inherited:\n" << mk_pp(e, m) << "\n" << mk_pp(v, m) << "\n";);
+        TRACE(old_spacer, tout << "not inherited:\n" << mk_pp(e, m) << "\n" << mk_pp(v, m) << "\n";);
         set_x(e);
     }
 }
@@ -400,7 +400,7 @@ bool model_evaluator::extract_array_func_interp(expr* a, vector<expr_ref_vector>
 {
     SASSERT(m_array.is_array(a));
 
-    TRACE("old_spacer", tout << mk_pp(a, m) << "\n";);
+    TRACE(old_spacer, tout << mk_pp(a, m) << "\n";);
     while (m_array.is_store(a)) {
         expr_ref_vector store(m);
         store.append(to_app(a)->get_num_args() - 1, to_app(a)->get_args() + 1);
@@ -426,7 +426,7 @@ bool model_evaluator::extract_array_func_interp(expr* a, vector<expr_ref_vector>
             store.push_back(fe->get_result());
             for (unsigned j = 0; j < store.size(); ++j) {
                 if (!is_ground(store[j].get())) {
-                    TRACE("old_spacer", tout << "could not extract array interpretation: " << mk_pp(a, m) << "\n" << mk_pp(store[j].get(), m) << "\n";);
+                    TRACE(old_spacer, tout << "could not extract array interpretation: " << mk_pp(a, m) << "\n" << mk_pp(store[j].get(), m) << "\n";);
                     return false;
                 }
             }
@@ -435,21 +435,21 @@ bool model_evaluator::extract_array_func_interp(expr* a, vector<expr_ref_vector>
         }
         else_case = g->get_else();
         if (!else_case) {
-            TRACE("old_spacer", tout << "no else case " << mk_pp(a, m) << "\n";);
+            TRACE(old_spacer, tout << "no else case " << mk_pp(a, m) << "\n";);
             return false;
         }
         if (!is_ground(else_case)) {
-            TRACE("old_spacer", tout << "non-ground else case " << mk_pp(a, m) << "\n" << mk_pp(else_case, m) << "\n";);
+            TRACE(old_spacer, tout << "non-ground else case " << mk_pp(a, m) << "\n" << mk_pp(else_case, m) << "\n";);
             return false;
         }
         if (m_array.is_as_array(else_case)) {
             model_ref mr(m_model);
             else_case = eval(mr, else_case);
         }
-        TRACE("old_spacer", tout << "else case: " << mk_pp(else_case, m) << "\n";);
+        TRACE(old_spacer, tout << "else case: " << mk_pp(else_case, m) << "\n";);
         return true;
     }
-    TRACE("old_spacer", tout << "no translation: " << mk_pp(a, m) << "\n";);
+    TRACE(old_spacer, tout << "no translation: " << mk_pp(a, m) << "\n";);
 
     return false;
 }
@@ -459,7 +459,7 @@ bool model_evaluator::extract_array_func_interp(expr* a, vector<expr_ref_vector>
 */
 void model_evaluator::eval_array_eq(app* e, expr* arg1, expr* arg2)
 {
-    TRACE("old_spacer", tout << "array equality: " << mk_pp(e, m) << "\n";);
+    TRACE(old_spacer, tout << "array equality: " << mk_pp(e, m) << "\n";);
     expr_ref v1(m), v2(m);
     v1 = (*m_model)(arg1);
     v2 = (*m_model)(arg2);
@@ -467,11 +467,11 @@ void model_evaluator::eval_array_eq(app* e, expr* arg1, expr* arg2)
         set_true(e);
         return;
     }
-    sort* s = m.get_sort(arg1);
+    sort* s = arg1->get_sort();
     sort* r = get_array_range(s);
     // give up evaluating finite domain/range arrays
     if (!r->is_infinite() && !r->is_very_big() && !s->is_infinite() && !s->is_very_big()) {
-        TRACE("old_spacer", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+        TRACE(old_spacer, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
         set_x(e);
         return;
     }
@@ -479,21 +479,21 @@ void model_evaluator::eval_array_eq(app* e, expr* arg1, expr* arg2)
     expr_ref else1(m), else2(m);
     if (!extract_array_func_interp(v1, store, else1) ||
             !extract_array_func_interp(v2, store, else2)) {
-        TRACE("old_spacer", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+        TRACE(old_spacer, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
         set_x(e);
         return;
     }
 
     if (else1 != else2) {
         if (m.is_value(else1) && m.is_value(else2)) {
-            TRACE("old_spacer", tout
+            TRACE(old_spacer, tout
                   << "defaults are different: " << mk_pp(e, m) << " "
                   << mk_pp(else1, m) << " " << mk_pp(else2, m) << "\n";);
             set_false(e);
         } else if (m_array.is_array(else1)) {
             eval_array_eq(e, else1, else2);
         } else {
-            TRACE("old_spacer", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+            TRACE(old_spacer, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
             set_x(e);
         }
         return;
@@ -506,17 +506,17 @@ void model_evaluator::eval_array_eq(app* e, expr* arg1, expr* arg2)
     for (unsigned i = 0; i < store.size(); ++i) {
         args1.resize(1);
         args2.resize(1);
-        args1.append(store[i].size() - 1, store[i].c_ptr());
-        args2.append(store[i].size() - 1, store[i].c_ptr());
-        s1 = m_array.mk_select(args1.size(), args1.c_ptr());
-        s2 = m_array.mk_select(args2.size(), args2.c_ptr());
+        args1.append(store[i].size() - 1, store[i].data());
+        args2.append(store[i].size() - 1, store[i].data());
+        s1 = m_array.mk_select(args1.size(), args1.data());
+        s2 = m_array.mk_select(args2.size(), args2.data());
         w1 = (*m_model)(s1);
         w2 = (*m_model)(s2);
         if (w1 == w2) {
             continue;
         }
         if (m.is_value(w1) && m.is_value(w2)) {
-            TRACE("old_spacer", tout << "Equality evaluation: " << mk_pp(e, m) << "\n";
+            TRACE(old_spacer, tout << "Equality evaluation: " << mk_pp(e, m) << "\n";
                   tout << mk_pp(s1, m) << " |-> " << mk_pp(w1, m) << "\n";
                   tout << mk_pp(s2, m) << " |-> " << mk_pp(w2, m) << "\n";);
             set_false(e);
@@ -526,7 +526,7 @@ void model_evaluator::eval_array_eq(app* e, expr* arg1, expr* arg2)
                 continue;
             }
         } else {
-            TRACE("old_spacer", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+            TRACE(old_spacer, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
             set_x(e);
         }
         return;
@@ -560,7 +560,7 @@ void model_evaluator::eval_eq(app* e, expr* arg1, expr* arg2)
         } else if (e1 == e2) {
             set_bool(e, true);
         } else {
-            TRACE("old_spacer", tout << "not value equal:\n" << mk_pp(e1, m) << "\n" << mk_pp(e2, m) << "\n";);
+            TRACE(old_spacer, tout << "not value equal:\n" << mk_pp(e1, m) << "\n" << mk_pp(e2, m) << "\n";);
             set_x(e);
         }
     }
@@ -568,8 +568,8 @@ void model_evaluator::eval_eq(app* e, expr* arg1, expr* arg2)
 
 void model_evaluator::eval_basic(app* e)
 {
-    expr* arg1, *arg2;
-    expr *argCond, *argThen, *argElse, *arg;
+    expr* arg1 = nullptr, *arg2 = nullptr;
+    expr *argCond = nullptr, *argThen = nullptr, *argElse = nullptr, *arg = nullptr;
     bool has_x = false;
     unsigned arity = e->get_num_args();
     switch (e->get_decl_kind()) {
@@ -746,7 +746,7 @@ bool model_evaluator::check_model(ptr_vector<expr> const& formulas)
     for (unsigned i = 0; i < formulas.size(); ++i) {
         expr * form = formulas[i];
         SASSERT(!is_unknown(form));
-        TRACE("spacer_verbose",
+        TRACE(spacer_verbose,
               tout << "formula is " << (is_true(form) ? "true" : is_false(form) ? "false" : "unknown") << "\n" << mk_pp(form, m) << "\n";);
 
         if (is_false(form)) {
@@ -755,7 +755,7 @@ bool model_evaluator::check_model(ptr_vector<expr> const& formulas)
         }
         if (is_x(form)) {
             IF_VERBOSE(0, verbose_stream() << "formula undetermined in model: " << mk_pp(form, m) << "\n";);
-            TRACE("old_spacer", model_smt2_pp(tout, m, *m_model, 0););
+            TRACE(old_spacer, model_smt2_pp(tout, m, *m_model, 0););
             has_x = true;
         }
     }
@@ -807,7 +807,7 @@ expr_ref model_evaluator::eval(const model_ref& model, expr* e){
         expr_ref_vector args(m);
         expr_ref else_case(m);
         if (extract_array_func_interp(result, stores, else_case)) {
-            result = m_array.mk_const_array(m.get_sort(e), else_case);
+            result = m_array.mk_const_array(e->get_sort(), else_case);
             while (!stores.empty() && stores.back().back() == else_case) {
                 stores.pop_back();
             }
@@ -816,7 +816,7 @@ expr_ref model_evaluator::eval(const model_ref& model, expr* e){
                 args.resize(1);
                 args[0] = result;
                 args.append(stores[i]);
-                result = m_array.mk_store(args.size(), args.c_ptr());
+                result = m_array.mk_store(args);
             }
             return result;
         }

@@ -76,7 +76,7 @@ void factor_eqs(expr_ref_vector &v, expr_equiv_class &equiv) {
  */
 expr *choose_rep(expr_equiv_class::eq_class &clazz, ast_manager &m) {
     expr *rep = nullptr;
-    unsigned rep_sz, elem_sz;
+    unsigned rep_sz = 0, elem_sz;
     for (expr *elem : clazz) {
         if (!m.is_value(elem)) {
             elem_sz = get_num_exprs(elem);
@@ -86,7 +86,7 @@ expr *choose_rep(expr_equiv_class::eq_class &clazz, ast_manager &m) {
             }
         }
     }
-    TRACE("equiv",
+    TRACE(equiv,
           tout << "Rep: " << mk_pp(rep, m) << "\n";
           for (expr *el : clazz)
               tout << mk_pp(el, m) << "\n";

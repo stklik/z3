@@ -21,7 +21,32 @@ Abstract:
     q with y2=1
     where y1 and y2 are fresh 01 variables
 
-    The clauses are also removed.
+
+    Issue #5316:
+    It is in general unsound to remove clauses.
+    Example:
+
+    v or x = 0
+    ~v or x = 0
+    v or ~x = 0
+    ~v or ~x = 0
+
+    The function introduces the fresh variable 0-1 y for v.
+    The first two clauses produce the replacement x := 0*y
+    and substitution (x = 0) |-> y = 1.
+
+    After substitution:
+    y = 1 or ~(y = 1)
+    ~(y = 1) or ~(y = 1)
+    
+   By retaining clauses that introduced the replacement
+   the claim is that we ensure soundness. The solution ~(y = 1)
+   is validated against the original clauses 
+    v or x = 0
+    ~v or x = 0
+   that are expanded into
+    y = 1 or (y = 1)
+    ~(y = 1) or (y = 1)
 
 Author:
 
@@ -32,11 +57,12 @@ Revision History:
 --*/
 #include "tactic/tactical.h"
 #include "ast/rewriter/th_rewriter.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/expr_substitution.h"
 #include "util/dec_ref_util.h"
 #include "ast/ast_smt2_pp.h"
+#include "ast/ast_pp.h"
 
 class recover_01_tactic : public tactic {
     struct imp {
@@ -73,9 +99,7 @@ class recover_01_tactic : public tactic {
             app * cls   = to_app(c);
             if (cls->get_num_args() <= 1 || cls->get_num_args() >= m_cls_max_size)
                 return false;
-            unsigned sz = cls->get_num_args();
-            for (unsigned i = 0; i < sz; i++) {
-                expr * lit = cls->get_arg(i);
+            for (expr* lit : *cls) {
                 expr * lhs, * rhs, * arg;
                 if (is_uninterp_const(lit)) {
                     // positive literal
@@ -101,9 +125,9 @@ class recover_01_tactic : public tactic {
             }
             
             if (x != nullptr) {
-                var2clauses::obj_map_entry * entry = m_var2clauses.insert_if_not_there2(x, ptr_vector<app>());
-                if (entry->get_data().m_value.empty() || entry->get_data().m_value.back()->get_num_args() == cls->get_num_args()) {
-                    entry->get_data().m_value.push_back(cls);
+                auto& value = m_var2clauses.insert_if_not_there(x, ptr_vector<app>());
+                if (value.empty() || value.back()->get_num_args() == cls->get_num_args()) {
+                    value.push_back(cls);
                     return true;
                 }
             }
@@ -117,14 +141,10 @@ class recover_01_tactic : public tactic {
         obj_map<expr, expr *>       bool2int;
         
         app * find_zero_cls(func_decl * x, ptr_vector<app> & clauses) {
-            ptr_vector<app>::iterator it  = clauses.begin();
-            ptr_vector<app>::iterator end = clauses.end();
-            for (; it != end; ++it) {
-                app * cls = *it;
-                unsigned num = cls->get_num_args();
-                for (unsigned i = 0; i < num; i++) {
+            for (app * cls : clauses) {
+                for (expr* arg : *cls) {
                     expr * lhs, * rhs;
-                    if (m.is_eq(cls->get_arg(i), lhs, rhs)) {
+                    if (m.is_eq(arg, lhs, rhs)) {
                         if (is_uninterp_const(lhs) && m_util.is_zero(rhs))
                             return cls;
                         if (is_uninterp_const(rhs) && m_util.is_zero(lhs))
@@ -149,13 +169,13 @@ class recover_01_tactic : public tactic {
                 return false;
             idx = 0;
             unsigned val = 1;
-            for (unsigned i = 0; i < num; i++) {
+            for (unsigned i = 0; i < num; ++i) {
                 expr * lit = zero_cls->get_arg(i);
                 if (m.is_eq(lit))
                     continue;
                 // search for lit or ~lit in cls
                 unsigned j;
-                for (j = 0; j < num; j++) {
+                for (j = 0; j < num; ++j) {
                     expr * lit2 = cls->get_arg(j);
                     if (m.is_eq(lit2))
                         continue;
@@ -173,7 +193,7 @@ class recover_01_tactic : public tactic {
             
             // find k
             unsigned i;
-            for (i = 0; i < num; i++) {
+            for (i = 0; i < num; ++i) {
                 expr * lhs, * rhs;
                 if (m.is_eq(cls->get_arg(i), lhs, rhs) && (m_util.is_numeral(lhs, k) || m_util.is_numeral(rhs, k)))
                     break;
@@ -231,10 +251,7 @@ class recover_01_tactic : public tactic {
             found.resize(expected_num_clauses, false);
             idx2coeff.resize(expected_num_clauses); 
             
-            ptr_vector<app>::iterator it  = clauses.begin();
-            ptr_vector<app>::iterator end = clauses.end();
-            for (; it != end; ++it) {
-                app * cls = *it;
+            for (app * cls : clauses) {
                 unsigned idx; rational k;
                 if (!find_coeff(cls, zero_cls, idx, k)) 
                     return false;
@@ -247,13 +264,13 @@ class recover_01_tactic : public tactic {
             
             unsigned num_bits = cls_size - 1;
             // check if idxs are consistent
-            for (unsigned idx = 0; idx < expected_num_clauses; idx++) {
+            for (unsigned idx = 0; idx < expected_num_clauses; ++idx) {
                 if (!found[idx]) 
                     return false; // case is missing
                 rational expected_k;
                 unsigned idx_aux = idx;
                 unsigned idx_bit = 1;
-                for (unsigned j = 0; j < num_bits; j++) {
+                for (unsigned j = 0; j < num_bits; ++j) {
                     if (idx_aux % 2 == 1) {
                         expected_k += idx2coeff[idx_bit];
                     }
@@ -268,7 +285,7 @@ class recover_01_tactic : public tactic {
             expr_ref def(m);
             bool real_ctx = m_util.is_real(x->get_range());
             unsigned idx_bit = 1;
-            for (unsigned i = 0; i < cls_size; i++) {
+            for (unsigned i = 0; i < cls_size; ++i) {
                 expr * lit = zero_cls->get_arg(i);
                 if (m.is_eq(lit))
                     continue;
@@ -281,9 +298,9 @@ class recover_01_tactic : public tactic {
             if (def_args.size() == 1)
                 x_def = def_args[0];
             else
-                x_def = m_util.mk_add(def_args.size(), def_args.c_ptr());
-            
-            TRACE("recover_01", tout << x->get_name() << " --> " << mk_ismt2_pp(x_def, m) << "\n";);
+                x_def = m_util.mk_add(def_args);
+        
+            TRACE(recover_01, tout << x->get_name() << " --> " << mk_ismt2_pp(x_def, m) << "\n";);
             subst->insert(m.mk_const(x), x_def);
             if (m_produce_models) {
                 gmc->add(x, x_def);
@@ -293,7 +310,6 @@ class recover_01_tactic : public tactic {
     
         void operator()(goal_ref const & g, 
                         goal_ref_buffer & result) {
-            SASSERT(g->is_well_sorted());
             fail_if_proof_generation("recover-01", g);
             fail_if_unsat_core_generation("recover-01", g);
             m_produce_models      = g->models_enabled();
@@ -305,18 +321,12 @@ class recover_01_tactic : public tactic {
             SASSERT(new_goal->depth() == g->depth());
             SASSERT(new_goal->prec() == g->prec());
             new_goal->inc_depth();
-            new_goal->add(g->mc());
-            new_goal->add(g->pc());
 
-            unsigned sz = g->size();
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < g->size(); ++i) {
                 expr * f = g->form(i);
-                if (save_clause(f)) {
+                if (save_clause(f)) 
                     saved = true;
-                }
-                else {
-                    new_goal->assert_expr(f);
-                }
+                new_goal->assert_expr(f);
             }
             
             if (!saved) {
@@ -357,15 +367,14 @@ class recover_01_tactic : public tactic {
             m_rw.set_substitution(subst);
             expr_ref   new_curr(m);
             proof_ref  new_pr(m);
-            unsigned size = new_goal->size();
-            for (unsigned idx = 0; idx < size; idx++) {
+            for (unsigned idx = 0; idx < new_goal->size(); ++idx) {
                 expr * curr = new_goal->form(idx);
                 m_rw(curr, new_curr);
                 new_goal->update(idx, new_curr);
             }
             result.push_back(new_goal.get());
-            TRACE("recover_01", new_goal->display(tout););
-            SASSERT(new_goal->is_well_sorted());
+            TRACE(recover_01, new_goal->display(tout); if (new_goal->mc()) new_goal->mc()->display(tout););
+            SASSERT(new_goal->is_well_formed());
         }
         
         ~imp() {
@@ -389,14 +398,16 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "recover_01"; }
+
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {
         th_rewriter::get_param_descrs(r);
-        r.insert("recover_01_max_bits", CPK_UINT, "(default: 10) maximum number of bits to consider in a clause.");
+        r.insert("recover_01_max_bits", CPK_UINT, "maximum number of bits to consider in a clause.", "10");
     }
 
     void operator()(goal_ref const & g, 
@@ -405,7 +416,7 @@ public:
             (*m_imp)(g, result);
         }
         catch (rewriter_exception & ex) {
-            throw tactic_exception(ex.msg());
+            throw tactic_exception(ex.what());
         }
     }
     

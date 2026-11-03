@@ -57,9 +57,8 @@ mpbq_manager::~mpbq_manager() {
 }
 
 void mpbq_manager::reset(mpbq_vector & v) {
-    unsigned sz = v.size();
-    for (unsigned i = 0; i < sz; i++)
-        reset(v[i]);
+    for (auto & e : v) 
+        reset(e);
     v.reset();
 }
 
@@ -164,7 +163,7 @@ void mpbq_manager::add(mpbq const & a, mpz const & b, mpbq & r) {
     normalize(r);
 #ifdef MPBQ_DEBUG
     rational _r = to_rational(r);
-    TRACE("mpbq_bug", tout << "add a: " << _a << ", b: " << _b << ", r: " << _r << ", expected: " << (_a + _b) << "\n";);
+    TRACE(mpbq_bug, tout << "add a: " << _a << ", b: " << _b << ", r: " << _r << ", expected: " << (_a + _b) << "\n";);
     SASSERT(_a + _b == _r);
 #endif 
 }
@@ -192,7 +191,7 @@ void mpbq_manager::sub(mpbq const & a, mpbq const & b, mpbq & r) {
     normalize(r);
 #ifdef MPBQ_DEBUG
     rational _r = to_rational(r);
-    TRACE("mpbq_bug", tout << "sub a: " << _a << ", b: " << _b << ", r: " << _r << ", expected: " << (_a - _b) << "\n";);
+    TRACE(mpbq_bug, tout << "sub a: " << _a << ", b: " << _b << ", r: " << _r << ", expected: " << (_a - _b) << "\n";);
     SASSERT(_a - _b == _r);
 #endif 
 }
@@ -391,23 +390,25 @@ std::string mpbq_manager::to_string(mpbq const & a) {
     return buffer.str();
 }
 
-void mpbq_manager::display(std::ostream & out, mpbq const & a) {
+std::ostream& mpbq_manager::display(std::ostream & out, mpbq const & a) {
     out << m_manager.to_string(a.m_num);
     if (a.m_k > 0)
         out << "/2";
     if (a.m_k > 1)
         out << "^" << a.m_k;
+    return out;
 }
 
-void mpbq_manager::display_pp(std::ostream & out, mpbq const & a) {
+std::ostream& mpbq_manager::display_pp(std::ostream & out, mpbq const & a) {
     out << m_manager.to_string(a.m_num);
     if (a.m_k > 0)
         out << "/2";
     if (a.m_k > 1)
         out << "<sup>" << a.m_k << "</sup>";
+    return out;
 }
 
-void mpbq_manager::display_smt2(std::ostream & out, mpbq const & a, bool decimal) {
+std::ostream& mpbq_manager::display_smt2(std::ostream & out, mpbq const & a, bool decimal) {
     if (a.m_k == 0) {
         m_manager.display_smt2(out, a.m_num, decimal);
     }
@@ -421,12 +422,12 @@ void mpbq_manager::display_smt2(std::ostream & out, mpbq const & a, bool decimal
         if (decimal) out << ".0";
         out << "))";
     }
+    return out;
 }
 
-void mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, unsigned prec) {
+std::ostream& mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, unsigned prec) {
     if (is_int(a)) {
-        out << m_manager.to_string(a.m_num);
-        return;
+        return out << m_manager.to_string(a.m_num);
     }
     mpz two(2);
     mpz ten(10);
@@ -442,7 +443,7 @@ void mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, unsigned 
     SASSERT(!m_manager.is_zero(n1));
     out << m_manager.to_string(v1);
     out << ".";
-    for (unsigned i = 0; i < prec; i++) {
+    for (unsigned i = 0; i < prec; ++i) {
         m_manager.mul(n1, ten, n1);
         m_manager.div(n1, two_k, v1);
         m_manager.rem(n1, two_k, n1);
@@ -455,17 +456,16 @@ void mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, unsigned 
     m_manager.del(n1);
     m_manager.del(v1);
     m_manager.del(two_k);
+    return out;
 }
 
-void mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, mpbq const & b, unsigned prec) {
+std::ostream& mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, mpbq const & b, unsigned prec) {
     mpz two(2);
     mpz ten(10);
     mpz two_k1, two_k2;
     mpz n1, v1, n2, v2;
-    if (m_manager.is_neg(a.m_num) != m_manager.is_neg(b.m_num)) {
-        out << "?";
-        return;
-    }
+    if (m_manager.is_neg(a.m_num) != m_manager.is_neg(b.m_num)) 
+        return out << "?";
     if (m_manager.is_neg(a.m_num))
         out << "-";
     m_manager.set(v1, a.m_num);
@@ -487,7 +487,7 @@ void mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, mpbq cons
     if (m_manager.is_zero(n1) && m_manager.is_zero(n2))
         goto end; // number is an integer
     out << ".";
-    for (unsigned i = 0; i < prec; i++) {
+    for (unsigned i = 0; i < prec; ++i) {
         m_manager.mul(n1, ten, n1);
         m_manager.mul(n2, ten, n2);
         m_manager.div(n1, two_k1, v1);
@@ -512,6 +512,7 @@ void mpbq_manager::display_decimal(std::ostream & out, mpbq const & a, mpbq cons
     m_manager.del(v2);
     m_manager.del(two_k1);
     m_manager.del(two_k2);
+    return out;
 }
 
 bool mpbq_manager::to_mpbq(mpq const & q, mpbq & bq) {
@@ -749,7 +750,7 @@ bool mpbq_manager::select_small(mpbq const & lower, mpbq const & upper, mpbq & r
 
 
 void mpbq_manager::select_small_core(unsynch_mpq_manager & qm, mpq const & lower, mpbq const & upper, mpbq & r) {
-    TRACE("select_small", tout << "lower (q): " << qm.to_string(lower) << ", upper (bq): " << to_string(upper) << "\n";);
+    TRACE(select_small, tout << "lower (q): " << qm.to_string(lower) << ", upper (bq): " << to_string(upper) << "\n";);
     SASSERT(gt(upper, lower));
     mpz & aux = m_select_small_tmp;
     if (select_integer(qm, lower, upper, aux)) {

@@ -19,18 +19,16 @@ Author:
 Revision History:
 
 --*/
-#ifndef EXPR_STAT_H_
-#define EXPR_STAT_H_
+#pragma once
 
 class expr;
 
 struct expr_stat {
-    unsigned m_sym_count; // symbol count
-    unsigned m_depth;     // depth
-    unsigned m_const_count; // constant count
-    unsigned m_max_var_idx;  
-    bool     m_ground;
-    expr_stat():m_sym_count(0), m_depth(0), m_const_count(0), m_max_var_idx(0), m_ground(true) {}
+    unsigned m_sym_count = 0; // symbol count
+    unsigned m_depth = 0;     // depth
+    unsigned m_const_count = 0; // constant count
+    unsigned m_max_var_idx = 0;  
+    bool     m_ground = true;
 };
 
 /**
@@ -47,4 +45,3 @@ void get_expr_stat(expr * n, expr_stat & r);
 */
 unsigned get_symbol_count(expr * n);
 
-#endif /* EXPR_STAT_H_ */

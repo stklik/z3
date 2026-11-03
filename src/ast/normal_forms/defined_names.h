@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DEFINED_NAMES_H_
-#define DEFINED_NAMES_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -85,10 +84,8 @@ public:
     void push();
     void pop(unsigned num_scopes);
     void reset();
+    void translate(defined_names const& src, ast_translation& tr);
 
     unsigned get_num_names() const;
     func_decl * get_name_decl(unsigned i) const;
 };
-
-#endif /* DEFINED_NAMES_H_ */
-

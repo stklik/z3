@@ -17,11 +17,10 @@ Author:
 Notes:
 
 --*/
-#ifndef BVARRAY2UF_REWRITER_H_
-#define BVARRAY2UF_REWRITER_H_
+#pragma once
 
 #include "ast/rewriter/rewriter.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 
 class bvarray2uf_rewriter_cfg : public default_rewriter_cfg {
     ast_manager       & m_manager;
@@ -80,5 +79,4 @@ struct bvarray2uf_rewriter : public rewriter_tpl<bvarray2uf_rewriter_cfg> {
     void set_mcs(generic_model_converter * fmc) { m_cfg.set_mcs(fmc); }
 };
 
-#endif
 

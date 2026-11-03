@@ -30,7 +30,7 @@ Revision History:
 #include "model/model.h"
 #include "solver/solver.h"
 
-namespace smt {
+namespace {
 
     class get_implied_equalities_impl {
         
@@ -57,8 +57,8 @@ namespace smt {
         
         void partition_terms(unsigned num_terms, expr* const* terms, sort2term_ids& termids) {
             for (unsigned i = 0; i < num_terms; ++i) {
-                sort* s = m.get_sort(terms[i]);
-                term_ids& vec = termids.insert_if_not_there2(s, term_ids())->get_data().m_value;
+                sort* s = terms[i]->get_sort();
+                term_ids& vec = termids.insert_if_not_there(s, term_ids());
                 vec.push_back(term_id(expr_ref(terms[i],m), i));
             }
         }
@@ -92,13 +92,13 @@ namespace smt {
                     if (j < i && non_values.contains(j)) continue;
                     if (found_root_value && !non_values.contains(j)) continue;
                     expr* s = terms[j].term;
-                    SASSERT(m.get_sort(t) == m.get_sort(s));
+                    SASSERT(t->get_sort() == s->get_sort());
                     ++m_stats_calls;
                     m_solver.push();
                     m_solver.assert_expr(m.mk_not(m.mk_eq(s, t)));
                     bool is_eq = l_false == m_solver.check_sat(0,nullptr);
                     m_solver.pop(1);
-                    TRACE("get_implied_equalities", tout << mk_pp(t, m) << " = " << mk_pp(s, m) << " " << (is_eq?"eq":"unrelated") << "\n";);
+                    TRACE(get_implied_equalities, tout << mk_pp(t, m) << " = " << mk_pp(s, m) << " " << (is_eq?"eq":"unrelated") << "\n";);
                     if (is_eq) {
                         m_uf.merge(terms[i].id, terms[j].id);
                         if (!non_values.contains(j)) {
@@ -118,7 +118,7 @@ namespace smt {
                 expr* t = terms[i].term;
                 for (unsigned j = 0; j < i; ++j) {
                     expr* s = terms[j].term;
-                    SASSERT(m.get_sort(t) == m.get_sort(s));
+                    SASSERT(t->get_sort() == s->get_sort());
                     ++m_stats_calls;
                     m_stats_timer.start();
                     m_solver.push();
@@ -126,7 +126,7 @@ namespace smt {
                     bool is_eq = l_false == m_solver.check_sat(0,nullptr);
                     m_solver.pop(1);
                     m_stats_timer.stop();
-                    TRACE("get_implied_equalities", tout << mk_pp(t, m) << " = " << mk_pp(s, m) << " " << (is_eq?"eq":"unrelated") << "\n";);
+                    TRACE(get_implied_equalities, tout << mk_pp(t, m) << " = " << mk_pp(s, m) << " " << (is_eq?"eq":"unrelated") << "\n";);
                     if (is_eq) {
                         m_uf.merge(terms[i].id, terms[j].id);
                         break;
@@ -148,7 +148,7 @@ namespace smt {
             
             SASSERT(!terms.empty());
 
-            sort* srt = m.get_sort(terms[0].term);
+            sort* srt = terms[0].term->get_sort();
                        
             if (m_array_util.is_array(srt)) {
 
@@ -163,7 +163,7 @@ namespace smt {
                 }
                 for (unsigned i = 0; i < terms.size(); ++i) {
                     args[0] = terms[i].term;
-                    terms[i].term = m.mk_app(m_array_util.get_family_id(), OP_SELECT, 0, nullptr, args.size(), args.c_ptr());
+                    terms[i].term = m.mk_app(m_array_util.get_family_id(), OP_SELECT, 0, nullptr, args.size(), args.data());
                 }
                 assert_relevant(terms);
                 VERIFY(m_solver.check_sat(0,nullptr) != l_false);
@@ -177,7 +177,7 @@ namespace smt {
 
             uint_set non_values;
             
-            if (!is_value_sort(m, srt)) {
+            if (!smt::is_value_sort(m, srt)) {
                 for (unsigned i = 0; i < terms.size(); ++i) {
                     non_values.insert(i);
                 }
@@ -200,15 +200,15 @@ namespace smt {
             for (unsigned i = 0; i < terms.size(); ++i) {
                 expr* t = terms[i].term;
                 vl = (*model)(t);
-                TRACE("get_implied_equalities", tout << mk_pp(t, m) << " |-> " << mk_pp(vl, m) << "\n";);
+                TRACE(get_implied_equalities, tout << mk_pp(t, m) << " |-> " << mk_pp(vl, m) << "\n";);
                 reduce_value(model, vl);
                 if (!m.is_value(vl)) {
-                    TRACE("get_implied_equalities", tout << "Not a value: " << mk_pp(vl, m) << "\n";);
+                    TRACE(get_implied_equalities, tout << "Not a value: " << mk_pp(vl, m) << "\n";);
                     non_values.insert(i);
                     continue;
                 }
                 vals.push_back(vl);
-                unsigned_vector& vec = vals_map.insert_if_not_there2(vl, unsigned_vector())->get_data().m_value;
+                unsigned_vector& vec = vals_map.insert_if_not_there(vl, unsigned_vector());
                 bool found = false;
 
                 for (unsigned j = 0; !found && j < vec.size(); ++j) {
@@ -217,7 +217,7 @@ namespace smt {
                     m_solver.assert_expr(m.mk_not(m.mk_eq(t, s)));
                     lbool is_sat = m_solver.check_sat(0,nullptr);
                     m_solver.pop(1);
-                    TRACE("get_implied_equalities", tout << mk_pp(t, m) << " = " << mk_pp(s, m) << " " << is_sat << "\n";);
+                    TRACE(get_implied_equalities, tout << mk_pp(t, m) << " = " << mk_pp(s, m) << " " << is_sat << "\n";);
                     if (is_sat == l_false) {
                         found = true;
                         m_uf.merge(terms[i].id, terms[vec[j]].id);
@@ -234,7 +234,7 @@ namespace smt {
 
 
             if (!non_values.empty()) {
-                TRACE("get_implied_equalities", model_smt2_pp(tout, m, *model, 0););
+                TRACE(get_implied_equalities, model_smt2_pp(tout, m, *model, 0););
                 get_implied_equalities_filter_basic(non_values, terms);
                 //get_implied_equalities_basic(terms);
             }
@@ -249,7 +249,7 @@ namespace smt {
 
         void assert_relevant(unsigned num_terms, expr* const* terms) {
             for (unsigned i = 0; i < num_terms; ++i) {                
-                sort* srt = m.get_sort(terms[i]);
+                sort* srt = terms[i]->get_sort();
                 if (!m_array_util.is_array(srt)) {
                     m_solver.assert_expr(m.mk_app(m.mk_func_decl(symbol("Relevant!"), 1, &srt, m.mk_bool_sort()), terms[i]));
                 }
@@ -259,7 +259,7 @@ namespace smt {
         void assert_relevant(term_ids& terms) {
             for (unsigned i = 0; i < terms.size(); ++i) {
                 expr* t = terms[i].term;
-                sort* srt = m.get_sort(t);
+                sort* srt = t->get_sort();
                 if (!m_array_util.is_array(srt)) {
                     m_solver.assert_expr(m.mk_app(m.mk_func_decl(symbol("Relevant!"), 1, &srt, m.mk_bool_sort()), t));
                 }
@@ -351,7 +351,7 @@ namespace smt {
                         class_ids[term_ids[i].id] = m_uf.find(term_ids[i].id);
                     }
                 }
-                TRACE("get_implied_equalities",
+                TRACE(get_implied_equalities,
                       for (unsigned i = 0; i < num_terms; ++i) {
                           tout << mk_pp(terms[i], m) << " |-> " << class_ids[i] << "\n";
                       });
@@ -370,12 +370,14 @@ namespace smt {
 
     stopwatch get_implied_equalities_impl::s_timer;
     stopwatch get_implied_equalities_impl::s_stats_val_eq_timer;
+}
 
+namespace smt {
     lbool implied_equalities(ast_manager& m, solver& solver, unsigned num_terms, expr* const* terms, unsigned* class_ids) {        
         get_implied_equalities_impl gi(m, solver);
         return gi(num_terms, terms, class_ids);
     }
-};
+}
 
 
 
@@ -548,7 +550,7 @@ namespace smt {
                 eqs.push_back(eq_lit);
                 m_solver.assert_expr(m.mk_implies(eq_lit, eq));
             }
-            m_solver.assert_expr(m.mk_not(m.mk_and(eqs.size(), eqs.c_ptr())));
+            m_solver.assert_expr(m.mk_not(m.mk_and(eqs)));
             lbool is_sat = m_solver.check_sat(0,0);
             switch(is_sat) {
             case l_false:

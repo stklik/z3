@@ -18,8 +18,7 @@ Notes:
 
 --*/
 
-#ifndef SPARSE_MATRIX_DEF_H_
-#define SPARSE_MATRIX_DEF_H_
+#pragma once
 
 #include "math/simplex/sparse_matrix.h"
 #include "util/uint_set.h"
@@ -40,8 +39,8 @@ namespace simplex {
 
     template<typename Ext>
     void sparse_matrix<Ext>::_row::reset(manager& m) {
-        for (unsigned i = 0; i < m_entries.size(); ++i) {
-            m.reset(m_entries[i].m_coeff);
+        for (auto & e : m_entries) {
+            m.reset(e.m_coeff);
         }
         m_entries.reset();
         m_size           = 0;
@@ -94,12 +93,12 @@ namespace simplex {
         unsigned i  = 0;
         unsigned j  = 0;
         unsigned sz = m_entries.size();
-        for (; i < sz; i++) {
+        for (; i < sz; ++i) {
             _row_entry & t1 = m_entries[i];
             if (!t1.is_dead()) {
                 if (i != j) {
                     _row_entry & t2 = m_entries[j];
-                    t2.m_coeff.swap(t1.m_coeff);
+                    m.swap(t2.m_coeff, t1.m_coeff);
                     t2.m_var = t1.m_var;
                     t2.m_col_idx = t1.m_col_idx;
                     SASSERT(!t2.is_dead());
@@ -135,25 +134,25 @@ namespace simplex {
     */
     template<typename Ext>
     inline void sparse_matrix<Ext>::_row::save_var_pos(svector<int> & result_map, unsigned_vector& idxs) const {
-        typename vector<_row_entry>::const_iterator it  = m_entries.begin();
-        typename vector<_row_entry>::const_iterator end = m_entries.end();
+
         unsigned idx = 0;
-        for (; it != end; ++it, ++idx) {
-            if (!it->is_dead()) {
-                result_map[it->m_var] = idx;
-                idxs.push_back(it->m_var);
+        for (auto const& e : m_entries) {
+            if (!e.is_dead()) {
+                result_map[e.m_var] = idx;
+                idxs.push_back(e.m_var);
             }
+            ++idx;
         }
     }
 
 
     template<typename Ext>
     int sparse_matrix<Ext>::_row::get_idx_of(var_t v) const {
-        typename vector<_row_entry>::const_iterator it  = m_entries.begin();
-        typename vector<_row_entry>::const_iterator end = m_entries.end();
-        for (unsigned idx = 0; it != end; ++it, ++idx) {
-            if (!it->is_dead() && it->m_var == v)
+        unsigned idx = 0; 
+        for (auto const& e : m_entries) {
+            if (!e.is_dead() && e.m_var == v)
                 return idx;
+            ++idx;
         }
         return -1;
     }
@@ -179,7 +178,7 @@ namespace simplex {
         unsigned i  = 0;
         unsigned j  = 0;
         unsigned sz = m_entries.size();
-        for (; i < sz; i++) {
+        for (; i < sz; ++i) {
             col_entry & e1 = m_entries[i];
             if (!e1.is_dead()) {
                 if (i != j) {
@@ -205,32 +204,12 @@ namespace simplex {
         }
     }
 
-#if 0
-    /**
-       \brief Special version of compress, that is used when the column contain
-       only one entry located at position singleton_pos.
-    */
-    template<typename Ext>
-    void sparse_matrix<Ext>::column::compress_singleton(vector<_row> & rows, unsigned singleton_pos) {
-        SASSERT(m_size == 1);
-        if (singleton_pos != 0) {
-            col_entry & s  = m_entries[singleton_pos];
-            m_entries[0]   = s;
-            row & r        = rows[s.m_row_id];
-            r[s.m_row_idx].m_col_idx = 0;
-        }
-        m_first_free_idx = -1;
-        m_entries.shrink(1);
-    }
-#endif
     template<typename Ext>
     const typename sparse_matrix<Ext>::col_entry * 
     sparse_matrix<Ext>::column::get_first_col_entry() const {
-        typename svector<col_entry>::const_iterator it  = m_entries.begin();
-        typename svector<col_entry>::const_iterator end = m_entries.end();
-        for (; it != end; ++it) {
-            if (!it->is_dead()) {
-                return it;
+        for (auto const& e : m_entries) {
+            if (!e.is_dead()) {
+                return &e;
             }
         }
         return nullptr;
@@ -272,16 +251,21 @@ namespace simplex {
 
     template<typename Ext>
     sparse_matrix<Ext>::~sparse_matrix() {
-        for (unsigned i = 0; i < m_rows.size(); ++i) {
-            _row& r = m_rows[i];
-            for (unsigned j = 0; j < r.m_entries.size(); ++j) {
-                m.reset(r.m_entries[j].m_coeff);
+        reset_rows();
+    }
+
+    template<typename Ext>
+    void sparse_matrix<Ext>::reset_rows() {
+        for (auto& r : m_rows) {
+            for (auto& e : r.m_entries) {
+                m.reset(e.m_coeff);
             }
         }
     }
 
     template<typename Ext>
     void sparse_matrix<Ext>::reset() {
+        reset_rows();
         m_rows.reset();
         m_dead_rows.reset();
         m_columns.reset();
@@ -315,6 +299,8 @@ namespace simplex {
 
     template<typename Ext>
     void sparse_matrix<Ext>::add_var(row dst, numeral const& n, var_t v) {
+        if (m.is_zero(n))
+            return;
         _row& r   = m_rows[dst.id()];
         column& c = m_columns[v];
         unsigned r_idx;
@@ -333,6 +319,9 @@ namespace simplex {
     */
     template<typename Ext>
     void sparse_matrix<Ext>::add(row row1, numeral const& n, row row2) {
+
+        if (m.is_zero(n))
+            return;
         m_stats.m_add_rows++;
         _row & r1 = m_rows[row1.id()];
         
@@ -444,6 +433,25 @@ namespace simplex {
     }
 
     /**
+       \brief Set row <- n/row
+    */
+    template <typename Ext>
+    void sparse_matrix<Ext>::div(row r, numeral const &n) {
+      SASSERT(!m.is_zero(n));
+      if (m.is_one(n)) {
+        // no op
+      } else if (m.is_minus_one(n)) {
+        neg(r);
+      } else {
+        row_iterator it = row_begin(r);
+        row_iterator end = row_end(r);
+        for (; it != end; ++it) {
+          m.div(it->m_coeff, n, it->m_coeff);
+        }
+      }
+    }
+
+    /**
        \brief Delete row.
     */    
     template<typename Ext>
@@ -468,6 +476,10 @@ namespace simplex {
         g.reset();
         row_iterator it = row_begin(r), end = row_end(r); 
         for (; it != end && !m.is_one(g); ++it) {
+            if (!m.is_int(it->m_coeff)) {
+                g = numeral(1);  
+                break;
+            }
             if (m.is_zero(g)) g = it->m_coeff;
             else m.gcd(g, it->m_coeff, g);
         }   
@@ -591,6 +603,5 @@ namespace simplex {
 
     
 
-};
+}
 
-#endif

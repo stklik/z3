@@ -57,10 +57,7 @@ namespace datalog {
         {
             // m_fparams.m_relevancy_lvl = 0;
             m_fparams.m_mbqi = false;
-            m_fparams.m_timeout = 1000;
         }
-
-        ~imp() {}        
 
         lbool query(expr* query) {
             m_ctx.ensure_opened();
@@ -121,7 +118,7 @@ namespace datalog {
                     m_ground[i] = m.mk_fresh_const("c", fv[i]);
                 }
             }
-            e = m_var_subst(e, m_ground.size(), m_ground.c_ptr());
+            e = m_var_subst(e, m_ground.size(), m_ground.data());
         }
 
         static bool rule_sort_fn(const rule *r1, const rule *r2) {
@@ -178,7 +175,7 @@ namespace datalog {
                     switch(search(depth-1, index+1)) {
                     case l_undef:
                         status = l_undef;
-                        // fallthrough
+                        Z3_fallthrough;
                     case l_false:
                         m_goals.resize(num_goals);   
                         break;
@@ -187,7 +184,6 @@ namespace datalog {
                     }
                     break;
                 case l_undef:
-                    status = l_undef;
                     throw default_exception("undef");
                 }
                 m_solver.pop(1);
@@ -225,4 +221,4 @@ namespace datalog {
         return m_imp->get_answer();
     }
 
-};
+}

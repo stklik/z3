@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef ID_GEN_H_
-#define ID_GEN_H_
+#pragma once
 
 #include "util/vector.h"
 #include "util/util.h"
@@ -58,7 +57,7 @@ public:
     }
     
     unsigned show_hash(){
-      unsigned h = string_hash((char *)&m_free_ids[0],m_free_ids.size()*sizeof(unsigned),17);
+      unsigned h = string_hash(std::string_view((char *)&m_free_ids[0],m_free_ids.size()*sizeof(unsigned)),17);
       return hash_u_u(h,m_next_id);
     }
 
@@ -85,4 +84,3 @@ public:
 
 };
 
-#endif /* ID_GEN_H_ */

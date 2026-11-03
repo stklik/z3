@@ -48,7 +48,7 @@ extern "C" {
             acc.push_back(mk_accessor_decl(m, to_symbol(field_names[i]), type_ref(to_sort(field_sorts[i]))));
         }
 
-        constructor_decl* constrs[1] = { mk_constructor_decl(to_symbol(name), recognizer, acc.size(), acc.c_ptr()) };
+        constructor_decl* constrs[1] = { mk_constructor_decl(to_symbol(name), recognizer, acc.size(), acc.data()) };
 
         {
             datatype_decl * dt = mk_datatype_decl(dt_util, to_symbol(name), 0, nullptr, 1, constrs);
@@ -77,7 +77,7 @@ extern "C" {
         // Create projections
         ptr_vector<func_decl> const & _accs = *dt_util.get_constructor_accessors(decl);
         SASSERT(_accs.size() == num_fields);
-        for (unsigned i = 0; i < _accs.size(); i++) {
+        for (unsigned i = 0; i < _accs.size(); ++i) {
             mk_c(c)->save_multiple_ast_trail(_accs[i]);
             proj_decls[i] = of_func_decl(_accs[i]);
         }
@@ -102,6 +102,13 @@ extern "C" {
         sort* e;
 
         ptr_vector<constructor_decl> constrs;
+        symbol sname = to_symbol(name);
+
+        if (mk_c(c)->get_dt_plugin()->is_declared(sname)) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, "enumeration sort name is already declared");
+            RETURN_Z3(nullptr);
+        }
+
         for (unsigned i = 0; i < n; ++i) {
             symbol e_name(to_symbol(enum_names[i]));
             std::string recognizer_s("is_");
@@ -112,8 +119,9 @@ extern "C" {
         }
 
 
+
         {
-            datatype_decl * dt = mk_datatype_decl(dt_util, to_symbol(name), 0, nullptr, n, constrs.c_ptr());
+            datatype_decl * dt = mk_datatype_decl(dt_util, sname, 0, nullptr, n, constrs.data());
             bool is_ok = mk_c(c)->get_dt_plugin()->mk_datatypes(1, &dt, 0, nullptr, sorts);
             del_datatype_decl(dt);
 
@@ -160,69 +168,40 @@ extern "C" {
         LOG_Z3_mk_list_sort(c, name, elem_sort, nil_decl, is_nil_decl, cons_decl, is_cons_decl, head_decl, tail_decl);
         RESET_ERROR_CODE();
         ast_manager& m = mk_c(c)->m();
+        func_decl_ref nil(m), is_nil(m), cons(m), is_cons(m), head(m), tail(m);        
         datatype_util& dt_util = mk_c(c)->dtutil();
         mk_c(c)->reset_last_result();
-        datatype_util data_util(m);
-        accessor_decl* head_tail[2] = {
-            mk_accessor_decl(m, symbol("head"), type_ref(to_sort(elem_sort))),
-            mk_accessor_decl(m, symbol("tail"), type_ref(0))
-        };
-        constructor_decl* constrs[2] = {
-            mk_constructor_decl(symbol("nil"), symbol("is_nil"), 0, nullptr),
-            // Leo: SMT 2.0 document uses 'insert' instead of cons
-            mk_constructor_decl(symbol("cons"), symbol("is_cons"), 2, head_tail)
-        };
-
-        sort_ref_vector sorts(m);
-        {
-            datatype_decl * decl = mk_datatype_decl(dt_util, to_symbol(name), 0, nullptr, 2, constrs);
-            bool is_ok = mk_c(c)->get_dt_plugin()->mk_datatypes(1, &decl, 0, nullptr, sorts);
-            del_datatype_decl(decl);
-
-            if (!is_ok) {
-                SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
-                RETURN_Z3(nullptr);
-            }
+        sort_ref s = dt_util.mk_list_datatype(to_sort(elem_sort), to_symbol(name), cons, is_cons, head, tail, nil, is_nil);
+        
+        if (!s) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            RETURN_Z3(nullptr);
         }
-        sort * s = sorts.get(0);
 
         mk_c(c)->save_multiple_ast_trail(s);
-        ptr_vector<func_decl> const& cnstrs = *data_util.get_datatype_constructors(s);
-        SASSERT(cnstrs.size() == 2);
-        func_decl* f;
         if (nil_decl) {
-            f = cnstrs[0];
-            mk_c(c)->save_multiple_ast_trail(f);
-            *nil_decl = of_func_decl(f);
+            mk_c(c)->save_multiple_ast_trail(nil);
+            *nil_decl = of_func_decl(nil);
         }
         if (is_nil_decl) {
-            f = data_util.get_constructor_is(cnstrs[0]);
-            mk_c(c)->save_multiple_ast_trail(f);
-            *is_nil_decl = of_func_decl(f);
+            mk_c(c)->save_multiple_ast_trail(is_nil);
+            *is_nil_decl = of_func_decl(is_nil);
         }
         if (cons_decl) {
-            f = cnstrs[1];
-            mk_c(c)->save_multiple_ast_trail(f);
-            *cons_decl = of_func_decl(f);
+            mk_c(c)->save_multiple_ast_trail(cons);
+            *cons_decl = of_func_decl(cons);
         }
         if (is_cons_decl) {
-            f = data_util.get_constructor_is(cnstrs[1]);
-            mk_c(c)->save_multiple_ast_trail(f);
-            *is_cons_decl = of_func_decl(f);
+            mk_c(c)->save_multiple_ast_trail(is_cons);
+            *is_cons_decl = of_func_decl(is_cons);
         }
         if (head_decl) {
-            ptr_vector<func_decl> const& acc = *data_util.get_constructor_accessors(cnstrs[1]);
-            SASSERT(acc.size() == 2);
-            f = (acc)[0];
-            mk_c(c)->save_multiple_ast_trail(f);
-            *head_decl = of_func_decl(f);
+            mk_c(c)->save_multiple_ast_trail(head);
+            *head_decl = of_func_decl(head);
         }
         if (tail_decl) {
-            ptr_vector<func_decl> const& acc = *data_util.get_constructor_accessors(cnstrs[1]);
-            SASSERT(acc.size() == 2);
-            f = (acc)[1];
-            mk_c(c)->save_multiple_ast_trail(f);
-            *tail_decl = of_func_decl(f);
+            mk_c(c)->save_multiple_ast_trail(tail);
+            *tail_decl = of_func_decl(tail);
         }
         RETURN_Z3_mk_list_sort(of_sort(s));
         Z3_CATCH_RETURN(nullptr);
@@ -262,6 +241,20 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
+    unsigned Z3_API Z3_constructor_num_fields(Z3_context c, Z3_constructor constr) {
+        Z3_TRY;
+        LOG_Z3_constructor_num_fields(c, constr);
+        RESET_ERROR_CODE();
+        mk_c(c)->reset_last_result();
+        if (!constr) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            return 0;
+        }
+        constructor* c = reinterpret_cast<constructor*>(constr);
+        return c->m_field_names.size();
+        Z3_CATCH_RETURN(0);
+    }
+
 
     void Z3_API Z3_query_constructor(Z3_context c,
                                      Z3_constructor constr,
@@ -285,6 +278,11 @@ extern "C" {
             SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
             return;
         }
+        ptr_vector<func_decl> const& accs = *data_util.get_constructor_accessors(f);
+        if (num_fields > accs.size()) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, "num_fields exceeds constructor arity");
+            return;
+        }
         if (constructor_decl) {
             mk_c(c)->save_multiple_ast_trail(f);
             *constructor_decl = of_func_decl(f);
@@ -295,7 +293,6 @@ extern "C" {
             *tester = of_func_decl(f2);
         }
 
-        ptr_vector<func_decl> const& accs = *data_util.get_constructor_accessors(f);
         for (unsigned i = 0; i < num_fields; ++i) {
             func_decl* f2 = (accs)[i];
             mk_c(c)->save_multiple_ast_trail(f2);
@@ -313,12 +310,24 @@ extern "C" {
         Z3_CATCH;
     }
 
-    static datatype_decl* mk_datatype_decl(Z3_context c,
-                                           Z3_symbol name,
-                                           unsigned num_constructors,
-                                           Z3_constructor constructors[]) {
+    static datatype_decl* api_datatype_decl(Z3_context c,
+                                            Z3_symbol name,
+                                            unsigned num_parameters,
+                                            Z3_sort const parameters[],
+                                            unsigned num_constructors,
+                                            Z3_constructor constructors[]) {
         datatype_util& dt_util = mk_c(c)->dtutil();
         ast_manager& m = mk_c(c)->m();
+        
+        sort_ref_vector params(m);
+        
+        // A correct use of the API is to always provide parameters explicitly.
+        // implicit parameters through polymorphic type variables does not work
+        // because the order of polymorphic variables in the parameters is ambiguous.
+        if (num_parameters > 0 && parameters) 
+            for (unsigned i = 0; i < num_parameters; ++i) 
+                params.push_back(to_sort(parameters[i]));
+        
         ptr_vector<constructor_decl> constrs;
         for (unsigned i = 0; i < num_constructors; ++i) {
             constructor* cn = reinterpret_cast<constructor*>(constructors[i]);
@@ -331,9 +340,9 @@ extern "C" {
                     acc.push_back(mk_accessor_decl(m, cn->m_field_names[j], type_ref(cn->m_sort_refs[j])));
                 }
             }
-            constrs.push_back(mk_constructor_decl(cn->m_name, cn->m_tester, acc.size(), acc.c_ptr()));
+            constrs.push_back(mk_constructor_decl(cn->m_name, cn->m_tester, acc.size(), acc.data()));
         }
-        return mk_datatype_decl(dt_util, to_symbol(name), 0, nullptr, num_constructors, constrs.c_ptr());
+        return mk_datatype_decl(dt_util, to_symbol(name), params.size(), params.data(), num_constructors, constrs.data());
     }
 
     Z3_sort Z3_API Z3_mk_datatype(Z3_context c,
@@ -348,7 +357,7 @@ extern "C" {
 
         sort_ref_vector sorts(m);
         {
-            datatype_decl * data = mk_datatype_decl(c, name, num_constructors, constructors);
+            datatype_decl * data = api_datatype_decl(c, name, 0, nullptr, num_constructors, constructors);
             bool is_ok = mk_c(c)->get_dt_plugin()->mk_datatypes(1, &data, 0, nullptr, sorts);
             del_datatype_decl(data);
 
@@ -367,6 +376,42 @@ extern "C" {
             cn->m_constructor = cnstrs[i];
         }
         RETURN_Z3_mk_datatype(of_sort(s));
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    Z3_sort Z3_API Z3_mk_polymorphic_datatype(Z3_context c,
+                                              Z3_symbol name,
+                                              unsigned num_parameters,
+                                              Z3_sort parameters[],
+                                              unsigned num_constructors,
+                                              Z3_constructor constructors[]) {
+        Z3_TRY;
+        LOG_Z3_mk_polymorphic_datatype(c, name, num_parameters, parameters, num_constructors, constructors);
+        RESET_ERROR_CODE();
+        ast_manager& m = mk_c(c)->m();
+        datatype_util data_util(m);
+
+        sort_ref_vector sorts(m);
+        {
+            datatype_decl * data = api_datatype_decl(c, name, num_parameters, parameters, num_constructors, constructors);
+            bool is_ok = mk_c(c)->get_dt_plugin()->mk_datatypes(1, &data, 0, nullptr, sorts);
+            del_datatype_decl(data);
+
+            if (!is_ok) {
+                SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+                RETURN_Z3(nullptr);
+            }
+        }
+        sort * s = sorts.get(0);
+
+        mk_c(c)->save_ast_trail(s);
+        ptr_vector<func_decl> const& cnstrs = *data_util.get_datatype_constructors(s);
+
+        for (unsigned i = 0; i < num_constructors; ++i) {
+            constructor* cn = reinterpret_cast<constructor*>(constructors[i]);
+            cn->m_constructor = cnstrs[i];
+        }
+        RETURN_Z3_mk_polymorphic_datatype(of_sort(s));
         Z3_CATCH_RETURN(nullptr);
     }
 
@@ -394,6 +439,24 @@ extern "C" {
         Z3_CATCH;
     }
 
+    Z3_sort Z3_API Z3_mk_datatype_sort(Z3_context c, Z3_symbol name, unsigned num_params, Z3_sort const params[]) {
+        Z3_TRY;
+        LOG_Z3_mk_datatype_sort(c, name, num_params, params);
+        RESET_ERROR_CODE();
+        ast_manager& m = mk_c(c)->m();
+        datatype_util adt_util(m);
+        vector<parameter> ps;
+        ps.push_back(parameter(to_symbol(name)));
+        for (unsigned i = 0; i < num_params; ++i) {
+            ps.push_back(parameter(to_sort(params[i])));
+        }
+        sort * s = m.mk_sort(adt_util.get_family_id(), DATATYPE_SORT, ps.size(), ps.data());
+        mk_c(c)->save_ast_trail(s);
+        RETURN_Z3(of_sort(s));
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+
     void Z3_API Z3_mk_datatypes(Z3_context c,
                                 unsigned num_sorts,
                                 Z3_symbol const sort_names[],
@@ -409,11 +472,11 @@ extern "C" {
         ptr_vector<datatype_decl> datas;
         for (unsigned i = 0; i < num_sorts; ++i) {
             constructor_list* cl = reinterpret_cast<constructor_list*>(constructor_lists[i]);
-            datas.push_back(mk_datatype_decl(c, sort_names[i], cl->size(), reinterpret_cast<Z3_constructor*>(cl->c_ptr())));
+            datas.push_back(api_datatype_decl(c, sort_names[i], 0, nullptr, cl->size(), reinterpret_cast<Z3_constructor*>(cl->data())));
         }
         sort_ref_vector _sorts(m);
-        bool ok = mk_c(c)->get_dt_plugin()->mk_datatypes(datas.size(), datas.c_ptr(), 0, nullptr, _sorts);
-        del_datatype_decls(datas.size(), datas.c_ptr());
+        bool ok = mk_c(c)->get_dt_plugin()->mk_datatypes(datas.size(), datas.data(), 0, nullptr, _sorts);
+        del_datatype_decls(datas.size(), datas.data());
 
         if (!ok) {
             SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
@@ -434,6 +497,16 @@ extern "C" {
         }
         RETURN_Z3_mk_datatypes;
         Z3_CATCH;
+    }
+
+    bool Z3_API Z3_is_recursive_datatype_sort(Z3_context c, Z3_sort t) {
+        Z3_TRY;
+        LOG_Z3_is_recursive_datatype_sort(c, t);
+        RESET_ERROR_CODE();
+        sort * s = to_sort(t);
+        datatype_util& dt_util = mk_c(c)->dtutil();
+        return dt_util.is_datatype(s) && dt_util.is_recursive(s);
+        Z3_CATCH_RETURN(false);
     }
 
     unsigned Z3_API Z3_get_datatype_sort_num_constructors(Z3_context c, Z3_sort t) {
@@ -597,7 +670,7 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
-    Z3_ast Z3_datatype_update_field(
+    Z3_ast Z3_API Z3_datatype_update_field(
         Z3_context c,  Z3_func_decl f, Z3_ast t, Z3_ast v) {
         Z3_TRY;
         LOG_Z3_datatype_update_field(c, f, t, v);
@@ -607,9 +680,9 @@ extern "C" {
         expr* _t = to_expr(t);
         expr* _v = to_expr(v);
         expr* args[2] = { _t, _v };
-        sort* domain[2] = { m.get_sort(_t), m.get_sort(_v) };
+        sort* domain[2] = { _t->get_sort(), _v->get_sort() };
         parameter param(_f);
-        func_decl * d = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_DT_UPDATE_FIELD, 1, &param, 2, domain);
+        func_decl * d = m.mk_func_decl(mk_c(c)->get_dt_fid(), OP_DT_UPDATE_FIELD, 1, &param, 2, domain);
         app* r = m.mk_app(d, 2, args);
         mk_c(c)->save_ast_trail(r);
         check_sorts(c, r);
@@ -618,4 +691,4 @@ extern "C" {
     }
 
 
-};
+}

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SIMPLE_PARSER_H_
-#define SIMPLE_PARSER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/map.h"
@@ -30,7 +29,7 @@ class scanner;
 */
 class simple_parser {
 protected:
-    struct parser_error {};
+    struct parser_error : public std::exception {};
     struct builtin_op {
         family_id m_family_id;
         decl_kind m_kind;
@@ -46,7 +45,7 @@ protected:
     expr * parse_expr(scanner & s);
 public:
     simple_parser(ast_manager & m);
-    virtual ~simple_parser();
+    virtual ~simple_parser() = default;
     void add_builtin_op(symbol const & s, family_id fid, decl_kind kind);
     void add_builtin_op(char const * str, family_id fid, decl_kind kind);
     void add_var(symbol const & s, var * v);
@@ -60,5 +59,4 @@ public:
     virtual expr * parse_float(rational const & r) { throw parser_error(); }
 };
 
-#endif /* SIMPLE_PARSER_H_ */
 

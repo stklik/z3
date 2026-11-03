@@ -16,11 +16,10 @@ Author:
 Notes:
 
 --*/
-#ifndef PB2BV_MODEL_CONVERTER_H_
-#define PB2BV_MODEL_CONVERTER_H_
+#pragma once
 
-#include "tactic/model_converter.h"
-#include "tactic/arith/bound_manager.h"
+#include "ast/converters/model_converter.h"
+#include "ast/simplifiers/bound_manager.h"
 
 class pb2bv_model_converter : public model_converter {
     typedef std::pair<func_decl *, func_decl *> func_decl_pair;
@@ -37,4 +36,3 @@ public:
     model_converter * translate(ast_translation & translator) override;
 };
 
-#endif

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_CONFLICT_RESOLUTION_H_
-#define SMT_CONFLICT_RESOLUTION_H_
+#pragma once
 
 #include "smt/smt_literal.h"
 #include "smt/smt_bool_var_data.h"
@@ -25,7 +24,7 @@ Revision History:
 #include "smt/smt_enode.h"
 #include "smt/dyn_ack.h"
 #include "util/obj_pair_hashtable.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "util/obj_pair_hashtable.h"
 #include "util/map.h"
 #include "smt/watch_list.h"
@@ -45,8 +44,8 @@ namespace smt {
     protected:
         typedef obj_pair_set<enode, enode> enode_pair_set;
 
-        ast_manager &                  m_manager;
-        smt_params const &       m_params;
+        ast_manager &                  m;
+        smt_params const &             m_params;
         context &                      m_ctx;
         dyn_ack_manager &              m_dyn_ack_manager;
         literal_vector const &         m_assigned_literals;
@@ -92,10 +91,10 @@ namespace smt {
                 struct {
                     enode *            m_lhs;
                     enode *            m_rhs;
-                };
+                } m_pair;
             };
             tp_elem(literal l):m_kind(LITERAL), m_lidx(l.index()) {}
-            tp_elem(enode * lhs, enode * rhs):m_kind(EQUALITY), m_lhs(lhs), m_rhs(rhs) {}
+            tp_elem(enode * lhs, enode * rhs):m_kind(EQUALITY), m_pair(lhs, rhs) {}
         tp_elem(justification * js):m_kind(JUSTIFICATION), m_js(js) { SASSERT(js);}
         };
 
@@ -104,7 +103,9 @@ namespace smt {
         eq2proof                       m_eq2proof;
         lit2proof                      m_lit2proof;
         proof_ref_vector               m_new_proofs;
+        ast_ref_vector                 m_trail;
         proof_ref                      m_lemma_proof;
+        bool                           m_clause_proof_hypotheses = false;
 
         literal_vector                 m_assumptions;
 
@@ -125,7 +126,7 @@ namespace smt {
                     std::swap(n1, n2);
                 enode_pair p(n1, n2);
                 if (m_already_processed_eqs.insert_if_not_there(p)) {
-                    TRACE("conflict_detail_verbose", tout << "marking eq #" << p.first->get_owner_id() << " = #" << 
+                    TRACE(conflict_detail_verbose, tout << "marking eq #" << p.first->get_owner_id() << " = #" << 
                           p.second->get_owner_id() << "\n";);
                     m_todo_eqs.push_back(p);
                     SASSERT(m_already_processed_eqs.contains(p));
@@ -157,8 +158,10 @@ namespace smt {
         bool visit_eq_justications(enode * lhs, enode * rhs);
         void mk_proof(enode * lhs, enode * rhs, ptr_buffer<proof> & result);
         void mk_proof(enode * lhs, enode * rhs);
-        void init_mk_proof();
+        void reset();
+        void process_proof_todo();
         void mk_conflict_proof(b_justification conflict, literal not_l);
+        proof_ref mk_clause_proof(justification* js);
 
     protected:
         template<bool Set>
@@ -177,7 +180,7 @@ namespace smt {
         unsigned get_max_lvl(literal consequent, b_justification js);
         unsigned skip_literals_above_conflict_level();
         void process_antecedent(literal antecedent, unsigned & num_marks);
-        void process_justification(justification * js, unsigned & num_marks);
+        void process_justification(literal consequent, justification * js, unsigned & num_marks);
 
         bool_var_vector m_unmark;
         bool_var_vector m_lemma_min_stack;
@@ -208,7 +211,7 @@ namespace smt {
                             vector<watch_list> & watches
                             );
 
-        virtual ~conflict_resolution() {}
+        virtual ~conflict_resolution() = default;
 
         virtual bool resolve(b_justification conflict, literal not_l);
 
@@ -217,7 +220,7 @@ namespace smt {
         }
 
         ast_manager & get_manager() {
-            return m_manager;
+            return m;
         }
         
         unsigned get_new_scope_lvl() const { 
@@ -233,11 +236,11 @@ namespace smt {
         }
 
         literal * get_lemma_literals() {
-            return m_lemma.c_ptr();
+            return m_lemma.data();
         }
 
         expr * * get_lemma_atoms() {
-            return m_lemma_atoms.c_ptr();
+            return m_lemma_atoms.data();
         }
 
         void release_lemma_atoms() {
@@ -263,7 +266,7 @@ namespace smt {
     };
 
     inline void mark_literals(conflict_resolution & cr, unsigned sz, literal const * ls) {
-        for (unsigned i = 0; i < sz; i++)
+        for (unsigned i = 0; i < sz; ++i)
             cr.mark_literal(ls[i]);
     }
 
@@ -276,7 +279,4 @@ namespace smt {
                                                  );
 
 
-};
-
-#endif /* SMT_CONFLICT_RESOLUTION_H_ */
-
+}

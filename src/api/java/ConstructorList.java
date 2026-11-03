@@ -17,10 +17,12 @@ Notes:
 
 package com.microsoft.z3;
 
+import java.lang.ref.ReferenceQueue;
+
 /**
  * Lists of constructors
  **/
-public class ConstructorList extends Z3Object {
+public class ConstructorList<R> extends Z3Object {
 
     ConstructorList(Context ctx, long obj)
     {
@@ -34,13 +36,25 @@ public class ConstructorList extends Z3Object {
 
     @Override
     void addToReferenceQueue() {
-        getContext().getConstructorListDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, ConstructorListRef::new);
     }
 
-    ConstructorList(Context ctx, Constructor[] constructors)
+    ConstructorList(Context ctx, Constructor<R>[] constructors)
     {
         super(ctx, Native.mkConstructorList(ctx.nCtx(),
                 constructors.length,
                 Constructor.arrayToNative(constructors)));
+    }
+
+    private static class ConstructorListRef extends Z3ReferenceQueue.Reference<ConstructorList<?>> {
+
+        private ConstructorListRef(ConstructorList<?> referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.delConstructorList(ctx.nCtx(), z3Obj);
+        }
     }
 }

@@ -33,7 +33,7 @@ namespace datalog {
                 const bool * inner_columns, relation_base * inner) 
             : relation_base(p, s), m_inner_cols(s.size(), inner_columns), m_inner(inner) { 
         unsigned n = s.size();
-        for(unsigned i=0; i<n; i++) {
+        for(unsigned i=0; i<n; ++i) {
             if(inner_columns && inner_columns[i]) {
                 unsigned inner_idx = m_inner2sig.size();
                 SASSERT(get_inner().get_signature()[inner_idx]==s[i]);
@@ -63,14 +63,14 @@ namespace datalog {
 
     sieve_relation * sieve_relation::clone() const {
         relation_base * new_inner = get_inner().clone();
-        return get_plugin().mk_from_inner(get_signature(), m_inner_cols.c_ptr(), new_inner);
+        return get_plugin().mk_from_inner(get_signature(), m_inner_cols.data(), new_inner);
     }
 
     relation_base * sieve_relation::complement(func_decl* p) const {
         //this is not precisely a complement, because we still treat the ignored columns as
         //full, but it should give reasonable results inside the product relation
         relation_base * new_inner = get_inner().complement(p);
-        return get_plugin().mk_from_inner(get_signature(), m_inner_cols.c_ptr(), new_inner);
+        return get_plugin().mk_from_inner(get_signature(), m_inner_cols.data(), new_inner);
     }
 
     void sieve_relation::to_formula(expr_ref& fml) const {
@@ -85,7 +85,7 @@ namespace datalog {
             s.push_back(m.mk_var(idx, sig[i]));
         }
         get_inner().to_formula(tmp);
-        fml = get_plugin().get_context().get_var_subst()(tmp, sz, s.c_ptr());
+        fml = get_plugin().get_context().get_var_subst()(tmp, sz, s.data());
     }
 
 
@@ -149,11 +149,11 @@ namespace datalog {
     }
 
     void sieve_relation_plugin::extract_inner_columns(const relation_signature & s, relation_plugin & inner, 
-            svector<bool> & inner_columns) {
+            bool_vector & inner_columns) {
         SASSERT(inner_columns.size()==s.size());
         unsigned n = s.size();
         relation_signature inner_sig_singleton;
-        for(unsigned i=0; i<n; i++) {
+        for(unsigned i=0; i<n; ++i) {
             inner_sig_singleton.reset();
             inner_sig_singleton.push_back(s[i]);
             inner_columns[i] = inner.can_handle_signature(inner_sig_singleton);
@@ -168,11 +168,11 @@ namespace datalog {
     }
 
     void sieve_relation_plugin::collect_inner_signature(const relation_signature & s, 
-            const svector<bool> & inner_columns, relation_signature & inner_sig) {
+            const bool_vector & inner_columns, relation_signature & inner_sig) {
         SASSERT(inner_columns.size()==s.size());
         inner_sig.reset();
         unsigned n = s.size();
-        for(unsigned i=0; i<n; i++) {
+        for(unsigned i=0; i<n; ++i) {
             if(inner_columns[i]) {
                 inner_sig.push_back(s[i]);
             }
@@ -183,7 +183,7 @@ namespace datalog {
             relation_signature & inner_sig) {
         UNREACHABLE();
 #if 0
-        svector<bool> inner_cols(s.size());
+        bool_vector inner_cols(s.size());
         extract_inner_columns(s, inner_cols.c_ptr());
         collect_inner_signature(s, inner_cols, inner_sig);
 #endif
@@ -220,7 +220,7 @@ namespace datalog {
         relation_signature inner_sig;
         collect_inner_signature(s, spec.m_inner_cols, inner_sig);
         relation_base * inner = get_manager().mk_empty_relation(inner_sig, spec.m_inner_kind);               
-        return mk_from_inner(s, spec.m_inner_cols.c_ptr(), inner);
+        return mk_from_inner(s, spec.m_inner_cols.data(), inner);
     }
 
 
@@ -228,7 +228,7 @@ namespace datalog {
         UNREACHABLE();
         return nullptr;
 #if 0
-        svector<bool> inner_cols(s.size());
+        bool_vector inner_cols(s.size());
         extract_inner_columns(s, inner_cols.c_ptr());
         return mk_empty(s, inner_cols.c_ptr());
 #endif
@@ -236,7 +236,7 @@ namespace datalog {
 
     sieve_relation * sieve_relation_plugin::mk_empty(const relation_signature & s, relation_plugin & inner_plugin) {
         SASSERT(!inner_plugin.is_sieve_relation()); //it does not make sense to make a sieve of a sieve
-        svector<bool> inner_cols(s.size());
+        bool_vector inner_cols(s.size());
         extract_inner_columns(s, inner_plugin, inner_cols);
         relation_signature inner_sig;
         collect_inner_signature(s, inner_cols, inner_sig);
@@ -248,14 +248,14 @@ namespace datalog {
         relation_signature empty_sig;
         relation_plugin& plugin = get_manager().get_appropriate_plugin(s);
         relation_base * inner = plugin.mk_full(p, empty_sig, null_family_id);
-        svector<bool> inner_cols;
+        bool_vector inner_cols;
         inner_cols.resize(s.size(), false);
         return mk_from_inner(s, inner_cols, inner);
     }
 
     sieve_relation * sieve_relation_plugin::full(func_decl* p, const relation_signature & s, relation_plugin & inner_plugin) {
         SASSERT(!inner_plugin.is_sieve_relation()); //it does not make sense to make a sieve of a sieve
-        svector<bool> inner_cols(s.size());
+        bool_vector inner_cols(s.size());
         extract_inner_columns(s, inner_plugin, inner_cols);
         relation_signature inner_sig;
         collect_inner_signature(s, inner_cols, inner_sig);
@@ -267,7 +267,7 @@ namespace datalog {
         sieve_relation_plugin & m_plugin;
         unsigned_vector m_inner_cols_1;
         unsigned_vector m_inner_cols_2;
-        svector<bool> m_result_inner_cols;
+        bool_vector m_result_inner_cols;
 
         scoped_ptr<relation_join_fn> m_inner_join_fun;
     public:
@@ -305,7 +305,7 @@ namespace datalog {
 
             relation_base * inner_res = (*m_inner_join_fun)(inner1, inner2);
 
-            return m_plugin.mk_from_inner(get_result_signature(), m_result_inner_cols.c_ptr(), inner_res);
+            return m_plugin.mk_from_inner(get_result_signature(), m_result_inner_cols.data(), inner_res);
         }
     };
 
@@ -325,7 +325,7 @@ namespace datalog {
         unsigned_vector inner_cols1;
         unsigned_vector inner_cols2;
 
-        for(unsigned i=0; i<col_cnt; i++) {
+        for(unsigned i=0; i<col_cnt; ++i) {
             //if at least one end of an equality is not an inner column, we ignore that equality
             //(which introduces imprecision)
             if(r1_sieved && !sr1->is_inner_col(cols1[i])) {
@@ -347,7 +347,7 @@ namespace datalog {
 
 
     class sieve_relation_plugin::transformer_fn : public convenient_relation_transformer_fn {
-        svector<bool> m_result_inner_cols;
+        bool_vector m_result_inner_cols;
 
         scoped_ptr<relation_transformer_fn> m_inner_fun;
     public:
@@ -364,7 +364,7 @@ namespace datalog {
 
             relation_base * inner_res = (*m_inner_fun)(r.get_inner());
 
-            return plugin.mk_from_inner(get_result_signature(), m_result_inner_cols.c_ptr(), inner_res);
+            return plugin.mk_from_inner(get_result_signature(), m_result_inner_cols.data(), inner_res);
         }
     };
 
@@ -376,14 +376,14 @@ namespace datalog {
         const sieve_relation & r = static_cast<const sieve_relation &>(r0);
         unsigned_vector inner_removed_cols;
 
-        for(unsigned i=0; i<col_cnt; i++) {
+        for(unsigned i=0; i<col_cnt; ++i) {
             unsigned col = removed_cols[i];
             if(r.is_inner_col(col)) {
                 inner_removed_cols.push_back(r.get_inner_col(col));
             }
         }
 
-        svector<bool> result_inner_cols = r.m_inner_cols;
+        bool_vector result_inner_cols = r.m_inner_cols;
         project_out_vector_columns(result_inner_cols, col_cnt, removed_cols);
 
         relation_signature result_sig;
@@ -400,7 +400,7 @@ namespace datalog {
         if(!inner_fun) {
             return nullptr;
         }
-        return alloc(transformer_fn, inner_fun, result_sig, result_inner_cols.c_ptr());
+        return alloc(transformer_fn, inner_fun, result_sig, result_inner_cols.data());
     }
 
     relation_transformer_fn * sieve_relation_plugin::mk_rename_fn(const relation_base & r0, 
@@ -413,14 +413,14 @@ namespace datalog {
         unsigned sig_sz = r.get_signature().size();
         unsigned_vector permutation;
         add_sequence(0, sig_sz, permutation);
-        permutate_by_cycle(permutation, cycle_len, permutation_cycle);
+        permute_by_cycle(permutation, cycle_len, permutation_cycle);
 
         bool inner_identity;
         unsigned_vector inner_permutation;
         collect_sub_permutation(permutation, r.m_sig2inner, inner_permutation, inner_identity);
 
-        svector<bool> result_inner_cols = r.m_inner_cols;
-        permutate_by_cycle(result_inner_cols, cycle_len, permutation_cycle);
+        bool_vector result_inner_cols = r.m_inner_cols;
+        permute_by_cycle(result_inner_cols, cycle_len, permutation_cycle);
 
         relation_signature result_sig;
         relation_signature::from_rename(r.get_signature(), cycle_len, permutation_cycle, result_sig);
@@ -430,7 +430,7 @@ namespace datalog {
         if(!inner_fun) {
             return nullptr;
         }
-        return alloc(transformer_fn, inner_fun, result_sig, result_inner_cols.c_ptr());
+        return alloc(transformer_fn, inner_fun, result_sig, result_inner_cols.data());
     }
 
 
@@ -521,7 +521,7 @@ namespace datalog {
         unsigned_vector inner_icols;
 
         //we ignore the columns which do not belong to the inner relation (which introduces imprecision)
-        for(unsigned i=0; i<col_cnt; i++) {
+        for(unsigned i=0; i<col_cnt; ++i) {
             unsigned col = identical_cols[i];
             if(r.is_inner_col(col)) {
                 inner_icols.push_back(r.get_inner_col(col));
@@ -572,7 +572,7 @@ namespace datalog {
         expr_ref_vector subst_vect(m);
         subst_vect.resize(sz);
         unsigned subst_ofs = sz-1;
-        for(unsigned i=0; i<sz; i++) {
+        for(unsigned i=0; i<sz; ++i) {
             if(!cond_vars.contains(i)) {
                 continue;
             }
@@ -584,7 +584,7 @@ namespace datalog {
             }
             subst_vect[subst_ofs-i] = m.mk_var(r.m_sig2inner[i], sig[i]);
         }
-        expr_ref inner_cond = get_context().get_var_subst()(condition, subst_vect.size(), subst_vect.c_ptr());
+        expr_ref inner_cond = get_context().get_var_subst()(condition, subst_vect.size(), subst_vect.data());
 
         relation_mutator_fn * inner_fun = get_manager().mk_filter_interpreted_fn(r.get_inner(), to_app(inner_cond));
         if(!inner_fun) {
@@ -630,7 +630,7 @@ namespace datalog {
         unsigned_vector ir_cols;
         unsigned_vector ineg_cols;
 
-        for(unsigned i=0; i<col_cnt; i++) {
+        for(unsigned i=0; i<col_cnt; ++i) {
             //if at least one end of an equality is not an inner column, we ignore that equality
             //(which introduces imprecision)
             bool r_col_inner = r_sieved && !sr->is_inner_col(r_cols[i]);
@@ -662,4 +662,4 @@ namespace datalog {
     }
 
     
-};
+}

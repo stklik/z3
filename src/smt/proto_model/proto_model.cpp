@@ -19,6 +19,7 @@ Revision History:
 #include "ast/ast_pp.h"
 #include "ast/ast_ll_pp.h"
 #include "ast/well_sorted.h"
+#include "ast/array_decl_plugin.h"
 #include "ast/used_symbols.h"
 #include "ast/for_each_expr.h"
 #include "ast/rewriter/var_subst.h"
@@ -31,7 +32,7 @@ proto_model::proto_model(ast_manager & m, params_ref const & p):
     model_core(m),
     m_eval(*this),
     m_rewrite(m) {
-    register_factory(alloc(basic_factory, m));
+    register_factory(alloc(basic_factory, m, m.get_num_asts()));
     m_user_sort_factory = alloc(user_sort_factory, m);
     register_factory(m_user_sort_factory);
     m_model_partial = model_params(p).partial();
@@ -88,14 +89,14 @@ expr * proto_model::mk_some_interp_for(func_decl * d) {
 bool proto_model::eval(expr * e, expr_ref & result, bool model_completion) {
     m_eval.set_model_completion(model_completion);
     m_eval.set_expand_array_equalities(false);
-    TRACE("model_evaluator", model_v2_pp(tout, *this, true););
+    TRACE(model_evaluator, model_v2_pp(tout, *this, true););
     try {
         m_eval(e, result);
         return true;
     }
     catch (model_evaluator_exception & ex) {
         (void)ex;
-        TRACE("model_evaluator", tout << ex.msg() << "\n";);
+        TRACE(model_evaluator, tout << ex.what() << "\n";);
         return false;
     }
 }
@@ -119,19 +120,23 @@ bool proto_model::eval(expr * e, expr_ref & result, bool model_completion) {
    \brief Replace uninterpreted constants occurring in fi->get_else()
    by their interpretations.
 */
-void proto_model::cleanup_func_interp(func_interp * fi, func_decl_set & found_aux_fs) {
-    if (fi->is_partial())
-        return;
-    expr * fi_else = fi->get_else();
-    TRACE("model_bug", tout << "cleaning up:\n" << mk_pp(fi_else, m) << "\n";);
+void proto_model::cleanup_func_interp(expr_ref_vector& trail, func_interp * fi, func_decl_set & found_aux_fs) {
+    if (!fi->is_partial()) {
+        expr * fi_else = fi->get_else();    
+        fi->set_else(cleanup_expr(trail, fi_else, found_aux_fs));
+    }
+}
 
+expr* proto_model::cleanup_expr(expr_ref_vector& trail, expr* fi_else, func_decl_set& found_aux_fs) {
+    TRACE(model_bug, tout << "cleaning up:\n" << mk_pp(fi_else, m) << "\n";);
+    trail.reset();
     obj_map<expr, expr*> cache;
-    expr_ref_vector trail(m);
     ptr_buffer<expr, 128> todo;
     ptr_buffer<expr> args;
     todo.push_back(fi_else);
-
     expr * a;
+    expr_ref new_t(m);
+
     while (!todo.empty()) {
         a = todo.back();
         if (is_uninterp_const(a)) {
@@ -165,11 +170,10 @@ void proto_model::cleanup_func_interp(func_interp * fi, func_decl_set & found_au
                 }
                 func_decl * f = t->get_decl();
                 if (m_aux_decls.contains(f)) {
-                    TRACE("model_bug", tout << f->get_name() << "\n";);
+                    TRACE(model_bug, tout << f->get_name() << "\n";);
                     found_aux_fs.insert(f);
                 }
-                expr_ref new_t(m);
-                new_t = m_rewrite.mk_app(f, args.size(), args.c_ptr());
+                new_t = m_rewrite.mk_app(f, args.size(), args.data());                
                 if (t != new_t.get())
                     trail.push_back(new_t);
                 todo.pop_back();
@@ -177,7 +181,7 @@ void proto_model::cleanup_func_interp(func_interp * fi, func_decl_set & found_au
                 break;
             }
             default:
-                SASSERT(a != 0);
+                SASSERT(a != nullptr);
                 cache.insert(a, a);
                 todo.pop_back();
                 break;
@@ -187,18 +191,14 @@ void proto_model::cleanup_func_interp(func_interp * fi, func_decl_set & found_au
 
     VERIFY(cache.find(fi_else, a));
 
-    fi->set_else(a);
+    return a;
 }
 
 void proto_model::remove_aux_decls_not_in_set(ptr_vector<func_decl> & decls, func_decl_set const & s) {
-    unsigned sz = decls.size();
-    unsigned i  = 0;
     unsigned j  = 0;
-    for (; i < sz; i++) {
-        func_decl * f = decls[i];
+    for (func_decl* f : decls) {
         if (!m_aux_decls.contains(f) || s.contains(f)) {
-            decls[j] = f;
-            j++;
+            decls[j++] = f;
         }
     }
     decls.shrink(j);
@@ -210,14 +210,24 @@ void proto_model::remove_aux_decls_not_in_set(ptr_vector<func_decl> & decls, fun
    by their interpretations.
 */
 void proto_model::cleanup() {
-    TRACE("model_bug", model_v2_pp(tout, *this););
+    TRACE(model_bug, model_v2_pp(tout, *this););
     func_decl_set found_aux_fs;
-    for (auto const& kv : m_finterp) {
-        TRACE("model_bug", tout << kv.m_key->get_name() << "\n";);
-        func_interp * fi = kv.m_value;
-        cleanup_func_interp(fi, found_aux_fs);
+    expr_ref_vector trail(m);
+    ptr_buffer<func_interp> finterps;
+    for (auto const& kv : m_finterp)
+        finterps.push_back(kv.m_value);
+    for (auto* fi : finterps)         
+        cleanup_func_interp(trail, fi, found_aux_fs);
+    
+    for (unsigned i = 0; i < m_const_decls.size(); ++i) {
+        func_decl* d = m_const_decls[i];
+        expr* e = m_interp[d].second;
+        expr* r = cleanup_expr(trail, e, found_aux_fs);
+        if (e != r) {
+            register_decl(d, r);
+        }        
     }
-
+    // TRACE(model_bug, model_v2_pp(tout, *this););
     // remove auxiliary declarations that are not used.
     if (found_aux_fs.size() != m_aux_decls.size()) {
         remove_aux_decls_not_in_set(m_decls, found_aux_fs);
@@ -225,12 +235,13 @@ void proto_model::cleanup() {
 
         for (func_decl* faux : m_aux_decls) {
             if (!found_aux_fs.contains(faux)) {
-                TRACE("cleanup_bug", tout << "eliminating " << faux->get_name() << "\n";);
+                TRACE(cleanup_bug, tout << "eliminating " << faux->get_name() << " " << faux->get_ref_count() << "\n";);
                 unregister_decl(faux);
             }
         }
-        m_aux_decls.swap(found_aux_fs);
+        m_aux_decls = std::move(found_aux_fs);
     }
+    TRACE(model_bug, model_v2_pp(tout, *this););
 }
 
 value_factory * proto_model::get_factory(family_id fid) {
@@ -277,51 +288,37 @@ bool proto_model::is_finite(sort * s) const {
 }
 
 expr * proto_model::get_some_value(sort * s) {
-    if (m.is_uninterp(s)) {
-        return m_user_sort_factory->get_some_value(s);
-    }
-    else {
-        family_id fid = s->get_family_id();
-        value_factory * f = get_factory(fid);
-        if (f)
-            return f->get_some_value(s);
+    if (m.is_uninterp(s)) 
+        return m_user_sort_factory->get_some_value(s);    
+    else if (value_factory * f = get_factory(s->get_family_id())) 
+        return f->get_some_value(s);    
+    else 
         // there is no factory for the family id, then assume s is uninterpreted.
-        return m_user_sort_factory->get_some_value(s);
-    }
+        return m_user_sort_factory->get_some_value(s);    
 }
 
 bool proto_model::get_some_values(sort * s, expr_ref & v1, expr_ref & v2) {
-    if (m.is_uninterp(s)) {
-        return m_user_sort_factory->get_some_values(s, v1, v2);
-    }
-    else {
-        family_id fid = s->get_family_id();
-        value_factory * f = get_factory(fid);
-        if (f)
-            return f->get_some_values(s, v1, v2);
-        else
-            return false;
-    }
+    if (m.is_uninterp(s)) 
+        return m_user_sort_factory->get_some_values(s, v1, v2);    
+    else if (value_factory * f = get_factory(s->get_family_id())) 
+        return f->get_some_values(s, v1, v2);    
+    else 
+        return false;    
 }
 
 expr * proto_model::get_fresh_value(sort * s) {
-    if (m.is_uninterp(s)) {
-        return m_user_sort_factory->get_fresh_value(s);
-    }
-    else {
-        family_id fid = s->get_family_id();
-        value_factory * f = get_factory(fid);
-        if (f)
-            return f->get_fresh_value(s);
-        else
-            // Use user_sort_factory if the theory has no support for model construnction.
-            // This is needed when dummy theories are used for arithmetic or arrays.
-            return m_user_sort_factory->get_fresh_value(s);
-    }
+    if (m.is_uninterp(s)) 
+        return m_user_sort_factory->get_fresh_value(s);    
+    else if (value_factory * f = get_factory(s->get_family_id())) 
+        return f->get_fresh_value(s);    
+    else 
+        // Use user_sort_factory if the theory has no support for model construnction.
+        // This is needed when dummy theories are used for arithmetic or arrays.
+        return m_user_sort_factory->get_fresh_value(s);    
 }
 
 void proto_model::register_value(expr * n) {
-    sort * s = m.get_sort(n);
+    sort * s = n->get_sort();
     if (m.is_uninterp(s)) {
         m_user_sort_factory->register_value(n);
     }
@@ -336,7 +333,7 @@ void proto_model::register_value(expr * n) {
 void proto_model::compress() {
     for (func_decl* f : m_func_decls) {
         func_interp * fi = get_func_interp(f);
-        SASSERT(fi != 0);
+        SASSERT(fi != nullptr);
         fi->compress();
     }
 }
@@ -348,14 +345,12 @@ void proto_model::compress() {
 void proto_model::complete_partial_func(func_decl * f, bool use_fresh) {
     func_interp * fi = get_func_interp(f);
     if (fi && fi->is_partial()) {
-        expr * else_value;
-        if (use_fresh) {
+        expr * else_value = nullptr;
+        if (use_fresh)
             else_value = get_fresh_value(f->get_range());
-        }
-        else {
+        if (!else_value)
             else_value = fi->get_max_occ_result();
-        }
-        if (else_value == nullptr)
+        if (!else_value)
             else_value = get_some_value(f->get_range());
         fi->set_else(else_value);
     }
@@ -376,11 +371,11 @@ void proto_model::complete_partial_funcs(bool use_fresh) {
 }
 
 model * proto_model::mk_model() {
-    TRACE("proto_model", model_v2_pp(tout << "mk_model\n", *this););
+    TRACE(proto_model, model_v2_pp(tout << "mk_model\n", *this););
     model * mdl = alloc(model, m);
 
     for (auto const& kv : m_interp) {
-        mdl->register_decl(kv.m_key, kv.m_value);
+        mdl->register_decl(kv.m_key, kv.m_value.second);
     }
 
     for (auto const& kv : m_finterp) {
@@ -391,11 +386,11 @@ model * proto_model::mk_model() {
     m_finterp.reset(); // m took the ownership of the func_interp's
 
     unsigned sz = get_num_uninterpreted_sorts();
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         sort * s = get_uninterpreted_sort(i);
-        TRACE("proto_model", tout << "copying uninterpreted sorts...\n" << mk_pp(s, m) << "\n";);
+        TRACE(proto_model, tout << "copying uninterpreted sorts...\n" << mk_pp(s, m) << "\n";);
         ptr_vector<expr> const& buf = get_universe(s);
-        mdl->register_usort(s, buf.size(), buf.c_ptr());
+        mdl->register_usort(s, buf.size(), buf.data());
     }
 
     return mdl;

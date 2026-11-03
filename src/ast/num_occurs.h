@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef NUM_OCCURS_H_
-#define NUM_OCCURS_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -38,7 +37,10 @@ public:
         m_ignore_quantifiers(ignore_quantifiers) {
     }
 
-    void reset() { m_num_occurs.reset(); }
+    virtual ~num_occurs() = default;
+
+    void validate();
+    virtual void reset() { m_num_occurs.reset(); }
     
     void operator()(expr * t);
     void operator()(unsigned num, expr * const * ts);
@@ -51,5 +53,4 @@ public:
     }
 };
 
-#endif /* NUM_OCCURS_H_ */
 

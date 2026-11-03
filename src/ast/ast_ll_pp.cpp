@@ -17,9 +17,11 @@ Revision History:
 
 --*/
 
-#include<iostream>
+#include "ast/ast_ll_pp.h"
 #include "ast/for_each_ast.h"
 #include "ast/arith_decl_plugin.h"
+#include "ast/datatype_decl_plugin.h"
+#include "ast/ast_smt2_pp.h"
 
 // #define AST_LL_PP_SHOW_FAMILY_NAME
 
@@ -30,6 +32,7 @@ class ll_printer {
     bool           m_only_exprs;
     bool           m_compact;
     arith_util     m_autil;
+    datatype_util  m_dt;
 
     void display_def_header(ast * n) {
         if (n != m_root) {
@@ -42,18 +45,15 @@ class ll_printer {
     }
 
     void display_name(func_decl * decl) {
-        symbol n = decl->get_name();
-        if (decl->is_skolem() && n.is_numerical())
-            m_out << "z3.sk." << n.get_num();
-        else 
-            m_out << n;
+        m_out << ensure_quote(decl->get_name());
     }
 
     bool process_numeral(expr * n) {
         rational val;
         bool is_int;
         if (m_autil.is_numeral(n, val, is_int)) {
-            m_out << val << "::" << (is_int ? "Int" : "Real");
+            m_out << val;
+            if (!is_int && val.is_int()) m_out << ".0";
             return true;
         }
         return false;
@@ -81,14 +81,18 @@ class ll_printer {
                 display_child_ref(n);
             }
             break;
+        case AST_FUNC_DECL:
+            m_out << to_func_decl(n)->get_name();
+            break;
         default:
             display_child_ref(n);
         }
+
     }
 
     template<typename T>
     void display_children(unsigned num_children, T * const * children) {
-        for (unsigned i = 0; i < num_children; i++) {
+        for (unsigned i = 0; i < num_children; ++i) {
             if (i > 0) {
                 m_out << " ";
             }
@@ -99,6 +103,10 @@ class ll_printer {
     void display_params(decl * d) {
         unsigned n = d->get_num_parameters();
         parameter const* p = d->get_parameters();
+        if (n > 0 && p[0].is_symbol() && d->get_name() == p[0].get_symbol()) {
+            n--;
+            p++;
+        } 
 
         if (n > 0 && !d->private_parameters()) {
             m_out << "[";
@@ -113,6 +121,10 @@ class ll_printer {
             }
             m_out << "]";
         }
+        else if (is_func_decl(d) && m_dt.is_is(to_func_decl(d))) {
+            func_decl* fd = m_dt.get_recognizer_constructor(to_func_decl(d));
+            m_out << " " << fd->get_name();
+        }
     }
 
 public:
@@ -123,7 +135,8 @@ public:
         m_root(n),
         m_only_exprs(only_exprs),
         m_compact(compact),
-        m_autil(m) {
+        m_autil(m),
+        m_dt(m) {
     }
 
     void pp(ast* n) {
@@ -201,7 +214,7 @@ public:
                 m_out << n->get_decl()->get_parameter(i);
             }
             unsigned num_parents = m_manager.get_num_parents(n);
-            for (unsigned i = 0; i < num_parents; i++) {
+            for (unsigned i = 0; i < num_parents; ++i) {
                 m_out << " ";
                 display_child(m_manager.get_parent(n, i));
             }
@@ -240,12 +253,11 @@ public:
         }
     }
 
-    void operator()(quantifier * n) {
-        display_def_header(n);
+    void display_quantifier_header(quantifier* n) {
         m_out << "(" << (n->get_kind() == forall_k ? "forall" : (n->get_kind() == exists_k ? "exists" : "lambda")) << " ";
         unsigned num_decls = n->get_num_decls();
         m_out << "(vars ";
-        for (unsigned i = 0; i < num_decls; i++) {
+        for (unsigned i = 0; i < num_decls; ++i) {
             if (i > 0) {
                 m_out << " ";
             }
@@ -264,6 +276,12 @@ public:
             display_children(n->get_num_no_patterns(), n->get_no_patterns());
             m_out << ") ";
         }
+
+  }
+
+    void operator()(quantifier * n) {
+        display_def_header(n);
+        display_quantifier_header(n);
         display_child(n->get_expr());
         m_out << ")\n";
     }
@@ -273,38 +291,40 @@ public:
             m_out << "(:var " << to_var(n)->get_idx() << ")";
             return;
         }
+        if (is_quantifier(n)) {
+            display_quantifier_header(to_quantifier(n));
+            display(to_quantifier(n)->get_expr(), depth - 1);
+            m_out << ")";
+            return;
+        }
 
         if (!is_app(n) || depth == 0 || to_app(n)->get_num_args() == 0) {
             display_child(n);
             return;
         }
-        if (to_app(n)->get_num_args() > depth && to_app(n)->get_num_args() > 16) {
-            display_child(n);
-            return;
-        }
         unsigned num_args = to_app(n)->get_num_args();
+        
         if (num_args > 0) 
             m_out << "(";
         display_name(to_app(n)->get_decl());
         display_params(to_app(n)->get_decl());
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args && i < 16; ++i) {
             m_out << " ";
             display(to_app(n)->get_arg(i), depth-1);
         }
+        if (num_args >= 16) 
+            m_out << " ...";
         if (num_args > 0)
             m_out << ")";
     }
 
     void display_bounded(ast * n, unsigned depth) {
-        if (is_app(n)) {
-            display(to_expr(n), depth);
-        }
-        else if (is_var(n)) {
-            m_out << "(:var " << to_var(n)->get_idx() << ")";
-        }
-        else {
-            m_out << "#" << n->get_id();
-        }
+        if (!n)
+            m_out << "null";    
+        else if (is_expr(n)) 
+            display(to_expr(n), depth);               
+        else 
+            m_out << "#" << n->get_id();        
     }
 };
 

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_ARITH_PP_H_
-#define THEORY_ARITH_PP_H_
+#pragma once
 
 #include "smt/theory_arith.h"
 #include "ast/ast_smt_pp.h"
@@ -27,17 +26,22 @@ namespace smt {
     template<typename Ext>
     void theory_arith<Ext>::collect_statistics(::statistics & st) const {
         st.update("arith conflicts", m_stats.m_conflicts);
-        st.update("arith add rows", m_stats.m_add_rows);
+        st.update("arith row summations", m_stats.m_add_rows);
+        st.update("arith num rows", m_rows.size());
         st.update("arith pivots", m_stats.m_pivots);
         st.update("arith assert lower", m_stats.m_assert_lower);
         st.update("arith assert upper", m_stats.m_assert_upper);
         st.update("arith assert diseq", m_stats.m_assert_diseq);
         st.update("arith bound prop", m_stats.m_bound_props);
         st.update("arith fixed eqs", m_stats.m_fixed_eqs);
+        st.update("arith assume eqs", m_stats.m_assume_eqs);
         st.update("arith offset eqs", m_stats.m_offset_eqs);
         st.update("arith gcd tests", m_stats.m_gcd_tests);
+        st.update("arith gcd conflicts", m_stats.m_gcd_conflicts);
         st.update("arith ineq splits", m_stats.m_branches);
         st.update("arith gomory cuts", m_stats.m_gomory_cuts);
+        st.update("arith branch int", m_stats.m_branch_infeasible_int);
+        st.update("arith branch var", m_stats.m_branch_infeasible_var);
         st.update("arith patches", m_stats.m_patches);
         st.update("arith patches_succ", m_stats.m_patches_succ);
         st.update("arith max-min", m_stats.m_max_min);
@@ -45,6 +49,8 @@ namespace smt {
         st.update("arith pseudo nonlinear", m_stats.m_nl_linear);
         st.update("arith nonlinear bounds", m_stats.m_nl_bounds);
         st.update("arith nonlinear horner", m_stats.m_nl_cross_nested);
+        st.update("arith tableau max rows", m_stats.m_tableau_max_rows);
+        st.update("arith tableau max columns", m_stats.m_tableau_max_columns);
         m_arith_eq_adapter.collect_statistics(st);
     }
 
@@ -65,10 +71,8 @@ namespace smt {
         if (m_nl_monomials.empty())
             return;
         out << "non linear monomials:\n";
-        svector<theory_var>::const_iterator it  = m_nl_monomials.begin();
-        svector<theory_var>::const_iterator end = m_nl_monomials.end();
-        for (; it != end; ++it)
-            display_var(out, *it);
+        for (auto nl : m_nl_monomials) 
+            display_var(out, nl);
     }
 
     template<typename Ext>
@@ -79,18 +83,20 @@ namespace smt {
 
     template<typename Ext>
     void theory_arith<Ext>::display_row(std::ostream & out, row const & r, bool compact) const {
-        typename vector<row_entry>::const_iterator it  = r.begin_entries();
-        typename vector<row_entry>::const_iterator end = r.end_entries();
-        out << "(v" << r.get_base_var() << ") : ";
+        if (static_cast<unsigned>(r.get_base_var()) >= m_columns.size())
+            return;
+        column const & c   = m_columns[r.get_base_var()];
+        if (c.size() > 0)
+            out << "(v" << r.get_base_var() << " r" << c[0].m_row_id << ") : ";
         bool first = true;
-        for (; it != end; ++it) {
-            if (!it->is_dead()) {
+        for (auto const& e : r) {
+            if (!e.is_dead()) {
                 if (first)
                     first = false;
                 else
                     out << " + ";
-                theory_var s      = it->m_var;
-                numeral const & c = it->m_coeff;
+                theory_var s      = e.m_var;
+                numeral const & c = e.m_coeff;
                 if (!c.is_one())
                     out << c << "*";
                 if (compact) {
@@ -100,7 +106,7 @@ namespace smt {
                     }
                 }
                 else
-                    display_var_flat_def(out, s);
+                    out << enode_pp(get_enode(s), ctx);
             }
         }
         out << "\n";
@@ -114,20 +120,16 @@ namespace smt {
         else
             out << "rows (expanded view):\n";
         unsigned num = m_rows.size();
-        for (unsigned r_id = 0; r_id < num; r_id++) {
-            if (m_rows[r_id].m_base_var != null_theory_var) {
+        for (unsigned r_id = 0; r_id < num; ++r_id) 
+            if (m_rows[r_id].m_base_var != null_theory_var) 
                 display_row(out, r_id, compact);
-            }
-        }
     }
 
     template<typename Ext>
     void theory_arith<Ext>::display_row_shape(std::ostream & out, row const & r) const {
-        typename vector<row_entry>::const_iterator it  = r.begin_entries();
-        typename vector<row_entry>::const_iterator end = r.end_entries();
-        for (; it != end; ++it) {
-            if (!it->is_dead()) {
-                numeral const & c = it->m_coeff;
+        for (auto const& e : r) {
+            if (!e.is_dead()) {
+                numeral const & c = e.m_coeff;
                 if (c.is_one())
                     out << "1";
                 else if (c.is_minus_one())
@@ -147,11 +149,9 @@ namespace smt {
 
     template<typename Ext>
     bool theory_arith<Ext>::is_one_minus_one_row(row const & r) const {
-        typename vector<row_entry>::const_iterator it  = r.begin_entries();
-        typename vector<row_entry>::const_iterator end = r.end_entries();
-        for (; it != end; ++it) {
-            if (!it->is_dead()) {
-                numeral const & c = it->m_coeff;
+        for (auto const& e : r) {
+            if (!e.is_dead()) {
+                numeral const & c = e.m_coeff;
                 if (!c.is_one() && !c.is_minus_one())
                     return false;
             }
@@ -163,7 +163,7 @@ namespace smt {
     void theory_arith<Ext>::display_rows_shape(std::ostream & out) const {
         unsigned num = m_rows.size();
         unsigned num_trivial = 0;
-        for (unsigned r_id = 0; r_id < num; r_id++) {
+        for (unsigned r_id = 0; r_id < num; ++r_id) {
             row const & r = m_rows[r_id];
             if (r.m_base_var != null_theory_var) {
                 if (is_one_minus_one_row(r)) 
@@ -178,14 +178,12 @@ namespace smt {
     template<typename Ext>
     void theory_arith<Ext>::display_rows_bignums(std::ostream & out) const {
         unsigned num = m_rows.size();
-        for (unsigned r_id = 0; r_id < num; r_id++) {
+        for (unsigned r_id = 0; r_id < num; ++r_id) {
             row const & r = m_rows[r_id];
             if (r.m_base_var != null_theory_var) {
-                typename vector<row_entry>::const_iterator it  = r.begin_entries();
-                typename vector<row_entry>::const_iterator end = r.end_entries();
-                for (; it != end; ++it) {
-                    if (!it->is_dead()) {
-                        numeral const & c = it->m_coeff;
+                for (auto const& e : r) {
+                    if (!e.is_dead()) {
+                        numeral const & c = e.m_coeff;
                         if (c.to_rational().is_big()) {
                             std::string str = c.to_rational().to_string();
                             if (str.length() > 48) 
@@ -208,15 +206,13 @@ namespace smt {
         unsigned num_big_ints   = 0;
         unsigned num_small_rats = 0;
         unsigned num_big_rats   = 0;
-        for (unsigned r_id = 0; r_id < m_rows.size(); r_id++) {
+        for (unsigned r_id = 0; r_id < m_rows.size(); ++r_id) {
             row const & r = m_rows[r_id];
             if (r.m_base_var != null_theory_var) {
                 num_rows++;
-                typename vector<row_entry>::const_iterator it  = r.begin_entries();
-                typename vector<row_entry>::const_iterator end = r.end_entries();
-                for (; it != end; ++it) {
-                    if (!it->is_dead()) {
-                        numeral const & c = it->m_coeff;
+                for (auto const& e : r) {
+                    if (!e.is_dead()) {
+                        numeral const & c = e.m_coeff;
                         num_non_zeros++;
                         if (c.is_one())
                             num_ones++;
@@ -281,11 +277,9 @@ namespace smt {
     template<typename Ext>
     void theory_arith<Ext>::display_row_info(std::ostream & out, row const & r) const {
         display_row(out, r, true);
-        typename vector<row_entry>::const_iterator it  = r.begin_entries();
-        typename vector<row_entry>::const_iterator end = r.end_entries();
-        for (; it != end; ++it) 
-            if (!it->is_dead())
-                display_var(out, it->m_var);
+        for (auto const& e : r) 
+            if (!e.is_dead())
+                display_var(out, e.m_var);
     }
 
     /**
@@ -295,15 +289,14 @@ namespace smt {
     void theory_arith<Ext>::display_simplified_row(std::ostream & out, row const & r) const {
         bool has_rat_coeff = false;
         numeral k;
-        typename vector<row_entry>::const_iterator it  = r.begin_entries();
-        typename vector<row_entry>::const_iterator end = r.end_entries();
+        
         out << "(v" << r.get_base_var() << ") : ";
         bool first = true;
-        for (; it != end; ++it) {
-            if (it->is_dead())
+        for (auto const& e : r) {
+            if (e.is_dead())
                 continue;
-            theory_var v      = it->m_var;
-            numeral const & c = it->m_coeff;
+            theory_var v      = e.m_var;
+            numeral const & c = e.m_coeff;
             if (is_fixed(v)) {
                 k += c * lower_bound(v).get_rational(); 
                 continue;
@@ -325,11 +318,9 @@ namespace smt {
         }
         out << "\n";
         if (has_rat_coeff) {
-            typename vector<row_entry>::const_iterator it  = r.begin_entries();
-            typename vector<row_entry>::const_iterator end = r.end_entries();
-            for (; it != end; ++it) 
-                if (!it->is_dead() && (is_base(it->m_var) || (!is_fixed(it->m_var) && (lower(it->m_var) || upper(it->m_var)))))
-                    display_var(out, it->m_var);
+            for (auto const& e : r) 
+                if (!e.is_dead() && (is_base(e.m_var) || (!is_fixed(e.m_var) && (lower(e.m_var) || upper(e.m_var)))))
+                    display_var(out, e.m_var);
         }
     }
 
@@ -382,8 +373,7 @@ namespace smt {
         out << ", shared: " << get_context().is_shared(get_enode(v));
         out << ", unassigned: " << m_unassigned_atoms[v];
         out << ", rel: " << get_context().is_relevant(get_enode(v));
-        out << ", def: ";
-        display_var_flat_def(out, v);
+        out << ", def: " << enode_pp(get_enode(v), ctx);
         out << "\n";
     }
 
@@ -391,36 +381,36 @@ namespace smt {
     void theory_arith<Ext>::display_vars(std::ostream & out) const {
         out << "vars:\n";
         int n = get_num_vars();
-		int inf_vars = 0;
-		int int_inf_vars = 0;
-		for (theory_var v = 0; v < n; v++) {
-			if ((lower(v) && lower(v)->get_value() > get_value(v))
-				|| (upper(v) && upper(v)->get_value() < get_value(v)))
-				inf_vars++;
-			if (is_int(v) && !get_value(v).is_int())
-				int_inf_vars++;
-		}
-		out << "infeasibles = " << inf_vars << " int_inf = " << int_inf_vars << std::endl;
-		for (theory_var v = 0; v < n; v++) {
-			display_var(out, v);
-		}
+        int inf_vars = 0;
+        int int_inf_vars = 0;
+        for (theory_var v = 0; v < n; ++v) {
+            if ((lower(v) && lower(v)->get_value() > get_value(v))
+                || (upper(v) && upper(v)->get_value() < get_value(v)))
+                inf_vars++;
+            if (is_int(v) && !get_value(v).is_int())
+                int_inf_vars++;
+        }
+        out << "infeasibles = " << inf_vars << " int_inf = " << int_inf_vars << std::endl;
+        for (theory_var v = 0; v < n; ++v) {
+            display_var(out, v);
+        }
     }
 
     template<typename Ext>
     void theory_arith<Ext>::display_bound(std::ostream & out, bound * b, unsigned indent) const {
-        for (unsigned i = 0; i < indent; i++) out << "  ";
+        for (unsigned i = 0; i < indent; ++i) out << "  ";
         b->display(*this, out);
         out << "\n";
     }
 
     template<typename Ext>
     std::ostream& theory_arith<Ext>::antecedents_t::display(theory_arith& th, std::ostream & out) const {
-        th.get_context().display_literals_verbose(out, lits().size(), lits().c_ptr());
+        th.get_context().display_literals_verbose(out, lits().size(), lits().data());
         if (!lits().empty()) out << "\n";
         ast_manager& m = th.get_manager();
-        for (unsigned i = 0; i < m_eqs.size(); ++i) {
-            out << mk_pp(m_eqs[i].first->get_owner(), m) << " ";
-            out << mk_pp(m_eqs[i].second->get_owner(), m) << "\n";            
+        for (auto const& e : m_eqs) {
+            out << mk_pp(e.first->get_expr(), m) << " ";
+            out << mk_pp(e.second->get_expr(), m) << "\n";            
         }
         return out;
     }
@@ -431,40 +421,37 @@ namespace smt {
         m_dep_manager.linearize(dep, bounds);
         m_tmp_lit_set.reset();
         m_tmp_eq_set.reset();
-        ptr_vector<void>::const_iterator it  = bounds.begin();
-        ptr_vector<void>::const_iterator end = bounds.end();
-        for (; it != end; ++it) {
-            bound * b = static_cast<bound*>(*it);
-            out << " ";
-            b->display(*this, out);
+        for (void *_b : bounds) {
+            bound * b = static_cast<bound*>(_b);
+            b->display(*this, out << "\n");
         }
     }
 
     template<typename Ext>
     void theory_arith<Ext>::display_interval(std::ostream & out, interval const& i) {
         i.display(out);
-        display_deps(out << " lo:", i.get_lower_dependencies());
-        display_deps(out << " hi:", i.get_upper_dependencies());
+        display_deps(out << "\nlo:", i.get_lower_dependencies());
+        display_deps(out << "\nhi:", i.get_upper_dependencies());
     }
 
     template<typename Ext>
     void theory_arith<Ext>::display_atoms(std::ostream & out) const {
         out << "atoms:\n";
-        for (unsigned i = 0; i < m_atoms.size(); i++)
-            display_atom(out, m_atoms[i], false);
+        for (atom * a : m_atoms) 
+            display_atom(out, a, false);
     }
 
     template<typename Ext>
     void theory_arith<Ext>::display_asserted_atoms(std::ostream & out) const {
         out << "asserted atoms:\n";
-        for (unsigned i = 0; i < m_asserted_qhead; i++) {
+        for (unsigned i = 0; i < m_asserted_qhead; ++i) {
             bound * b = m_asserted_bounds[i];
             if (b->is_atom()) 
                 display_atom(out, static_cast<atom*>(b), true);
         }
         if (m_asserted_qhead < m_asserted_bounds.size()) {
             out << "delayed atoms:\n";
-            for (unsigned i = m_asserted_qhead; i < m_asserted_bounds.size(); i++) {
+            for (unsigned i = m_asserted_qhead; i < m_asserted_bounds.size(); ++i) {
                 bound * b = m_asserted_bounds[i];
                 if (b->is_atom()) 
                     display_atom(out, static_cast<atom*>(b), true);
@@ -477,28 +464,17 @@ namespace smt {
         theory_var      v = a->get_var();
         inf_numeral const & k = a->get_k();
         enode *         e = get_enode(v);
-        if (show_sign) {
-            if (!a->is_true()) 
-                out << "not ";
-            else 
-                out << "    ";
-        }
+        if (show_sign)
+            out << (a->is_true()?"    ":"not ");
         out << "v";
         out.width(3);
         out << std::left << v << " #";
         out.width(3);
         out << e->get_owner_id();
         out << std::right;
-        out << " ";
-        if (a->get_atom_kind() == A_LOWER)
-            out << ">=";
-        else
-            out << "<=";
-        out << " ";
+        out << " " << ((a->get_atom_kind() == A_LOWER)? ">=" : "<=") << " ";
         out.width(6);
-        out << k << "    ";
-        display_var_flat_def(out, v);
-        out << "\n";
+        out << k << "    " << enode_pp(get_enode(v), ctx) << "\n";
     }
 
     template<typename Ext>
@@ -507,8 +483,8 @@ namespace smt {
         ast_smt_pp pp(m);
         pp.set_benchmark_name("lemma");
         int n = get_num_vars();
-        for (theory_var v = 0; v < n; v++) {
-            expr * n = get_enode(v)->get_owner();
+        for (theory_var v = 0; v < n; ++v) {
+            expr * n = get_expr(v);
             if (is_fixed(v)) {
                 inf_numeral k_inf = lower_bound(v);
                 rational k = k_inf.get_rational().to_rational();
@@ -544,20 +520,14 @@ namespace smt {
 
     template<typename Ext>
     void theory_arith<Ext>::display_bounds_in_smtlib() const {
-        char buffer[128];
         static int id = 0;
-#ifdef _WINDOWS
-        sprintf_s(buffer, ARRAYSIZE(buffer), "arith_%d.smt", id);
-#else
-        sprintf(buffer, "arith_%d.smt", id);
-#endif
+        std::string buffer = "arith_" + std::to_string(id) + ".smt2";
         std::ofstream out(buffer);
         display_bounds_in_smtlib(out);
         out.close();
         id++;
     }
 
-};
+}
 
-#endif /* THEORY_ARITH_PP_H_ */
 

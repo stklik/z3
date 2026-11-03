@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef NLSAT_EVALUATOR_H_
-#define NLSAT_EVALUATOR_H_
+#pragma once
 
 #include "nlsat/nlsat_types.h"
 #include "nlsat/nlsat_assignment.h"
@@ -52,12 +51,11 @@ namespace nlsat {
            Let x be a->max_var(). Then, the resultant set specifies which
            values of x falsify the given literal.
         */
-        interval_set_ref infeasible_intervals(atom * a, bool neg);
+        interval_set_ref infeasible_intervals(atom * a, bool neg, clause const* cls);
 
         void push();
         void pop(unsigned num_scopes);
     };
     
-};
+}
 
-#endif

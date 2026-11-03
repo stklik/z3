@@ -17,18 +17,18 @@ Notes:
     
 --*/
 
+using System.Diagnostics;
 using System;
-using System.Diagnostics.Contracts;
 
 namespace Microsoft.Z3
 {
     /// <summary>
-    /// An arithmetic sort, i.e., Int or Real.
+    /// An arithmetic sort: Int, Real, or Complex.
     /// </summary>
     public class ArithSort : Sort
     {
         #region Internal
-        internal ArithSort(Context ctx, IntPtr obj) : base(ctx, obj) { Contract.Requires(ctx != null); }
+        internal ArithSort(Context ctx, IntPtr obj) : base(ctx, obj) { Debug.Assert(ctx != null); }
         #endregion
     };
 }

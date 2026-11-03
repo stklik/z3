@@ -16,8 +16,7 @@ Author:
 Notes:
     
 --*/
-#ifndef API_POLYNOMIAL_H_
-#define API_POLYNOMIAL_H_
+#pragma once
 
 #include "math/polynomial/polynomial.h"
 
@@ -29,10 +28,7 @@ namespace api {
         // TODO: add support for caching expressions -> polynomial and back
     public:
         pmanager(reslimit& lim) : m_pm(lim, m_nm) {}
-        ~pmanager() {}
         polynomial::manager & pm() { return m_pm; }
     };
 
-};
-
-#endif
+}

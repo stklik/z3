@@ -66,8 +66,7 @@ Revision History:
 
 --*/
 
-#ifndef DL_MK_ARRAY_INSTANTIATION_H_
-#define DL_MK_ARRAY_INSTANTIATION_H_
+#pragma once
 
 
 #include "ast/rewriter/factor_equivs.h"
@@ -113,11 +112,9 @@ namespace datalog {
      public:
         mk_array_instantiation(context & ctx, unsigned priority);
         rule_set * operator()(rule_set const & source) override;
-        ~mk_array_instantiation() override{}
     };
 
 
 
-};
+}
 
-#endif /* DL_MK_ARRAY_INSTANTIATION_H_ */

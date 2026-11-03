@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef PB_SLS_H_
-#define PB_SLS_H_
+#pragma once
 
 #include "ast/pb_decl_plugin.h"
 #include "model/model.h"
@@ -45,6 +44,5 @@ namespace smt {
     };
 
 
-};
+}
 
-#endif

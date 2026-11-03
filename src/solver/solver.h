@@ -16,21 +16,33 @@ Author:
 Notes:
 
 --*/
-#ifndef SOLVER_H_
-#define SOLVER_H_
+#pragma once
 
+#include "tactic/user_propagator_base.h"
 #include "solver/check_sat_result.h"
 #include "solver/progress_callback.h"
 #include "util/params.h"
+#include "util/sat_literal.h"
 
 class solver;
 class model_converter;
 
+
+
 class solver_factory {
 public:
-    virtual ~solver_factory() {}
+    virtual ~solver_factory() = default;
     virtual solver * operator()(ast_manager & m, params_ref const & p, bool proofs_enabled, bool models_enabled, bool unsat_core_enabled, symbol const & logic) = 0;
+    /**
+       \brief Create a clone of the solver factory for the given ast_manager.
+       The clone should be functionally equivalent but associated with the target manager.
+    */
+    virtual solver_factory* translate(ast_manager& m) = 0;
 };
+
+solver_factory * mk_smt_strategic_solver_factory(symbol const & logic = symbol::null);
+
+solver* mk_smt2_solver(ast_manager& m, params_ref const& p, symbol const& logic = symbol::null);
 
 /**
    \brief Abstract interface for making solvers available in the Z3
@@ -43,12 +55,18 @@ public:
      - statistics
      - results based on check_sat_result API
 */
-class solver : public check_sat_result {
-    params_ref m_params;
-    bool       m_enforce_model_conversion;
+class solver : public check_sat_result, public user_propagator::core {
+    params_ref  m_params;
+    symbol      m_cancel_backup_file;
 public:
-    solver(): m_enforce_model_conversion(false) {}
-    ~solver() override {}
+    struct scored_literal {
+        expr_ref lit;
+        double score = 0.0;
+        scored_literal(ast_manager& m, expr* e, double s): lit(e, m), score(s) {}
+        scored_literal(expr_ref const& e, double s): lit(e), score(s) {}
+    };
+
+    solver(ast_manager& m): check_sat_result(m) {}
 
     /**
     \brief Creates a clone of the solver.
@@ -75,6 +93,11 @@ public:
        parameters available in this solver.
     */
     virtual void collect_param_descrs(param_descrs & r);
+
+    /**
+    * \brief display parameters
+    */
+    std::ostream& display_parameters(std::ostream& out);
 
     /**
        \brief Push a parameter state. It is restored upon pop.
@@ -105,6 +128,16 @@ public:
     void assert_expr(expr_ref_vector const& ts) { 
         for (expr* e : ts) assert_expr(e);
     }
+
+    virtual void set_phase(expr* e) = 0;
+    virtual void move_to_front(expr* e) = 0; 
+
+    class phase { public: virtual ~phase() = default; };
+    
+    virtual phase* get_phase() = 0;
+
+    virtual void set_phase(phase* p) = 0;
+
 
     void assert_expr(ptr_vector<expr> const& ts) { 
         for (expr* e : ts) assert_expr(e);
@@ -140,11 +173,14 @@ public:
        
        If it is unsatisfiable, and unsat-core generation is enabled. Then, the unsat-core is a subset of these assumptions.
     */
-    virtual lbool check_sat(unsigned num_assumptions, expr * const * assumptions) = 0;
 
-    lbool check_sat(expr_ref_vector const& asms) { return check_sat(asms.size(), asms.c_ptr()); }
+    lbool check_sat(unsigned num_assumptions, expr * const * assumptions);
+
+    lbool check_sat(expr_ref_vector const& asms) { return check_sat(asms.size(), asms.data()); }
     
-    lbool check_sat(app_ref_vector const& asms) { return check_sat(asms.size(), (expr* const*)asms.c_ptr()); }
+    lbool check_sat(app_ref_vector const& asms) { return check_sat(asms.size(), (expr* const*)asms.data()); }
+
+    lbool check_sat() { return check_sat(0, nullptr); }
 
     /**
        \brief Check satisfiability modulo a cube and a clause.
@@ -153,8 +189,9 @@ public:
        assumed for the check.
     */
     virtual lbool check_sat_cc(expr_ref_vector const& cube, vector<expr_ref_vector> const& clauses) {
-        if (clauses.empty()) return check_sat(cube.size(), cube.c_ptr());
+        if (clauses.empty()) return check_sat(cube.size(), cube.data());
         NOT_IMPLEMENTED_YET();
+        return l_undef;
     }
 
     /**
@@ -218,12 +255,42 @@ public:
        \brief extract a lookahead candidates for branching.
     */
 
-    virtual expr_ref_vector cube(expr_ref_vector& vars, unsigned backtrack_level) = 0;
+    virtual expr_ref_vector cube(expr_ref_vector& vars, unsigned backtrack_level=0) = 0;
+
+    virtual expr_ref cube_vsids(expr_ref_vector const&) { return expr_ref(m); }
+
+    /**
+       \brief retrieve congruence closure root.
+    */
+    virtual expr* congruence_root(expr* e) = 0;
+
+    /**
+       \brief retrieve congruence closure sibling
+    */
+    virtual expr* congruence_next(expr* e) = 0;
+
+    /**
+       \brief expose explanation for congruence.
+    */
+    virtual expr_ref congruence_explain(expr* a, expr* b) = 0;
+
+    struct solution {
+        expr* var;
+        expr_ref term;
+        expr_ref guard;
+    };
+
+    virtual void solve_for(vector<solution>& s) {}
 
     /**
        \brief Display the content of this solver.
     */
     virtual std::ostream& display(std::ostream & out, unsigned n = 0, expr* const* assumptions = nullptr) const;
+
+    /**
+       \brief Display the content of this solver in DIMACS format
+    */
+    std::ostream& display_dimacs(std::ostream & out, bool include_names = true) const;
 
     /**
        \brief expose model converter when solver produces partially reduced set of assertions.
@@ -234,7 +301,40 @@ public:
     /**
        \brief extract units from solver.
     */
-    expr_ref_vector get_units(ast_manager& m);
+    expr_ref_vector get_units();
+
+    virtual void get_units_core(expr_ref_vector& units) {} 
+
+    expr_ref_vector get_non_units();
+
+    virtual expr_ref_vector get_trail(unsigned max_level) = 0; // { return expr_ref_vector(get_manager()); }
+    virtual expr_ref_vector get_assigned_literals() { return get_trail(UINT_MAX); }
+    virtual unsigned get_assign_level(expr* e) const { return UINT_MAX; }
+    virtual bool is_relevant(expr* e) const { return true; }
+    virtual unsigned get_num_bool_vars() const { return UINT_MAX; }
+    virtual sat::bool_var get_bool_var(expr* e) const { return sat::null_bool_var; }
+    virtual expr* bool_var2expr(sat::bool_var) const { return nullptr; }
+    virtual lbool get_assignment(sat::bool_var) const { return l_undef; }
+    virtual double get_activity(sat::bool_var) const { return 0.0; }
+    virtual bool was_eliminated(sat::bool_var) const { return false; }
+
+    virtual void pop_to_base_level() {}
+
+    virtual void setup_for_parallel() {}
+
+    virtual void set_preprocess(bool) {}
+
+    virtual void set_max_conflicts(unsigned max_conflicts) {
+        params_ref p;
+        p.set_uint("max_conflicts", max_conflicts);
+        updt_params(p);
+    }
+
+    virtual unsigned get_max_conflicts() const { return UINT_MAX; }
+    
+    virtual void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth) = 0;
+
+    virtual void get_backbone_candidates(vector<scored_literal>&, unsigned) {}
 
     class scoped_push {
         solver& s;
@@ -245,13 +345,16 @@ public:
         void disable_pop() { m_nopop = true; }
     };
 
- 
+    virtual lbool check_sat_core(unsigned num_assumptions, expr * const * assumptions) = 0;
+
 protected:
 
     virtual lbool get_consequences_core(expr_ref_vector const& asms, expr_ref_vector const& vars, expr_ref_vector& consequences);
 
+    void dump_state(unsigned sz, expr* const* assumptions);
 
     bool is_literal(ast_manager& m, expr* e);
+
 
 };
 
@@ -260,5 +363,3 @@ typedef ref<solver> solver_ref;
 inline std::ostream& operator<<(std::ostream& out, solver const& s) {
     return s.display(out);
 }
-
-#endif

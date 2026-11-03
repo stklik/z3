@@ -20,8 +20,7 @@ Revision History:
 
 --*/
 #include "tactic/tactical.h"
-#include "tactic/generic_model_converter.h"
-#include "util/cooperate.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/arith_decl_plugin.h"
 #include "tactic/core/simplify_tactic.h"
 #include "ast/ast_smt2_pp.h"
@@ -98,9 +97,8 @@ class degree_shift_tactic : public tactic {
 
 
         void checkpoint() {
-            if (m.canceled())
+            if (!m.inc())
                 throw tactic_exception(m.limit().get_cancel_msg());
-            cooperate("degree_shift");
         }
 
         void visit(expr * t, expr_fast_mark1 & visited) {
@@ -163,33 +161,28 @@ class degree_shift_tactic : public tactic {
 
         void display_candidates(std::ostream & out) {
             out << "candidates:\n";
-            for (auto const& kv : m_var2degree) {
-                if (!kv.m_value.is_one()) {
-                    out << "POWER: " << kv.m_value << "\n" << mk_ismt2_pp(kv.m_key, m) << "\n";
-                }
-            }
+            for (auto const& [k, v] : m_var2degree) 
+                if (!v.is_one()) 
+                    out << "POWER: " << v << "\n" << mk_ismt2_pp(k, m) << "\n";
         }
 
         void collect(goal const & g) {
             m_var2degree.reset();
             expr_fast_mark1 visited;
-            unsigned sz = g.size();
-            for (unsigned i = 0; i < sz; i++) {
-                collect(g.form(i), visited);
-            }
+            for (auto [f, d, p] : g)
+                collect(f, visited);
             
-            TRACE("degree_shift", display_candidates(tout););
+            TRACE(degree_shift, display_candidates(tout););
         }
 
         void discard_non_candidates() {
             m_pinned.reset();
             ptr_vector<app> to_delete;
-            for (auto const& kv : m_var2degree) {
-                if (kv.m_value.is_one())
-                    to_delete.push_back(kv.m_key);
+            for (auto const& [k, v] : m_var2degree) 
+                if (v.is_one())
+                    to_delete.push_back(k);
                 else
-                    m_pinned.push_back(kv.m_key); // make sure it is not deleted during simplifications
-            }
+                    m_pinned.push_back(k); // make sure it is not deleted during simplifications            
             for (app* a : to_delete) 
                 m_var2degree.erase(a);
         }
@@ -201,30 +194,29 @@ class degree_shift_tactic : public tactic {
                 xmc = alloc(generic_model_converter, m, "degree_shift");
                 mc = xmc;
             }
-            for (auto const& kv : m_var2degree) {
-                SASSERT(kv.m_value.is_int());
-                SASSERT(kv.m_value >= rational(2));
-                app * fresh = m.mk_fresh_const(0, kv.m_key->get_decl()->get_range());
+            for (auto const& [k, v] : m_var2degree) {
+                SASSERT(v.is_int());
+                SASSERT(v >= rational(2));
+                app * fresh = m.mk_fresh_const(nullptr, k->get_decl()->get_range());
                 m_pinned.push_back(fresh);
-                m_var2var.insert(kv.m_key, fresh);
+                m_var2var.insert(k, fresh);
                 if (m_produce_models) {
                     xmc->hide(fresh->get_decl());
-                    xmc->add(kv.m_key->get_decl(), mk_power(fresh, rational(1)/kv.m_value));
+                    xmc->add(k->get_decl(), mk_power(fresh, rational(1)/v));
                 }
                 if (m_produce_proofs) {
-                    expr * s  = mk_power(kv.m_key, kv.m_value);
+                    expr * s  = mk_power(k, v);
                     expr * eq = m.mk_eq(fresh, s);
                     proof * pr1 = m.mk_def_intro(eq);
                     proof * result_pr = m.mk_apply_def(fresh, s, pr1);
                     m_pinned.push_back(result_pr);
-                    m_var2pr.insert(kv.m_key, result_pr);
+                    m_var2pr.insert(k, result_pr);
                 }
             }
         }
 
         void operator()(goal_ref const & g, 
                         goal_ref_buffer & result) {
-            SASSERT(g->is_well_sorted());
             m_produce_proofs = g->proofs_enabled();
             m_produce_models = g->models_enabled();
             tactic_report report("degree_shift", *g);
@@ -238,28 +230,24 @@ class degree_shift_tactic : public tactic {
                 // substitute
                 expr_ref  new_curr(m);
                 proof_ref new_pr(m);
-                unsigned   size = g->size();
-                for (unsigned idx = 0; idx < size; idx++) {
+                unsigned idx = 0;
+                for (auto [curr, dep, pr] : *g) {
                     checkpoint();
-                    expr * curr = g->form(idx);
                     (*m_rw)(curr, new_curr, new_pr);
-                    if (m_produce_proofs) {
-                        proof * pr = g->pr(idx);
-                        new_pr     = m.mk_modus_ponens(pr, new_pr);
-                    }
-                    g->update(idx, new_curr, new_pr, g->dep(idx));
+                    new_pr = m.mk_modus_ponens(pr, new_pr);                    
+                    g->update(idx++, new_curr, new_pr, dep);
                 }
 
                 // add >= 0 constraints for variables with even degree
-                for (auto const& kv : m_var2degree) {
-                    SASSERT(kv.m_value.is_int());
-                    SASSERT(kv.m_value >= rational(2));
-                    if (kv.m_value.is_even()) {
-                        app * new_var  = m_var2var.find(kv.m_key);
+                for (auto const& [k,v] : m_var2degree) {
+                    SASSERT(v.is_int());
+                    SASSERT(v >= rational(2));
+                    if (v.is_even()) {
+                        app * new_var  = m_var2var.find(k);
                         app * new_c    = m_autil.mk_ge(new_var, m_autil.mk_numeral(rational(0), false));
                         proof * new_pr = nullptr;
                         if (m_produce_proofs) {
-                            proof * pr = m_var2pr.find(kv.m_key);
+                            proof * pr = m_var2pr.find(k);
                             new_pr     = m.mk_th_lemma(m_autil.get_family_id(), new_c, 1, &pr);
                         }
                         g->assert_expr(new_c, new_pr, nullptr);
@@ -269,8 +257,7 @@ class degree_shift_tactic : public tactic {
             g->inc_depth();
             g->add(mc.get());
             result.push_back(g.get());
-            TRACE("degree_shift", g->display(tout); if (mc) mc->display(tout););
-            SASSERT(g->is_well_sorted());
+            TRACE(degree_shift, g->display(tout); if (mc) mc->display(tout););
         }
     };
     
@@ -287,6 +274,8 @@ public:
     ~degree_shift_tactic() override {
         dealloc(m_imp);
     }
+
+    char const* name() const override { return "degree_shift"; }
 
     void operator()(goal_ref const & in, 
                     goal_ref_buffer & result) override {

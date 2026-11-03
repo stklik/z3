@@ -16,10 +16,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT2SCANNER_H_
-#define SMT2SCANNER_H_
+#pragma once
 
-#include<iostream>
+#include<istream>
 #include "util/symbol.h"
 #include "util/vector.h"
 #include "util/rational.h"
@@ -31,6 +30,7 @@ namespace smt2 {
     
     class scanner {
     private:
+        cmd_context&       ctx;
         bool               m_interactive;
         int                m_spos; // position in the current line of the stream
         char               m_curr;  // current char;
@@ -49,13 +49,12 @@ namespace smt2 {
         unsigned           m_bpos;
         unsigned           m_bend;
         svector<char>      m_string;
-        std::istream&      m_stream;
+        std::istream*      m_stream;
         
         bool               m_cache_input;
         svector<char>      m_cache;
         svector<char>      m_cache_result;
         
-        bool               m_smtlib2_compliant;
         
         char curr() const { return m_curr; }
         void new_line() { m_line++; m_spos = 0; }
@@ -76,9 +75,7 @@ namespace smt2 {
             EOF_TOKEN
         };
         
-        scanner(cmd_context & ctx, std::istream& stream, bool interactive = false);
-        
-        ~scanner() {}    
+        scanner(cmd_context & ctx, std::istream& stream, bool interactive = false);  
         
         int get_line() const { return m_line; }
         int get_pos() const { return m_pos; }
@@ -92,6 +89,7 @@ namespace smt2 {
         token read_symbol();
         token read_quoted_symbol();
         void read_comment();
+        void read_multiline_comment();
         token read_number();
         token read_signed_number();
         token read_string();
@@ -101,10 +99,11 @@ namespace smt2 {
         void stop_caching() { m_cache_input = false; }
         unsigned cache_size() const { return m_cache.size(); }
         void reset_cache() { m_cache.reset(); }
+        void reset_input(std::istream & stream, bool interactive = false);
+
         char const * cached_str(unsigned begin, unsigned end);
     };
 
-};
+}
 
-#endif /* SCANNER_H_ */
 

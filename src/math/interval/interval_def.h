@@ -16,14 +16,12 @@ Author:
 Revision History:
 
 --*/
-#ifndef INTERVAL_DEF_H_
-#define INTERVAL_DEF_H_
+#pragma once
 
 #include "math/interval/interval.h"
 #include "util/debug.h"
 #include "util/trace.h"
 #include "util/scoped_numeral.h"
-#include "util/cooperate.h"
 #include "util/common_msgs.h"
 
 #define DEFAULT_PI_PRECISION 2
@@ -65,7 +63,6 @@ template<typename C>
 void interval_manager<C>::checkpoint() {
     if (!m_limit.inc())
         throw default_exception(Z3_CANCELED_MSG);
-    cooperate("interval");
 }
 
 /*
@@ -203,7 +200,7 @@ void interval_manager<C>::nth_root(numeral const & a, unsigned n, numeral const 
     m().abs(A);
 
     nth_root_pos(A, n, p, lo, hi);
-    STRACE("nth_root_trace",
+    STRACE(nth_root_trace,
            tout << "[nth-root] ("; m().display(tout, A); tout << ")^(1/" << n << ") >= "; m().display(tout, lo); tout << "\n";
            tout << "[nth-root] ("; m().display(tout, A); tout << ")^(1/" << n << ") <= "; m().display(tout, hi); tout << "\n";);
     if (is_neg) {
@@ -312,7 +309,7 @@ void interval_manager<C>::approx_nth_root(numeral const & A, unsigned n, numeral
             m().div(x_prime, _n, x_prime);
             m().sub(x_prime, x, d);
             m().abs(d);
-            TRACE("nth_root",
+            TRACE(nth_root,
                   tout << "A:       "; m().display(tout, A); tout << "\n";
                   tout << "x:       "; m().display(tout, x); tout << "\n";
                   tout << "x_prime: "; m().display(tout, x_prime); tout << "\n";
@@ -341,7 +338,7 @@ void interval_manager<C>::nth_root_pos(numeral const & A, unsigned n, numeral co
     else {
         // Check if hi is really a upper bound for A^(n-1)
         A_div_x_n(A, hi, n-1, true /* lo will be greater than the actual lower bound */, lo);
-        TRACE("nth_root_bug",
+        TRACE(nth_root_bug,
               tout << "Assuming upper\n";
               tout << "A: "; m().display(tout, A); tout << "\n";
               tout << "hi: "; m().display(tout, hi); tout << "\n";
@@ -387,10 +384,10 @@ template<typename C>
 void interval_manager<C>::fact(unsigned n, numeral & o) {
     _scoped_numeral<numeral_manager> aux(m());
     m().set(o, 1);
-    for (unsigned i = 2; i <= n; i++) {
+    for (unsigned i = 2; i <= n; ++i) {
         m().set(aux, static_cast<int>(i));
         m().mul(aux, o, o);
-        TRACE("fact_bug", tout << "i: " << i << ", o: " << m().to_rational_string(o) << "\n";);
+        TRACE(fact_bug, tout << "i: " << i << ", o: " << m().to_rational_string(o) << "\n";);
     }
 }
 
@@ -410,24 +407,24 @@ void interval_manager<C>::sine_series(numeral const & a, unsigned k, bool upper,
     bool sign         = true;
     bool upper_factor = !upper; // since the first sign is negative, we must minimize factor to maximize result
     for (unsigned i = 3; i <= k; i+=2) {
-        TRACE("sine_bug", tout << "[begin-loop] o: " << m().to_rational_string(o) << "\ni: " << i << "\n";
+        TRACE(sine_bug, tout << "[begin-loop] o: " << m().to_rational_string(o) << "\ni: " << i << "\n";
               tout << "upper: " << upper << ", upper_factor: " << upper_factor << "\n";
               tout << "o (default): " << m().to_string(o) << "\n";);
         set_rounding(upper_factor);
         m().power(a, i, f);
-        TRACE("sine_bug", tout << "a^i " << m().to_rational_string(f) << "\n";);
+        TRACE(sine_bug, tout << "a^i " << m().to_rational_string(f) << "\n";);
         set_rounding(!upper_factor);
         fact(i, aux);
-        TRACE("sine_bug", tout << "i! " << m().to_rational_string(aux) << "\n";);
+        TRACE(sine_bug, tout << "i! " << m().to_rational_string(aux) << "\n";);
         set_rounding(upper_factor);
         m().div(f, aux, f);
-        TRACE("sine_bug", tout << "a^i/i! " << m().to_rational_string(f) << "\n";);
+        TRACE(sine_bug, tout << "a^i/i! " << m().to_rational_string(f) << "\n";);
         set_rounding(upper);
         if (sign)
             m().sub(o, f, o);
         else
             m().add(o, f, o);
-        TRACE("sine_bug", tout << "o: " << m().to_rational_string(o) << "\n";);
+        TRACE(sine_bug, tout << "o: " << m().to_rational_string(o) << "\n";);
         sign         = !sign;
         upper_factor = !upper_factor;
     }
@@ -435,7 +432,7 @@ void interval_manager<C>::sine_series(numeral const & a, unsigned k, bool upper,
 
 template<typename C>
 void interval_manager<C>::sine(numeral const & a, unsigned k, numeral & lo, numeral & hi) {
-    TRACE("sine", tout << "sine(a), a: " << m().to_rational_string(a) << "\na: " << m().to_string(a) << "\n";);
+    TRACE(sine, tout << "sine(a), a: " << m().to_rational_string(a) << "\na: " << m().to_string(a) << "\n";);
     SASSERT(&lo != &hi);
     if (m().is_zero(a)) {
         m().reset(lo);
@@ -459,13 +456,13 @@ void interval_manager<C>::sine(numeral const & a, unsigned k, numeral & lo, nume
     if (m().is_neg(error))
         m().neg(error);
     m().power(error, k+1, error);
-    TRACE("sine", tout << "a^(k+1): " << m().to_rational_string(error) << "\nk : " << k << "\n";);
+    TRACE(sine, tout << "a^(k+1): " << m().to_rational_string(error) << "\nk : " << k << "\n";);
     round_to_minus_inf();
     fact(k+1, aux);
-    TRACE("sine", tout << "(k+1)!: " << m().to_rational_string(aux) << "\n";);
+    TRACE(sine, tout << "(k+1)!: " << m().to_rational_string(aux) << "\n";);
     round_to_plus_inf();
     m().div(error, aux, error);
-    TRACE("sine", tout << "error: " << m().to_rational_string(error) << "\n";);
+    TRACE(sine, tout << "error: " << m().to_rational_string(error) << "\n";);
 
     // Taylor series up to k with rounding to -oo
     sine_series(a, k, false, lo);
@@ -483,10 +480,10 @@ void interval_manager<C>::sine(numeral const & a, unsigned k, numeral & lo, nume
     }
     else {
         // We must recompute the series with rounding to +oo
-        TRACE("sine", tout << "lo before -error: " << m().to_rational_string(lo) << "\n";);
+        TRACE(sine, tout << "lo before -error: " << m().to_rational_string(lo) << "\n";);
         round_to_minus_inf();
         m().sub(lo, error, lo);
-        TRACE("sine", tout << "lo: " << m().to_rational_string(lo) << "\n";);
+        TRACE(sine, tout << "lo: " << m().to_rational_string(lo) << "\n";);
         if (m().lt(lo, m_minus_one)) {
             m().set(lo, -1);
             m().set(hi, 1);
@@ -495,7 +492,7 @@ void interval_manager<C>::sine(numeral const & a, unsigned k, numeral & lo, nume
         sine_series(a, k, true, hi);
         round_to_plus_inf();
         m().add(hi, error, hi);
-        TRACE("sine", tout << "hi: " << m().to_rational_string(hi) << "\n";);
+        TRACE(sine, tout << "hi: " << m().to_rational_string(hi) << "\n";);
     }
 }
 
@@ -534,7 +531,7 @@ void interval_manager<C>::cosine_series(numeral const & a, unsigned k, bool uppe
 
 template<typename C>
 void interval_manager<C>::cosine(numeral const & a, unsigned k, numeral & lo, numeral & hi) {
-    TRACE("cosine", tout << "cosine(a): "; m().display_decimal(tout, a, 32); tout << "\n";);
+    TRACE(cosine, tout << "cosine(a): "; m().display_decimal(tout, a, 32); tout << "\n";);
     SASSERT(&lo != &hi);
     if (m().is_zero(a)) {
         m().set(lo, 1);
@@ -562,7 +559,7 @@ void interval_manager<C>::cosine(numeral const & a, unsigned k, numeral & lo, nu
     fact(k+1, aux);
     round_to_plus_inf();
     m().div(error, aux, error);
-    TRACE("sine", tout << "error: "; m().display_decimal(tout, error, 32); tout << "\n";);
+    TRACE(sine, tout << "error: "; m().display_decimal(tout, error, 32); tout << "\n";);
 
     // Taylor series up to k with rounding to -oo
     cosine_series(a, k, false, lo);
@@ -684,6 +681,17 @@ void interval_manager<C>::set(interval & t, interval const & s) {
     }
     set_lower_is_open(t, lower_is_open(s));
     set_upper_is_open(t, upper_is_open(s));
+    SASSERT(is_empty(t) || check_invariant(t));
+}
+
+template<typename C>
+void interval_manager<C>::set(interval & t, numeral const& n) {
+    m().set(lower(t), n);
+    set_lower_is_inf(t, false);
+    m().set(upper(t), n);
+    set_upper_is_inf(t, false);    
+    set_lower_is_open(t, false);
+    set_upper_is_open(t, false);
     SASSERT(check_invariant(t));
 }
 
@@ -704,31 +712,31 @@ bool interval_manager<C>::before(interval const & a, interval const & b) const {
 }
 
 template<typename C>
-void interval_manager<C>::neg_jst(interval const & a, interval_deps & b_deps) {
+void interval_manager<C>::neg_jst(interval const & a, interval_deps_combine_rule & b_deps) {
     if (lower_is_inf(a)) {
         if (upper_is_inf(a)) {
-            b_deps.m_lower_deps = 0;
-            b_deps.m_upper_deps = 0;
+            b_deps.m_lower_combine = 0;
+            b_deps.m_upper_combine = 0;
         }
         else {
-            b_deps.m_lower_deps = DEP_IN_UPPER1;
-            b_deps.m_upper_deps = 0;
+            b_deps.m_lower_combine = DEP_IN_UPPER1;
+            b_deps.m_upper_combine = 0;
         }
     }
     else {
         if (upper_is_inf(a)) {
-            b_deps.m_lower_deps = 0;
-            b_deps.m_upper_deps = DEP_IN_LOWER1;
+            b_deps.m_lower_combine = 0;
+            b_deps.m_upper_combine = DEP_IN_LOWER1;
         }
         else {
-            b_deps.m_lower_deps = DEP_IN_UPPER1;
-            b_deps.m_upper_deps = DEP_IN_LOWER1;
+            b_deps.m_lower_combine = DEP_IN_UPPER1;
+            b_deps.m_upper_combine = DEP_IN_LOWER1;
         }
     }
 }
 
 template<typename C>
-void interval_manager<C>::neg(interval const & a, interval & b, interval_deps & b_deps) {
+void interval_manager<C>::neg(interval const & a, interval & b, interval_deps_combine_rule & b_deps) {
     neg_jst(a, b_deps);
     neg(a, b);
 }
@@ -783,13 +791,13 @@ void interval_manager<C>::neg(interval const & a, interval & b) {
 }
 
 template<typename C>
-void interval_manager<C>::add_jst(interval const & a, interval const & b, interval_deps & c_deps) {
-    c_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2;
-    c_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2;
+void interval_manager<C>::add_jst(interval const & a, interval const & b, interval_deps_combine_rule & c_deps) {
+    c_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2;
+    c_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2;
 }
 
 template<typename C>
-void interval_manager<C>::add(interval const & a, interval const & b, interval & c, interval_deps & c_deps) {
+void interval_manager<C>::add(interval const & a, interval const & b, interval & c, interval_deps_combine_rule & c_deps) {
     add_jst(a, b, c_deps);
     add(a, b, c);
 }
@@ -805,17 +813,17 @@ void interval_manager<C>::add(interval const & a, interval const & b, interval &
     set_upper_is_inf(c, new_u_kind == EN_PLUS_INFINITY);
     set_lower_is_open(c, lower_is_open(a) || lower_is_open(b));
     set_upper_is_open(c, upper_is_open(a) || upper_is_open(b));
-    SASSERT(check_invariant(c));
+    SASSERT(is_empty(a) || is_empty(b) || check_invariant(c));
 }
 
 template<typename C>
-void interval_manager<C>::sub_jst(interval const & a, interval const & b, interval_deps & c_deps) {
-    c_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2;
-    c_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2;
+void interval_manager<C>::sub_jst(interval const & a, interval const & b, interval_deps_combine_rule & c_deps) {
+    c_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2;
+    c_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2;
 }
 
 template<typename C>
-void interval_manager<C>::sub(interval const & a, interval const & b, interval & c, interval_deps & c_deps) {
+void interval_manager<C>::sub(interval const & a, interval const & b, interval & c, interval_deps_combine_rule & c_deps) {
     sub_jst(a, b, c_deps);
     sub(a, b, c);
 }
@@ -835,18 +843,18 @@ void interval_manager<C>::sub(interval const & a, interval const & b, interval &
 }
 
 template<typename C>
-void interval_manager<C>::mul_jst(numeral const & k, interval const & a, interval_deps & b_deps) {
+void interval_manager<C>::mul_jst(numeral const & k, interval const & a, interval_deps_combine_rule & b_deps) {
     if (m().is_zero(k)) {
-        b_deps.m_lower_deps = 0;
-        b_deps.m_upper_deps = 0;
+        b_deps.m_lower_combine = 0;
+        b_deps.m_upper_combine = 0;
    }
     else if (m().is_neg(k)) {
-        b_deps.m_lower_deps = DEP_IN_UPPER1;
-        b_deps.m_upper_deps = DEP_IN_LOWER1;
+        b_deps.m_lower_combine = DEP_IN_UPPER1;
+        b_deps.m_upper_combine = DEP_IN_LOWER1;
     }
     else {
-        b_deps.m_lower_deps = DEP_IN_LOWER1;
-        b_deps.m_upper_deps = DEP_IN_UPPER1;
+        b_deps.m_lower_combine = DEP_IN_LOWER1;
+        b_deps.m_upper_combine = DEP_IN_UPPER1;
     }
 }
 
@@ -909,7 +917,7 @@ void interval_manager<C>::div_mul(numeral const & k, interval const & a, interva
 }
 
 template<typename C>
-void interval_manager<C>::mul(numeral const & k, interval const & a, interval & b, interval_deps & b_deps) {
+void interval_manager<C>::mul(numeral const & k, interval const & a, interval & b, interval_deps_combine_rule & b_deps) {
     mul_jst(k, a, b_deps);
     mul(k, a, b);
 }
@@ -922,57 +930,57 @@ void interval_manager<C>::mul(int n, int d, interval const & a, interval & b) {
 }
 
 template<typename C>
-void interval_manager<C>::div(interval const & a, numeral const & k, interval & b, interval_deps & b_deps) {
+void interval_manager<C>::div(interval const & a, numeral const & k, interval & b, interval_deps_combine_rule & b_deps) {
     div_jst(a, k, b_deps);
     div(a, k, b);
 }
 
 template<typename C>
-void interval_manager<C>::mul_jst(interval const & i1, interval const & i2, interval_deps & r_deps) {
+void interval_manager<C>::mul_jst(interval const & i1, interval const & i2, interval_deps_combine_rule & r_deps) {
     if (is_zero(i1)) {
-        r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
-        r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
     }
     else if (is_zero(i2)) {
-        r_deps.m_lower_deps = DEP_IN_LOWER2 | DEP_IN_UPPER2;
-        r_deps.m_upper_deps = DEP_IN_LOWER2 | DEP_IN_UPPER2;
+        r_deps.m_lower_combine = DEP_IN_LOWER2 | DEP_IN_UPPER2;
+        r_deps.m_upper_combine = DEP_IN_LOWER2 | DEP_IN_UPPER2;
     }
     else if (is_N(i1)) {
         if (is_N(i2)) {
             // x <= b <= 0, y <= d <= 0 --> b*d <= x*y
             // a <= x <= b <= 0, c <= y <= d <= 0 --> x*y <= a*c  (we can use the fact that x or y is always negative (i.e., b is neg or d is neg))
-            r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2;
-            r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER1; // we can replace DEP_IN_UPPER1 with DEP_IN_UPPER2
+            r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2;
+            r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER1; // we can replace DEP_IN_UPPER1 with DEP_IN_UPPER2
         }
         else if (is_M(i2)) {
             // a <= x <= b <= 0,  y <= d, d > 0 --> a*d <= x*y (uses the fact that b is not positive)
             // a <= x <= b <= 0,  c <= y, c < 0 --> x*y <= a*c (uses the fact that b is not positive)
-            r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2 | DEP_IN_UPPER1;
-            r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER1;
+            r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2 | DEP_IN_UPPER1;
+            r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER1;
         }
         else {
             // a <= x <= b <= 0, 0 <= c <= y <= d --> a*d <= x*y (uses the fact that x is neg (b is not positive) or y is pos (c is not negative))
             // x <= b <= 0,  0 <= c <= y --> x*y <= b*c
-            r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2 | DEP_IN_UPPER1; // we can replace DEP_IN_UPPER1 with DEP_IN_UPPER2
-            r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2;
+            r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2 | DEP_IN_UPPER1; // we can replace DEP_IN_UPPER1 with DEP_IN_UPPER2
+            r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2;
         }
     }
     else if (is_M(i1)) {
         if (is_N(i2)) {
             // b > 0, x <= b,  c <= y <= d <= 0 --> b*c <= x*y (uses the fact that d is not positive)
             // a < 0, a <= x,  c <= y <= d <= 0 --> x*y <= a*c (uses the fact that d is not positive)
-            r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
-            r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+            r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+            r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
         }
         else if (is_M(i2)) {
-            r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
-            r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+            r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+            r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
         }
         else {
             // a < 0, a <= x, 0 <= c <= y <= d --> a*d <= x*y (uses the fact that c is not negative)
             // b > 0, x <= b, 0 <= c <= y <= d --> x*y <= b*d (uses the fact that c is not negative)
-            r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2 | DEP_IN_LOWER2;
-            r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2 | DEP_IN_LOWER2;
+            r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2 | DEP_IN_LOWER2;
+            r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2 | DEP_IN_LOWER2;
         }
     }
     else {
@@ -980,27 +988,27 @@ void interval_manager<C>::mul_jst(interval const & i1, interval const & i2, inte
         if (is_N(i2)) {
             // 0 <= a <= x <= b,   c <= y <= d <= 0  -->  x*y <= b*c (uses the fact that x is pos (a is not neg) or y is neg (d is not pos))
             // 0 <= a <= x,  y <= d <= 0  --> a*d <= x*y
-            r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_LOWER1; // we can replace DEP_IN_LOWER1 with DEP_IN_UPPER2
-            r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2;
+            r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_LOWER1; // we can replace DEP_IN_LOWER1 with DEP_IN_UPPER2
+            r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2;
         }
         else if (is_M(i2)) {
             // 0 <= a <= x <= b,  c <= y --> b*c <= x*y (uses the fact that a is not negative)
             // 0 <= a <= x <= b,  y <= d --> x*y <= b*d (uses the fact that a is not negative)
-            r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_LOWER1;
-            r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2 | DEP_IN_LOWER1;
+            r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_LOWER1;
+            r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2 | DEP_IN_LOWER1;
         }
         else {
             SASSERT(is_P(i2));
             // 0 <= a <= x, 0 <= c <= y --> a*c <= x*y
             // x <= b, y <= d --> x*y <= b*d (uses the fact that x is pos (a is not negative) or y is pos (c is not negative))
-            r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2;
-            r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2 | DEP_IN_LOWER1; // we can replace DEP_IN_LOWER1 with DEP_IN_LOWER2
+            r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2;
+            r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2 | DEP_IN_LOWER1; // we can replace DEP_IN_LOWER1 with DEP_IN_LOWER2
         }
     }
 }
 
 template<typename C>
-void interval_manager<C>::mul(interval const & i1, interval const & i2, interval & r, interval_deps & r_deps) {
+void interval_manager<C>::mul(interval const & i1, interval const & i2, interval & r, interval_deps_combine_rule & r_deps) {
     mul_jst(i1, i2, r_deps);
     mul(i1, i2, r);
 }
@@ -1010,7 +1018,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
 #ifdef _TRACE
     static unsigned call_id = 0;
 #endif
-#if Z3DEBUG || _TRACE
+#if Z3DEBUG 
     bool i1_contains_zero = contains_zero(i1);
     bool i2_contains_zero = contains_zero(i2);
 #endif
@@ -1041,7 +1049,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         if (is_N(i2)) {
             // x <= b <= 0, y <= d <= 0 --> b*d <= x*y
             // a <= x <= b <= 0, c <= y <= d <= 0 --> x*y <= a*c  (we can use the fact that x or y is always negative (i.e., b is neg or d is neg))
-            TRACE("interval_bug", tout << "(N, N) #" << call_id << "\n"; display(tout, i1); tout << "\n"; display(tout, i2); tout << "\n";
+            TRACE(interval_bug, tout << "(N, N) #" << call_id << "\n"; display(tout, i1); tout << "\n"; display(tout, i2); tout << "\n";
                   tout << "a: "; m().display(tout, a); tout << "\n";
                   tout << "b: "; m().display(tout, b); tout << "\n";
                   tout << "c: "; m().display(tout, c); tout << "\n";
@@ -1061,7 +1069,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         else if (is_M(i2)) {
             // a <= x <= b <= 0,  y <= d, d > 0 --> a*d <= x*y (uses the fact that b is not positive)
             // a <= x <= b <= 0,  c <= y, c < 0 --> x*y <= a*c (uses the fact that b is not positive)
-            TRACE("interval_bug", tout << "(N, M) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(N, M) #" << call_id << "\n";);
 
             set_lower_is_open(r, a_o || d_o);
             set_upper_is_open(r, a_o || c_o);
@@ -1074,7 +1082,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         else {
             // a <= x <= b <= 0, 0 <= c <= y <= d --> a*d <= x*y (uses the fact that x is neg (b is not positive) or y is pos (c is not negative))
             // x <= b <= 0,  0 <= c <= y --> x*y <= b*c
-            TRACE("interval_bug", tout << "(N, P) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(N, P) #" << call_id << "\n";);
             SASSERT(is_P(i2));
 
             // must update upper_is_open first, since value of is_N0(i1) and is_P0(i2) may be affected by update
@@ -1091,7 +1099,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         if (is_N(i2)) {
             // b > 0, x <= b,  c <= y <= d <= 0 --> b*c <= x*y (uses the fact that d is not positive)
             // a < 0, a <= x,  c <= y <= d <= 0 --> x*y <= a*c (uses the fact that d is not positive)
-            TRACE("interval_bug", tout << "(M, N) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(M, N) #" << call_id << "\n";);
 
             set_lower_is_open(r, b_o || c_o);
             set_upper_is_open(r, a_o || c_o);
@@ -1145,7 +1153,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         else {
             // a < 0, a <= x, 0 <= c <= y <= d --> a*d <= x*y (uses the fact that c is not negative)
             // b > 0, x <= b, 0 <= c <= y <= d --> x*y <= b*d (uses the fact that c is not negative)
-            TRACE("interval_bug", tout << "(M, P) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(M, P) #" << call_id << "\n";);
             SASSERT(is_P(i2));
 
             set_lower_is_open(r, a_o || d_o);
@@ -1162,7 +1170,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         if (is_N(i2)) {
             // 0 <= a <= x <= b,   c <= y <= d <= 0  -->  x*y <= b*c (uses the fact that x is pos (a is not neg) or y is neg (d is not pos))
             // 0 <= a <= x,  y <= d <= 0  --> a*d <= x*y
-            TRACE("interval_bug", tout << "(P, N) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(P, N) #" << call_id << "\n";);
 
             // must update upper_is_open first, since value of is_P0(i1) and is_N0(i2) may be affected by update
             set_upper_is_open(r, (is_P0(i1) || is_N0(i2)) ? false : a_o || d_o);
@@ -1176,7 +1184,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
         else if (is_M(i2)) {
             // 0 <= a <= x <= b,  c <= y --> b*c <= x*y (uses the fact that a is not negative)
             // 0 <= a <= x <= b,  y <= d --> x*y <= b*d (uses the fact that a is not negative)
-            TRACE("interval_bug", tout << "(P, M) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(P, M) #" << call_id << "\n";);
 
             set_lower_is_open(r, b_o || c_o);
             set_upper_is_open(r, b_o || d_o);
@@ -1190,7 +1198,7 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
             SASSERT(is_P(i2));
             // 0 <= a <= x, 0 <= c <= y --> a*c <= x*y
             // x <= b, y <= d --> x*y <= b*d (uses the fact that x is pos (a is not negative) or y is pos (c is not negative))
-            TRACE("interval_bug", tout << "(P, P) #" << call_id << "\n";);
+            TRACE(interval_bug, tout << "(P, P) #" << call_id << "\n";);
 
             set_lower_is_open(r, (is_P0(i1) || is_P0(i2)) ? false : a_o || c_o);
             set_upper_is_open(r, b_o || d_o);
@@ -1207,62 +1215,62 @@ void interval_manager<C>::mul(interval const & i1, interval const & i2, interval
     set_lower_is_inf(r, new_l_kind == EN_MINUS_INFINITY);
     set_upper_is_inf(r, new_u_kind == EN_PLUS_INFINITY);
     SASSERT(!(i1_contains_zero || i2_contains_zero) || contains_zero(r));
-    TRACE("interval_bug", tout << "result: "; display(tout, r); tout << "\n";);
+    TRACE(interval_bug, tout << "result: "; display(tout, r); tout << "\n";);
 #ifdef _TRACE
     call_id++;
 #endif
 }
 
 template<typename C>
-void interval_manager<C>::power_jst(interval const & a, unsigned n, interval_deps & b_deps) {
+void interval_manager<C>::power_jst(interval const & a, unsigned n, interval_deps_combine_rule & b_deps) {
     if (n == 1) {
-        b_deps.m_lower_deps = DEP_IN_LOWER1;
-        b_deps.m_upper_deps = DEP_IN_UPPER1;
+        b_deps.m_lower_combine = DEP_IN_LOWER1;
+        b_deps.m_upper_combine = DEP_IN_UPPER1;
     }
     else if (n % 2 == 0) {
         if (lower_is_pos(a)) {
             // [l, u]^n = [l^n, u^n] if l > 0
             // 0 < l <= x      --> l^n <= x^n (lower bound guarantees that is positive)
             // 0 < l <= x <= u --> x^n <= u^n (use lower and upper bound -- need the fact that x is positive)
-            b_deps.m_lower_deps = DEP_IN_LOWER1;
+            b_deps.m_lower_combine = DEP_IN_LOWER1;
             if (upper_is_inf(a))
-                b_deps.m_upper_deps = 0;
+                b_deps.m_upper_combine = 0;
             else
-                b_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+                b_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
         }
         else if (upper_is_neg(a)) {
             // [l, u]^n = [u^n, l^n] if u < 0
             // l <= x <= u < 0   -->  x^n <= l^n (use lower and upper bound -- need the fact that x is negative)
             // x <= u < 0        -->  u^n <= x^n
-            b_deps.m_lower_deps = DEP_IN_UPPER1;
+            b_deps.m_lower_combine = DEP_IN_UPPER1;
             if (lower_is_inf(a))
-                b_deps.m_upper_deps = 0;
+                b_deps.m_upper_combine = 0;
             else
-                b_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+                b_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
         }
         else {
             // [l, u]^n = [0, max{l^n, u^n}] otherwise
             // we need both bounds to justify upper bound
-            b_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
-            b_deps.m_lower_deps = 0;
+            b_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+            b_deps.m_lower_combine = 0;
         }
     }
     else {
         // Remark: when n is odd x^n is monotonic.
         if (lower_is_inf(a))
-            b_deps.m_lower_deps = 0;
+            b_deps.m_lower_combine = 0;
         else
-            b_deps.m_lower_deps = DEP_IN_LOWER1;
+            b_deps.m_lower_combine = DEP_IN_LOWER1;
 
         if (upper_is_inf(a))
-            b_deps.m_upper_deps = 0;
+            b_deps.m_upper_combine = 0;
         else
-            b_deps.m_upper_deps = DEP_IN_UPPER1;
+            b_deps.m_upper_combine = DEP_IN_UPPER1;
     }
 }
 
 template<typename C>
-void interval_manager<C>::power(interval const & a, unsigned n, interval & b, interval_deps & b_deps) {
+void interval_manager<C>::power(interval const & a, unsigned n, interval & b, interval_deps_combine_rule & b_deps) {
     power_jst(a, n, b_deps);
     power(a, n, b);
 }
@@ -1328,7 +1336,7 @@ void interval_manager<C>::power(interval const & a, unsigned n, interval & b) {
         else {
             // [l, u]^n = [0, max{l^n, u^n}] otherwise
             // we need both bounds to justify upper bound
-            TRACE("interval_bug", tout << "(M) #" << call_id << "\n"; display(tout, a); tout << "\nn:" << n << "\n";);
+            TRACE(interval_bug, tout << "(M) #" << call_id << "\n"; display(tout, a); tout << "\nn:" << n << "\n";);
 
             ext_numeral_kind un1_kind = lower_kind(a), un2_kind = upper_kind(a);
             numeral & un1 = m_result_lower;
@@ -1375,7 +1383,7 @@ void interval_manager<C>::power(interval const & a, unsigned n, interval & b) {
             set_upper_is_open(b, upper_is_open(a));
         }
     }
-    TRACE("interval_bug", tout << "result: "; display(tout, b); tout << "\n";);
+    TRACE(interval_bug, tout << "result: "; display(tout, b); tout << "\n";);
 #ifdef _TRACE
     call_id++;
 #endif
@@ -1383,7 +1391,7 @@ void interval_manager<C>::power(interval const & a, unsigned n, interval & b) {
 
 
 template<typename C>
-void interval_manager<C>::nth_root(interval const & a, unsigned n, numeral const & p, interval & b, interval_deps & b_deps) {
+void interval_manager<C>::nth_root(interval const & a, unsigned n, numeral const & p, interval & b, interval_deps_combine_rule & b_deps) {
     nth_root_jst(a, n, p, b_deps);
     nth_root(a, n, p, b);
 }
@@ -1424,20 +1432,20 @@ void interval_manager<C>::nth_root(interval const & a, unsigned n, numeral const
         set_upper_is_open(b, upper_is_open(a) && m().eq(lo, hi));
         m().set(upper(b), hi);
     }
-    TRACE("interval_nth_root", display(tout, a); tout << " --> "; display(tout, b); tout << "\n";);
+    TRACE(interval_nth_root, display(tout, a); tout << " --> "; display(tout, b); tout << "\n";);
 }
 
 template<typename C>
-void interval_manager<C>::nth_root_jst(interval const & a, unsigned n, numeral const & p, interval_deps & b_deps) {
-    b_deps.m_lower_deps = DEP_IN_LOWER1;
+void interval_manager<C>::nth_root_jst(interval const & a, unsigned n, numeral const & p, interval_deps_combine_rule & b_deps) {
+    b_deps.m_lower_combine = DEP_IN_LOWER1;
     if (n % 2 == 0)
-        b_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        b_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
     else
-        b_deps.m_upper_deps = DEP_IN_UPPER1;
+        b_deps.m_upper_combine = DEP_IN_UPPER1;
 }
 
 template<typename C>
-void interval_manager<C>::xn_eq_y(interval const & y, unsigned n, numeral const & p, interval & x, interval_deps & x_deps) {
+void interval_manager<C>::xn_eq_y(interval const & y, unsigned n, numeral const & p, interval & x, interval_deps_combine_rule & x_deps) {
     xn_eq_y_jst(y, n, p, x_deps);
     xn_eq_y(y, n, p, x);
 }
@@ -1456,7 +1464,7 @@ void interval_manager<C>::xn_eq_y(interval const & y, unsigned n, numeral const 
             nth_root(upper(y), n, p, lo, hi);
             // result is [-hi, hi]
             // result is open if upper(y) is open and lo == hi
-            TRACE("interval_xn_eq_y", tout << "x^n = "; display(tout, y); tout << "\n";
+            TRACE(interval_xn_eq_y, tout << "x^n = "; display(tout, y); tout << "\n";
                   tout << "sqrt(y) in "; m().display(tout, lo); tout << " "; m().display(tout, hi); tout << "\n";);
             bool open = upper_is_open(y) && m().eq(lo, hi);
             set_lower_is_inf(x, false);
@@ -1467,7 +1475,7 @@ void interval_manager<C>::xn_eq_y(interval const & y, unsigned n, numeral const 
             round_to_minus_inf();
             m().set(lower(x), hi);
             m().neg(lower(x));
-            TRACE("interval_xn_eq_y", tout << "interval for x: "; display(tout, x); tout << "\n";);
+            TRACE(interval_xn_eq_y, tout << "interval for x: "; display(tout, x); tout << "\n";);
         }
     }
     else {
@@ -1477,29 +1485,29 @@ void interval_manager<C>::xn_eq_y(interval const & y, unsigned n, numeral const 
 }
 
 template<typename C>
-void interval_manager<C>::xn_eq_y_jst(interval const & y, unsigned n, numeral const & p, interval_deps & x_deps) {
+void interval_manager<C>::xn_eq_y_jst(interval const & y, unsigned n, numeral const & p, interval_deps_combine_rule & x_deps) {
     if (n % 2 == 0) {
-        x_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
-        x_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        x_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        x_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
     }
     else {
-        x_deps.m_lower_deps = DEP_IN_LOWER1;
-        x_deps.m_upper_deps = DEP_IN_UPPER1;
+        x_deps.m_lower_combine = DEP_IN_LOWER1;
+        x_deps.m_upper_combine = DEP_IN_UPPER1;
     }
 }
 
 template<typename C>
-void interval_manager<C>::inv_jst(interval const & a, interval_deps & b_deps) {
+void interval_manager<C>::inv_jst(interval const & a, interval_deps_combine_rule & b_deps) {
     SASSERT(!contains_zero(a));
     if (is_P1(a)) {
-        b_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
-        b_deps.m_upper_deps = DEP_IN_LOWER1;
+        b_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        b_deps.m_upper_combine = DEP_IN_LOWER1;
     }
     else if (is_N1(a)) {
         // x <= u < 0 --> 1/u <= 1/x
         // l <= x <= u < 0 --> 1/l <= 1/x (use lower and upper bounds)
-        b_deps.m_lower_deps = DEP_IN_UPPER1;
-        b_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER1;
+        b_deps.m_lower_combine = DEP_IN_UPPER1;
+        b_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER1;
     }
     else {
         UNREACHABLE();
@@ -1507,7 +1515,7 @@ void interval_manager<C>::inv_jst(interval const & a, interval_deps & b_deps) {
 }
 
 template<typename C>
-void interval_manager<C>::inv(interval const & a, interval & b, interval_deps & b_deps) {
+void interval_manager<C>::inv(interval const & a, interval & b, interval_deps_combine_rule & b_deps) {
     inv_jst(a, b_deps);
     inv(a, b);
 }
@@ -1519,7 +1527,7 @@ void interval_manager<C>::inv(interval const & a, interval & b) {
 #endif
     // If the interval [l,u] does not contain 0, then 1/[l,u] = [1/u, 1/l]
     SASSERT(!contains_zero(a));
-    TRACE("interval_bug", tout << "(inv) #" << call_id << "\n"; display(tout, a); tout << "\n";);
+    TRACE(interval_bug, tout << "(inv) #" << call_id << "\n"; display(tout, a); tout << "\n";);
 
     numeral & new_l_val = m_result_lower;
     numeral & new_u_val = m_result_upper;
@@ -1586,23 +1594,23 @@ void interval_manager<C>::inv(interval const & a, interval & b) {
     else {
         UNREACHABLE();
     }
-    TRACE("interval_bug", tout << "result: "; display(tout, b); tout << "\n";);
+    TRACE(interval_bug, tout << "result: "; display(tout, b); tout << "\n";);
 #ifdef _TRACE
     call_id++;
 #endif
 }
 
 template<typename C>
-void interval_manager<C>::div_jst(interval const & i1, interval const & i2, interval_deps & r_deps) {
+void interval_manager<C>::div_jst(interval const & i1, interval const & i2, interval_deps_combine_rule & r_deps) {
     SASSERT(!contains_zero(i2));
     if (is_zero(i1)) {
         if (is_P1(i2)) {
-            r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2;
-            r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2;
+            r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2;
+            r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2;
         }
         else {
-            r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2;
-            r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2;
+            r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2;
+            r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2;
         }
     }
     else {
@@ -1610,28 +1618,28 @@ void interval_manager<C>::div_jst(interval const & i1, interval const & i2, inte
             if (is_N1(i2)) {
                 // x <= b <= 0,      c <= y <= d < 0 --> b/c <= x/y
                 // a <= x <= b <= 0,      y <= d < 0 -->        x/y <= a/d
-                r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
-                r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2;
+                r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+                r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2;
             }
             else {
                 // a <= x, a < 0,   0 < c <= y       -->  a/c <= x/y
                 // x <= b <= 0,     0 < c <= y <= d  -->         x/y <= b/d
-                r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2;
-                r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+                r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2;
+                r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
             }
         }
         else if (is_M(i1)) {
             if (is_N1(i2)) {
                 // 0 < a <= x <= b < 0,  y <= d < 0   --> b/d <= x/y
                 // 0 < a <= x <= b < 0,  y <= d < 0   -->        x/y <= a/d
-                r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2;
-                r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_UPPER2;
+                r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2;
+                r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_UPPER2;
             }
             else {
                 // 0 < a <= x <= b < 0, 0 < c <= y  --> a/c <= x/y
                 // 0 < a <= x <= b < 0, 0 < c <= y  -->        x/y <= b/c
-                r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2;
-                r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2;
+                r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2;
+                r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2;
             }
         }
         else {
@@ -1639,22 +1647,22 @@ void interval_manager<C>::div_jst(interval const & i1, interval const & i2, inte
             if (is_N1(i2)) {
                 // b > 0,    x <= b,   c <= y <= d < 0    -->  b/d <= x/y
                 // 0 <= a <= x,        c <= y <= d < 0    -->         x/y  <= a/c
-                r_deps.m_lower_deps = DEP_IN_UPPER1 | DEP_IN_UPPER2;
-                r_deps.m_upper_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+                r_deps.m_lower_combine = DEP_IN_UPPER1 | DEP_IN_UPPER2;
+                r_deps.m_upper_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
             }
             else {
                 SASSERT(is_P1(i2));
                 // 0 <= a <= x,      0 < c <= y <= d    -->   a/d <= x/y
                 // b > 0     x <= b, 0 < c <= y         -->          x/y <= b/c
-                r_deps.m_lower_deps = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
-                r_deps.m_upper_deps = DEP_IN_UPPER1 | DEP_IN_LOWER2;
+                r_deps.m_lower_combine = DEP_IN_LOWER1 | DEP_IN_LOWER2 | DEP_IN_UPPER2;
+                r_deps.m_upper_combine = DEP_IN_UPPER1 | DEP_IN_LOWER2;
             }
         }
     }
 }
 
 template<typename C>
-void interval_manager<C>::div(interval const & i1, interval const & i2, interval & r, interval_deps & r_deps) {
+void interval_manager<C>::div(interval const & i1, interval const & i2, interval & r, interval_deps_combine_rule & r_deps) {
     div_jst(i1, i2, r_deps);
     div(i1, i2, r);
 }
@@ -1668,7 +1676,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
     SASSERT(&i1 != &r);
 
     if (is_zero(i1)) {
-        TRACE("interval_bug", tout << "div #" << call_id << "\n"; display(tout, i1); tout << "\n"; display(tout, i2); tout << "\n";);
+        TRACE(interval_bug, tout << "div #" << call_id << "\n"; display(tout, i1); tout << "\n"; display(tout, i2); tout << "\n";);
 
         // 0/other = 0 if other != 0
         m().reset(lower(r));
@@ -1693,7 +1701,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
         numeral & new_u_val = m_result_upper;
         ext_numeral_kind new_l_kind, new_u_kind;
 
-        TRACE("interval_bug", tout << "div #" << call_id << "\n"; display(tout, i1); tout << "\n"; display(tout, i2); tout << "\n";
+        TRACE(interval_bug, tout << "div #" << call_id << "\n"; display(tout, i1); tout << "\n"; display(tout, i2); tout << "\n";
               tout << "a: "; m().display(tout, a); tout << "\n";
               tout << "b: "; m().display(tout, b); tout << "\n";
               tout << "c: "; m().display(tout, c); tout << "\n";
@@ -1704,7 +1712,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
             if (is_N1(i2)) {
                 // x <= b <= 0,      c <= y <= d < 0 --> b/c <= x/y
                 // a <= x <= b <= 0,      y <= d < 0 -->        x/y <= a/d
-                TRACE("interval_bug", tout << "(N, N) #" << call_id << "\n";);
+                TRACE(interval_bug, tout << "(N, N) #" << call_id << "\n";);
 
                 set_lower_is_open(r, is_N0(i1) ? false : b_o || c_o);
                 set_upper_is_open(r, a_o || d_o);
@@ -1724,7 +1732,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
             else {
                 // a <= x, a < 0,   0 < c <= y       -->  a/c <= x/y
                 // x <= b <= 0,     0 < c <= y <= d  -->         x/y <= b/d
-                TRACE("interval_bug", tout << "(N, P) #" << call_id << "\n";);
+                TRACE(interval_bug, tout << "(N, P) #" << call_id << "\n";);
                 SASSERT(is_P1(i2));
 
                 set_upper_is_open(r, is_N0(i1) ? false : (b_o || d_o));
@@ -1747,7 +1755,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
             if (is_N1(i2)) {
                 // 0 < a <= x <= b < 0,  y <= d < 0   --> b/d <= x/y
                 // 0 < a <= x <= b < 0,  y <= d < 0   -->        x/y <= a/d
-                TRACE("interval_bug", tout << "(M, N) #" << call_id << "\n";);
+                TRACE(interval_bug, tout << "(M, N) #" << call_id << "\n";);
 
                 set_lower_is_open(r, b_o || d_o);
                 set_upper_is_open(r, a_o || d_o);
@@ -1763,14 +1771,14 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
                     ::div(m(), b, b_k, d, d_k, new_l_val, new_l_kind);
                     round_to_plus_inf();
                     ::div(m(), a, a_k, d, d_k, new_u_val, new_u_kind);
-                    TRACE("interval_bug", tout << "new_l_kind: " << new_l_kind << ", new_u_kind: " << new_u_kind << "\n";);
+                    TRACE(interval_bug, tout << "new_l_kind: " << new_l_kind << ", new_u_kind: " << new_u_kind << "\n";);
                 }
             }
             else {
                 // 0 < a <= x <= b < 0, 0 < c <= y  --> a/c <= x/y
                 // 0 < a <= x <= b < 0, 0 < c <= y  -->        x/y <= b/c
 
-                TRACE("interval_bug", tout << "(M, P) #" << call_id << "\n";);
+                TRACE(interval_bug, tout << "(M, P) #" << call_id << "\n";);
                 SASSERT(is_P1(i2));
 
                 set_lower_is_open(r, a_o || c_o);
@@ -1795,7 +1803,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
             if (is_N1(i2)) {
                 // b > 0,    x <= b,   c <= y <= d < 0    -->  b/d <= x/y
                 // 0 <= a <= x,        c <= y <= d < 0    -->         x/y  <= a/c
-                TRACE("interval_bug", tout << "(P, N) #" << call_id << "\n";);
+                TRACE(interval_bug, tout << "(P, N) #" << call_id << "\n";);
 
                 set_upper_is_open(r, is_P0(i1) ? false : a_o || c_o);
                 set_lower_is_open(r, b_o || d_o);
@@ -1816,7 +1824,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
                 SASSERT(is_P1(i2));
                 // 0 <= a <= x,      0 < c <= y <= d    -->   a/d <= x/y
                 // b > 0     x <= b, 0 < c <= y         -->          x/y <= b/c
-                TRACE("interval_bug", tout << "(P, P) #" << call_id << "\n";);
+                TRACE(interval_bug, tout << "(P, P) #" << call_id << "\n";);
 
                 set_lower_is_open(r, is_P0(i1) ? false : a_o || d_o);
                 set_upper_is_open(r, b_o || c_o);
@@ -1840,7 +1848,7 @@ void interval_manager<C>::div(interval const & i1, interval const & i2, interval
         set_lower_is_inf(r, new_l_kind == EN_MINUS_INFINITY);
         set_upper_is_inf(r, new_u_kind == EN_PLUS_INFINITY);
     }
-    TRACE("interval_bug", tout << "result: "; display(tout, r); tout << "\n";);
+    TRACE(interval_bug, tout << "result: "; display(tout, r); tout << "\n";);
 #ifdef _TRACE
     call_id++;
 #endif
@@ -1893,7 +1901,7 @@ void interval_manager<C>::pi(unsigned n, interval & r) {
     // compute lower bound
     numeral & l_val = m_result_lower;
     m().reset(l_val);
-    for (unsigned i = 0; i <= n; i++) {
+    for (unsigned i = 0; i <= n; ++i) {
         pi_series(i, p, false);
         round_to_minus_inf();
         m().add(l_val, p, l_val);
@@ -1908,7 +1916,7 @@ void interval_manager<C>::pi(unsigned n, interval & r) {
     else {
         // recompute the sum rounding to plus infinite
         m().reset(u_val);
-        for (unsigned i = 0; i <= n; i++) {
+        for (unsigned i = 0; i <= n; ++i) {
             pi_series(i, p, true);
             round_to_plus_inf();
             m().add(u_val, p, u_val);
@@ -1946,7 +1954,7 @@ void interval_manager<C>::e_series(unsigned k, bool upper, numeral & o) {
     _scoped_numeral<numeral_manager> d(m()), a(m());
     m().set(o, 2);
     m().set(d, 1);
-    for (unsigned i = 2; i <= k; i++) {
+    for (unsigned i = 2; i <= k; ++i) {
         set_rounding(!upper);
         m().set(a, static_cast<int>(i));
         m().mul(d, a, d); // d == i!
@@ -1998,4 +2006,3 @@ void interval_manager<C>::e(unsigned k, interval & r) {
     m().set(upper(r), hi);
 }
 
-#endif

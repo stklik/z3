@@ -5,7 +5,7 @@ Copyright (c) 2015 Microsoft Corporation
 --*/
 
 #include "ast/ast.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "qe/qe.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/ast_pp.h"
@@ -18,6 +18,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include "model/model_smt2_pp.h"
 #include "parsers/smt2/smt2parser.h"
 #include "ast/rewriter/var_subst.h"
+#include <iostream>
 
 static void validate_quant_solution(ast_manager& m, expr* fml, expr* guard, qe::def_vector const& defs) {
     // verify:
@@ -59,13 +60,13 @@ static void validate_quant_solutions(app* x, expr* fml, expr_ref_vector& guards)
     //    fml <=> guard_1 \/ guard_2 \/ ... 
     ast_manager& m = guards.get_manager();
     expr_ref tmp(m), fml2(m);
-    tmp = m.mk_or(guards.size(), guards.c_ptr());
+    tmp = m.mk_or(guards);
     expr* _x = x;
     std::cout << mk_pp(fml, m) << "\n";
     expr_abstract(m, 0, 1, &_x, fml, fml2);
     std::cout << mk_pp(fml2, m) << "\n";
     symbol name(x->get_decl()->get_name());
-    sort* s = m.get_sort(x);
+    sort* s = x->get_sort();
     fml2 = m.mk_exists(1, &s, &name, fml2);
     std::cout << mk_pp(fml2, m) << "\n";
     tmp = m.mk_not(m.mk_iff(fml2, tmp));
@@ -131,8 +132,7 @@ static expr_ref parse_fml(ast_manager& m, char const* str) {
            << "(assert " << str << ")\n";
     std::istringstream is(buffer.str());
     VERIFY(parse_smt2_commands(ctx, is));
-    ENSURE(ctx.begin_assertions() != ctx.end_assertions());
-    result = *ctx.begin_assertions();
+    result = ctx.assertions().get(0);
     return result;
 }
 
@@ -147,7 +147,7 @@ static void parse_fml(char const* str, app_ref_vector& vars, expr_ref& fml) {
         }
         fml = q->get_expr();
         var_subst vs(m, true);
-        fml = vs(fml, vars.size(), (expr*const*)vars.c_ptr());
+        fml = vs(fml, vars.size(), (expr*const*)vars.data());
     }
 }
 
@@ -165,7 +165,37 @@ static void test_quant_solver(ast_manager& m, char const* str, bool validate = t
     expr_ref fml(m);
     app_ref_vector vars(m);
     parse_fml(str, vars, fml);
-    test_quant_solver(m, vars.size(), vars.c_ptr(), fml, validate);
+    test_quant_solver(m, vars.size(), vars.data(), fml, validate);
+}
+
+static void test_qe_regression_4175() {
+    ast_manager m;
+    reg_decl_plugins(m);
+    smt_params params;
+    arith_util a(m);
+
+    expr_ref fml = parse_fml(m, "(forall ((b Real)) (= (= r1 b) (= b 0)))");
+    VERIFY(fml);
+    expr_ref result(m);
+    qe::expr_quant_elim qe(m, params);
+    qe(m.mk_true(), fml, result);
+    VERIFY(result);
+
+    expr_ref r1(m.mk_const(symbol("r1"), a.mk_real()), m);
+    expr_ref zero(a.mk_numeral(rational(0), false), m);
+
+    {
+        smt::kernel solver(m, params);
+        solver.assert_expr(result);
+        solver.assert_expr(m.mk_eq(r1, zero));
+        VERIFY(l_true == solver.check());
+    }
+    {
+        smt::kernel solver(m, params);
+        solver.assert_expr(result);
+        solver.assert_expr(m.mk_not(m.mk_eq(r1, zero)));
+        VERIFY(l_false == solver.check());
+    }
 }
 
 
@@ -253,6 +283,7 @@ void tst_quant_solve() {
     disable_debug("heap");
 
     test_quant_solve1();   
+    test_qe_regression_4175();
 
 #if 0
     memory::finalize();
@@ -262,5 +293,3 @@ void tst_quant_solve() {
     exit(0);
 #endif
 }
-
-

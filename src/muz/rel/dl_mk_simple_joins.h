@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_SIMPLE_JOINS_H_
-#define DL_MK_SIMPLE_JOINS_H_
+#pragma once
 
 #include "util/map.h"
 #include "util/obj_pair_hashtable.h"
@@ -57,7 +56,6 @@ namespace datalog {
         rule_set * operator()(rule_set const & source) override;
     };
 
-};
+}
 
-#endif /* DL_MK_SIMPLE_JOINS_H_ */
 

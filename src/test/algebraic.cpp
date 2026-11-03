@@ -20,22 +20,23 @@ Notes:
 #include "math/polynomial/polynomial_var2value.h"
 #include "util/mpbq.h"
 #include "util/rlimit.h"
+#include <iostream>
 
 static void display_anums(std::ostream & out, scoped_anum_vector const & rs) {
     out << "numbers in decimal:\n";
     algebraic_numbers::manager & m = rs.m();
-    for (unsigned i = 0; i < rs.size(); i++) {
-        m.display_decimal(out, rs[i], 10);
+    for (const auto& r : rs) {
+        m.display_decimal(out, r, 10);
         out << "\n";
     }
     out << "numbers as root objects\n";
-    for (unsigned i = 0; i < rs.size(); i++) {
-        m.display_root(out, rs[i]);
+    for (const auto& r : rs) {
+        m.display_root(out, r);
         out << "\n";
     }
     out << "numbers as intervals\n";
-    for (unsigned i = 0; i < rs.size(); i++) {
-        m.display_interval(out, rs[i]);
+    for (const auto& r : rs) {
+        m.display_interval(out, r);
         out << "\n";
     }
 }
@@ -189,7 +190,7 @@ void tst_refine_mpbq(int n, int d) {
     bqm.to_mpbq(q1, l);
     bqm.set(u, l);
     bqm.mul2(u);
-    for (unsigned i = 0; i < 20; i++) {
+    for (unsigned i = 0; i < 20; ++i) {
         std::cout << l << " < " << q1 << " < " << u << "\n";
         bqm.display_decimal(std::cout, l,  20); std::cout << " < ";
         qm.display_decimal(std::cout, q1, 20); std::cout << " < ";
@@ -200,7 +201,7 @@ void tst_refine_mpbq(int n, int d) {
     bqm.to_mpbq(q1, l);
     bqm.set(u, l);
     bqm.mul2(u);
-    for (unsigned i = 0; i < 20; i++) {
+    for (unsigned i = 0; i < 20; ++i) {
         std::cout << l << " < " << q1 << " < " << u << "\n";
         bqm.display_decimal(std::cout, l,  20); std::cout << " < ";
         qm.display_decimal(std::cout, q1, 20); std::cout << " < ";
@@ -229,7 +230,7 @@ static void tst_wilkinson() {
     polynomial_ref x(m);
     x = m.mk_polynomial(m.mk_var());
     polynomial_ref p(m);
-    for (int i = 1; i <= 20; i++) {
+    for (int i = 1; i <= 20; ++i) {
         if (i > 1)
             p = p*(x - i);
         else
@@ -243,7 +244,7 @@ static void tst_wilkinson() {
     am.isolate_roots(p, rs1);
     display_anums(std::cout, rs1);
     ENSURE(rs1.size() == 20);
-    for (unsigned i = 0; i < rs1.size(); i++) {
+    for (unsigned i = 0; i < rs1.size(); ++i) {
         ENSURE(am.is_int(rs1[i]));
     }
 }
@@ -335,7 +336,7 @@ static void tst_eval_sign(polynomial_ref const & p, anum_manager & am,
 }
 
 static void tst_eval_sign() {
-    enable_trace("anum_eval_sign");
+    // enable_trace("anum_eval_sign");
     reslimit rl;
     unsynch_mpq_manager        qm;
     polynomial::manager        pm(rl, qm);
@@ -397,15 +398,15 @@ static void tst_isolate_roots(polynomial_ref const & p, anum_manager & am,
     std::cout << "x1 -> "; am.display_root(std::cout, v1); std::cout << "\n";
     std::cout << "x2 -> "; am.display_root(std::cout, v2); std::cout << "\n";
     scoped_anum_vector roots(am);
-    svector<int> signs;
+    svector<::sign> signs;
     am.isolate_roots(p, x2v, roots, signs);
     ENSURE(roots.size() + 1 == signs.size());
     std::cout << "roots:\n";
-    for (unsigned i = 0; i < roots.size(); i++) {
+    for (unsigned i = 0; i < roots.size(); ++i) {
         am.display_root(std::cout, roots[i]); std::cout << " "; am.display_decimal(std::cout, roots[i]); std::cout << "\n";
     }
     std::cout << "signs:\n";
-    for (unsigned i = 0; i < signs.size(); i++) {
+    for (unsigned i = 0; i < signs.size(); ++i) {
         if (i > 0)
             std::cout << " 0 ";
         if (signs[i] < 0) std::cout << "-";
@@ -416,7 +417,7 @@ static void tst_isolate_roots(polynomial_ref const & p, anum_manager & am,
 }
 
 static void tst_isolate_roots() {
-    enable_trace("isolate_roots");
+    // enable_trace("isolate_roots");
     reslimit rl;
     unsynch_mpq_manager        qm;
     polynomial::manager        pm(rl, qm);
@@ -483,7 +484,7 @@ static void tst_isolate_roots() {
 
 static void pp(polynomial_ref const & p, polynomial::var x) {
     unsigned d = degree(p, x);
-    for (unsigned i = 0; i <= d; i++) {
+    for (unsigned i = 0; i <= d; ++i) {
         std::cout << "(" << coeff(p, x, i) << ") ";
     }
     std::cout << "\n";
@@ -562,7 +563,122 @@ static void tst_root() {
 
 }
 
+static void tst_get_interval() {
+    reslimit rl;
+    unsynch_mpq_manager qm;
+    algebraic_numbers::manager am(rl, qm);
+    scoped_anum a(am);
+    scoped_mpq q(qm), l(qm), u(qm);
+    rational lower, upper;
+
+    for (int n = -1; n <= 1; ++n) {
+        qm.set(q, n, 3);
+        am.set(a, q);
+        auto count = rl.count();
+        am.get_interval(a, l, u);
+        am.get_interval(a, lower, upper);
+        ENSURE(rl.count() == count);
+        ENSURE(qm.eq(l, q) && qm.eq(u, q));
+        ENSURE(lower == rational(q) && upper == rational(q));
+    }
+
+    polynomial::manager pm(rl, qm);
+    polynomial_ref x(pm), p(pm);
+    x = pm.mk_polynomial(pm.mk_var());
+    p = (x^2) - 2;
+    scoped_anum_vector roots(am);
+    am.isolate_roots(p, roots);
+    ENSURE(roots.size() == 2);
+    for (auto const & root : roots) {
+        rational stored_lower, stored_upper;
+        am.get_lower(root, stored_lower);
+        am.get_upper(root, stored_upper);
+
+        // Copying bounds must neither refine them nor consume solver resources.
+        auto count = rl.count();
+        am.get_interval(root, l, u);
+        am.get_interval(root, lower, upper);
+        ENSURE(rl.count() == count);
+        ENSURE(rational(l) == stored_lower && rational(u) == stored_upper);
+        ENSURE(lower == stored_lower && upper == stored_upper);
+
+        am.get_lower(root, lower);
+        am.get_upper(root, upper);
+        ENSURE(lower == stored_lower && upper == stored_upper);
+        ENSURE(am.gt(root, l) && am.lt(root, u));
+    }
+}
+
+static void tst_sturm() {
+    reslimit rl;
+    unsynch_mpq_manager nm;
+    polynomial::manager m(rl, nm);
+    polynomial_ref x(m);
+    x = m.mk_polynomial(m.mk_var());
+    polynomial_ref p(m);
+    polynomial_ref q(m);
+
+#define N(s) (rational(#s).to_mpq())
+
+    p = N(507962865083498496)*(x^10) + 
+        N(102100535881783197696)*(x^9) -
+        N(14783112447185507561472)*(x^8) - 
+        N(2001324733200883839555072)*(x^7) + 
+        N(195168383210843217999079936)*(x^6) + 
+        N(38119811955608999164032)*(x^5) + 
+        N(9215524544769908136049956)*(x^4) - 
+        N(733241058456905205563830332)*(x^3) - 
+        N(15888459782104331950227)*(x^2) - 
+        N(10235992917286431461226534)*x + 
+        N(688689757310708660505387921);    
+
+    q = N(1286741608255488)*(x^6) + 
+        N(129317531629676544)*(x^5) - 
+        N(25384908626459170944)*(x^4) + 
+        N(16014650289587907456)*(x^3) + 
+        N(2042137943326838560)*(x^2) + 
+        N(44729821875714513846)*x - 
+        N(29154410578758924855);
+
+    algebraic_numbers::manager am(rl, nm);
+    scoped_anum_vector rs1(am), rs2(am);
+    std::cout << "p: " << p << "\n";
+    am.isolate_roots(p, rs1);
+    scoped_anum a(am), b(am), c(am);
+    a = rs1[2];
+    b = rs1[3];
+    am.isolate_roots(q, rs2);
+    c = rs2[3];
+
+    display_anums(std::cout, rs1);
+    display_anums(std::cout, rs2);
+
+    am.display_decimal(std::cout << "a:", a) << "\n";
+    am.display_interval(std::cout << "a:", a) << "\n";
+    am.display_root(std::cout << "a:", a) << "\n";
+
+    am.display_decimal(std::cout << "b:", b) << "\n";
+    am.display_interval(std::cout << "b:", b) << "\n";
+    am.display_root(std::cout << "b:", b) << "\n";
+
+    am.display_decimal(std::cout << "c:", c) << "\n";
+    am.display_interval(std::cout << "c:", c) << "\n";
+    am.display_root(std::cout << "c:", c) << "\n";
+
+    std::cout << "c < a " << am.lt(c, a) << " (expecting 0)\n";
+
+    std::cout << "b < a " << am.lt(b, a) << "\n";
+    std::cout << "c < b " << am.lt(c, b) << "\n";
+    // it should not be the case that b < a == 0, c < b == 0 and c < a == 1.
+}
+
+
+
+
 void tst_algebraic() {
+    tst_get_interval();
+    tst_sturm();
+
     // enable_trace("resultant_bug");
     // enable_trace("poly_sign");
     disable_trace("algebraic");

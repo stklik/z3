@@ -16,12 +16,12 @@ Author:
 Revision History:
 
 --*/
-#ifdef _WINDOWS
 #include "util/rational.h"
 #include "smt/diff_logic.h"
 #include "smt/smt_literal.h"
 #include "util/util.h"
 #include "util/debug.h"
+#include <iostream>
 
 struct diff_logic_ext {
     typedef rational numeral;
@@ -39,7 +39,7 @@ struct tst_dl_functor {
     }
 };
 
-static void tst1() {
+[[maybe_unused]] static void tst1() {
     dlg g;
     smt::literal l;
     g.init_var(1);
@@ -55,7 +55,7 @@ static void tst1() {
     g.pop(1);
 }
 
-static void tst2() {
+[[maybe_unused]] static void tst2() {
     dlg g;
     rational w;
     smt::literal l1(1);
@@ -79,14 +79,14 @@ static void tst2() {
     ENSURE(g.get_edge_weight(1, 4, w, d) && w == rational(1));
     ENSURE(!g.get_edge_weight(1, 3, w, d));
     ENSURE(g.enable_edge(g.add_edge(2, 4, rational(10), l6)));
-    ENSURE(g.is_feasible());
+    ENSURE(g.is_feasible_dbg());
     g.push();
     ENSURE(g.enable_edge(g.add_edge(3, 0, rational(2), l4)));
     ENSURE(!g.enable_edge(g.add_edge(0, 1, rational(-1), l5)));
-    ENSURE(!g.is_feasible());
-    TRACE("diff_logic", g.display(tout););
+    ENSURE(!g.is_feasible_dbg());
+    TRACE(diff_logic, g.display(tout););
     struct proc {
-        svector<bool> found;
+        bool_vector found;
         proc():
             found(7, false) {
         }
@@ -104,8 +104,8 @@ static void tst2() {
     ENSURE(p.found[5] == true);
     ENSURE(p.found[6] == false);
     g.pop(1);
-    ENSURE(g.is_feasible());
-    TRACE("diff_logic", g.display(tout););
+    ENSURE(g.is_feasible_dbg());
+    TRACE(diff_logic, g.display(tout););
 }
 
 static int add_edge(dlg& g, dl_var src, dl_var dst, int weight, unsigned lit) {
@@ -115,7 +115,7 @@ static int add_edge(dlg& g, dl_var src, dl_var dst, int weight, unsigned lit) {
     return id;
 }
 
-static void tst3() {
+[[maybe_unused]] static void tst3() {
     dlg g;
     for (unsigned i = 1; i <= 10; ++i) {
         g.init_var(i);
@@ -137,7 +137,7 @@ static void tst3() {
     add_edge(g, 6, 10, 1, 610);
     add_edge(g, 8, 10, 1, 810);
     add_edge(g, 9, 10, 1, 910);
-    TRACE("diff_logic", g.display(tout););
+    TRACE(diff_logic, g.display(tout););
 
     int e38 = g.add_edge(3, 8, rational(3), smt::literal(38));
     std::cout << "Edge: " << e38 << "\n";
@@ -168,7 +168,3 @@ void tst_diff_logic() {
     //tst2();
     //tst3();
 }
-#else
-void tst_diff_logic() {
-}
-#endif

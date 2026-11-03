@@ -18,8 +18,8 @@ Notes:
 --*/
 #include "tactic/aig/aig.h"
 #include "tactic/goal.h"
-#include "ast/ast_smt2_pp.h"
-#include "util/cooperate.h"
+#include "ast/ast_ll_pp.h"
+#include "ast/ast_util.h"
 
 #define USE_TWO_LEVEL_RULES
 #define FIRST_NODE_ID (UINT_MAX/2)
@@ -32,6 +32,7 @@ class aig_lit {
 public:
     aig_lit(aig * n = nullptr):m_ref(n) {}
     aig_lit(aig_ref const & r):m_ref(static_cast<aig*>(r.m_ref)) {}
+    aig_lit(const aig_lit &) = default;
     bool is_inverted() const { return (reinterpret_cast<size_t>(m_ref) & static_cast<size_t>(1)) == static_cast<size_t>(1); }
     void invert() { m_ref = reinterpret_cast<aig*>(reinterpret_cast<size_t>(m_ref) ^ static_cast<size_t>(1)); }
     aig * ptr() const { return reinterpret_cast<aig*>(reinterpret_cast<size_t>(m_ref) & ~static_cast<size_t>(1)); }
@@ -50,7 +51,6 @@ struct aig {
     unsigned m_ref_count;
     aig_lit  m_children[2];
     unsigned m_mark:1;
-    aig() {}
 };
 
 #if Z3DEBUG
@@ -70,7 +70,7 @@ inline unsigned to_idx(aig * p) { SASSERT(!is_var(p)); return p->m_id - FIRST_NO
 
 
 static void unmark(unsigned sz, aig * const * ns) {
-    for (unsigned i = 0; i < sz; i++) {
+    for (unsigned i = 0; i < sz; ++i) {
         ns[i]->m_mark = false;
     }
 }
@@ -127,9 +127,8 @@ struct aig_manager::imp {
     void checkpoint() {
         if (memory::get_allocation_size() > m_max_memory)
             throw aig_exception(TACTIC_MAX_MEMORY_MSG);
-        if (m().canceled())
+        if (!m().inc())
             throw aig_exception(m().limit().get_cancel_msg());
-        cooperate("aig");
     }
 
     void dec_ref_core(aig_lit const & r) { dec_ref_core(r.ptr()); }
@@ -146,7 +145,7 @@ struct aig_manager::imp {
     }
 
     void delete_node(aig * n) {
-        TRACE("aig_lit_count", tout << "deleting: "; display_ref(tout, n); tout << "\n";);
+        TRACE(aig_lit_count, tout << "deleting: "; display_ref(tout, n); tout << "\n";);
         SASSERT(m_num_aigs > 0);
         m_num_aigs--;
         if (is_var(n)) {
@@ -433,13 +432,8 @@ struct aig_manager::imp {
         expr2aig(imp & _m):m(_m) {}
         
         ~expr2aig() {
-            obj_map<expr, aig_lit>::iterator it  = m_cache.begin();
-            obj_map<expr, aig_lit>::iterator end = m_cache.end();
-            for (; it != end; ++it) {
-                TRACE("expr2aig", tout << "dec-ref: "; m.display_ref(tout, it->m_value); 
-                      tout << " ref-count: " << ref_count(it->m_value) << "\n";);
-                m.dec_ref(it->m_value);
-            }
+            for (auto& [k,v] : m_cache) 
+                m.dec_ref(v);
             restore_result_stack(0);
         }
         
@@ -449,7 +443,7 @@ struct aig_manager::imp {
         }
 
         void cache_result(expr * t, aig_lit const & r) {
-            TRACE("expr2aig", tout << "caching:\n" << mk_ismt2_pp(t, m.m()) << "\n---> "; m.display_ref(tout, r); tout << "\n";); 
+            TRACE(expr2aig, tout << "caching:\n" << mk_bounded_pp(t, m.m()) << "\n---> "; m.display_ref(tout, r); tout << "\n";); 
             SASSERT(!m_cache.contains(t));
             m.inc_ref(r);
             m_cache.insert(t, r);
@@ -487,6 +481,7 @@ struct aig_manager::imp {
                     case OP_EQ:
                         if (!m.m().is_bool(tapp->get_arg(0)))
                             break;
+                        Z3_fallthrough;
                     case OP_NOT:
                     case OP_OR:      
                     case OP_AND:
@@ -514,7 +509,7 @@ struct aig_manager::imp {
         void restore_result_stack(unsigned old_sz) {
             unsigned sz = m_result_stack.size();
             SASSERT(old_sz <= sz);
-            for (unsigned i = old_sz; i < sz; i++)
+            for (unsigned i = old_sz; i < sz; ++i)
                 m.dec_ref(m_result_stack[i]);
             m_result_stack.shrink(old_sz);
         }
@@ -548,14 +543,34 @@ struct aig_manager::imp {
         }
 
         void mk_iff(unsigned spos) {
+            if (spos + 2 != m_result_stack.size())
+                throw default_exception("aig conversion assumes expressions have been simplified");
             SASSERT(spos + 2 == m_result_stack.size());
             aig_lit r = m.mk_iff(m_result_stack[spos], m_result_stack[spos+1]);
             save_node_result(spos, r);
         }
         
         void mk_xor(unsigned spos) {
-            SASSERT(spos + 2 == m_result_stack.size());
-            aig_lit r = m.mk_xor(m_result_stack[spos], m_result_stack[spos+1]);
+            SASSERT(spos <= m_result_stack.size());
+            unsigned num = m_result_stack.size() - spos;
+            aig_lit r;
+            switch (num) {
+            case 0:
+                r = m.m_false;
+                break;
+            case 1:
+                r = m_result_stack[spos];
+                break;
+            case 2:
+                r = m.mk_xor(m_result_stack[spos], m_result_stack[spos+1]);                
+                break;
+            default:
+                r = m.mk_xor(m_result_stack[spos], m_result_stack[spos+1]);
+                for (unsigned i = 2; i < num; ++i) {
+                    r = m.mk_xor(r, m_result_stack[spos + i]);
+                }
+                break;
+            }
             save_node_result(spos, r);
         }
 
@@ -761,7 +776,7 @@ struct aig_manager::imp {
                 return n->m_id == 0 ? ast_mng.mk_true() : m.var2expr(n);
             }
             else {
-                CTRACE("aig2expr", !is_cached(n), tout << "invalid get_cached for "; m.display_ref(tout, n); tout << "\n";);
+                CTRACE(aig2expr, !is_cached(n), tout << "invalid get_cached for "; m.display_ref(tout, n); tout << "\n";);
                 SASSERT(is_cached(n));
                 return m_cache.get(to_idx(n));
             }
@@ -852,9 +867,9 @@ struct aig_manager::imp {
                 add_child(left(t));
                 add_child(right(t));
             }
-            expr * r = ast_mng.mk_not(ast_mng.mk_or(m_and_children.size(), m_and_children.c_ptr()));
+            expr * r = ast_mng.mk_not(ast_mng.mk_or(m_and_children.size(), m_and_children.data()));
             cache_result(n, r);
-            TRACE("aig2expr", tout << "caching AND "; m.display_ref(tout, n); tout << "\n";);
+            TRACE(aig2expr, tout << "caching AND "; m.display_ref(tout, n); tout << "\n";);
         }
 
         void mk_ite(aig * n) {
@@ -866,13 +881,20 @@ struct aig_manager::imp {
             }
             expr * r;
             if (m.is_not_eq(t, e)) {
-                r = ast_mng.mk_iff(get_cached(c), get_cached(t));
+                {
+                    expr_ref lhs(get_cached(c), ast_mng);
+                    expr_ref rhs(get_cached(t), ast_mng);
+                    r = ast_mng.mk_iff(lhs, rhs);
+                }
             }
             else { 
-                r = ast_mng.mk_ite(get_cached(c), get_cached(t), get_cached(e));
+                expr_ref condition(get_cached(c), ast_mng);
+                expr_ref then_expr(get_cached(t), ast_mng);
+                expr_ref else_expr(get_cached(e), ast_mng);
+                r = ast_mng.mk_ite(condition, then_expr, else_expr);
             }
             cache_result(n, r);
-            TRACE("aig2expr", tout << "caching ITE/IFF "; m.display_ref(tout, n); tout << "\n";);
+            TRACE(aig2expr, tout << "caching ITE/IFF "; m.display_ref(tout, n); tout << "\n";);
         }
 
         /**
@@ -922,7 +944,7 @@ struct aig_manager::imp {
                 switch (fr.m_kind){
                 case AIG_AUX_AND:
                     // do nothing
-                    TRACE("aig2expr", tout << "skipping aux AND "; m.display_ref(tout, n); tout << "\n";);
+                    TRACE(aig2expr, tout << "skipping aux AND "; m.display_ref(tout, n); tout << "\n";);
                     break;
                 case AIG_AND:
                     mk_and(n);
@@ -959,7 +981,7 @@ struct aig_manager::imp {
                     continue;
                 }
                 bool ok = true;
-                for (unsigned i = 0; i < 2; i++) {
+                for (unsigned i = 0; i < 2; ++i) {
                     aig * c = t->m_children[i].ptr();
                     if (!is_var(c) && cache.get(to_idx(c), nullptr) == nullptr) {
                         todo.push_back(c);
@@ -969,7 +991,7 @@ struct aig_manager::imp {
                 if (!ok) 
                     continue;
                 expr * args[2];
-                for (unsigned i = 0; i < 2; i++) {
+                for (unsigned i = 0; i < 2; ++i) {
                     aig_lit l = t->m_children[i];
                     aig *   c = l.ptr();
                     if (is_var(c))
@@ -991,33 +1013,34 @@ struct aig_manager::imp {
                 r = invert(r);
         }
 
-        void operator()(aig_lit const & l, expr_ref & r) {
-            naive(l, r);
-        }
-
-        void operator()(aig_lit const & l, goal & g) {
-            g.reset();
+        void not_naive(aig_lit const& l, expr_ref & r) {
             sbuffer<aig_lit> roots;
+            expr_ref_vector rs(r.m());
             roots.push_back(l);
             while (!roots.empty()) {
                 aig_lit n = roots.back();
                 roots.pop_back();
                 if (n.is_inverted()) {
-                    g.assert_expr(invert(process_root(n.ptr())), nullptr, nullptr);
+                    rs.push_back(invert(process_root(n.ptr())));
                     continue;
                 }
                 aig * p = n.ptr();
                 if (m.is_ite(p)) {
-                    g.assert_expr(process_root(p), nullptr, nullptr);
+                    rs.push_back(process_root(p));
                     continue;
                 }
                 if (is_var(p)) {
-                    g.assert_expr(m.var2expr(p), nullptr, nullptr);
+                    rs.push_back(m.var2expr(p));
                     continue;
                 }
                 roots.push_back(left(p));
                 roots.push_back(right(p));
             }
+            r = ::mk_and(rs);
+        }
+
+        void operator()(aig_lit const & l, expr_ref & r) {            
+            not_naive(l, r);
         }
 
     };
@@ -1041,7 +1064,7 @@ struct aig_manager::imp {
         }
 
         void reset_saved() {
-            m.dec_array_ref(m_saved.size(), m_saved.c_ptr());
+            m.dec_array_ref(m_saved.size(), m_saved.data());
             m_saved.finalize();
         }
 
@@ -1122,7 +1145,7 @@ struct aig_manager::imp {
             aig_lit a = left(left(n));
             aig_lit b = right(left(n));
             aig_lit c = right(n);
-            TRACE("max_sharing", 
+            TRACE(max_sharing, 
                   tout << "trying (and "; m.display_ref(tout, a); 
                   tout << " (and ";       m.display_ref(tout, b); 
                   tout << " ";            m.display_ref(tout, c);
@@ -1135,12 +1158,12 @@ struct aig_manager::imp {
                     r.invert();
                 save_result(o, r);
                 m.dec_ref(bc);
-                TRACE("max_sharing", tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
+                TRACE(max_sharing, tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
                 return true;
             }
             m.dec_ref(bc);
             
-            TRACE("max_sharing", 
+            TRACE(max_sharing, 
                   tout << "trying (and "; m.display_ref(tout, a); 
                   tout << " (and ";       m.display_ref(tout, c); 
                   tout << " ";            m.display_ref(tout, b);
@@ -1153,7 +1176,7 @@ struct aig_manager::imp {
                     r.invert();
                 save_result(o, r);
                 m.dec_ref(ac);
-                TRACE("max_sharing", tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
+                TRACE(max_sharing, tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
                 return true;
             }
             m.dec_ref(ac);
@@ -1167,7 +1190,7 @@ struct aig_manager::imp {
             aig_lit a = left(n);
             aig_lit b = left(right(n));
             aig_lit c = right(right(n));
-            TRACE("max_sharing", 
+            TRACE(max_sharing, 
                   tout << "trying (and (and "; m.display_ref(tout, a); 
                   tout << " ";                 m.display_ref(tout, b); 
                   tout << ") ";                m.display_ref(tout, c);
@@ -1180,13 +1203,13 @@ struct aig_manager::imp {
                     r.invert();
                 save_result(o, r);
                 m.dec_ref(ab);
-                TRACE("max_sharing", tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
+                TRACE(max_sharing, tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
                 return true;
             }
             m.dec_ref(ab);
             
             aig_lit ac = m.mk_and(a, c);
-            TRACE("max_sharing", 
+            TRACE(max_sharing, 
                   tout << "trying (and (and "; m.display_ref(tout, a); 
                   tout << " ";                 m.display_ref(tout, c); 
                   tout << ") ";                m.display_ref(tout, b);
@@ -1198,7 +1221,7 @@ struct aig_manager::imp {
                     r.invert();
                 save_result(o, r);
                 m.dec_ref(ac);
-                TRACE("max_sharing", tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
+                TRACE(max_sharing, tout << "improved:\n"; m.display(tout, o); tout << "---->\n"; m.display(tout, r););
                 return true;
             }
             m.dec_ref(ac);
@@ -1252,16 +1275,18 @@ struct aig_manager::imp {
             start:
                 frame & fr = m_frame_stack.back();
                 aig * n    = fr.m_node;
-                TRACE("max_sharing", tout << "processing "; m.display_ref(tout, n); tout << " idx: " << fr.m_idx << "\n";);
+                TRACE(max_sharing, tout << "processing "; m.display_ref(tout, n); tout << " idx: " << fr.m_idx << "\n";);
                 switch (fr.m_idx) {
                 case 0: 
                     fr.m_idx++;
                     if (!visit(left(n)))
                         goto start;
+                    Z3_fallthrough;
                 case 1:
                     fr.m_idx++;
                     if (!visit(right(n)))
                         goto start;
+                    Z3_fallthrough;
                 default:
                     if (!is_cached(n))
                         improve_sharing(n);
@@ -1275,7 +1300,7 @@ struct aig_manager::imp {
             process(p.ptr());
             SASSERT(m_result_stack.size() == 1);
             aig_lit r = m_result_stack.back();
-            TRACE("max_sharing", tout << "r.is_null(): " << r.is_null() << "\n";);
+            TRACE(max_sharing, tout << "r.is_null(): " << r.is_null() << "\n";);
             SASSERT(r.is_null() || ref_count(r) >= 1);
             reset_cache();
             if (r.is_null()) {
@@ -1286,7 +1311,7 @@ struct aig_manager::imp {
                 r.invert();
             }
             m_result_stack.pop_back();
-            TRACE("max_sharing", tout << "result:\n"; m.display(tout, r););
+            TRACE(max_sharing, tout << "result:\n"; m.display(tout, r););
             m.dec_ref_result(r);
             return r;
         }
@@ -1327,14 +1352,14 @@ public:
     void dec_ref(aig_lit const & r) { dec_ref(r.ptr()); }
 
     void dec_array_ref(unsigned sz, aig * const * ns) {
-        for (unsigned i = 0; i < sz; i++)
+        for (unsigned i = 0; i < sz; ++i)
             if (ns[i]) 
                 dec_ref(ns[i]);
     }
 
     aig_lit mk_and(aig_lit r1, aig_lit r2) {
         aig_lit r = mk_node(r1, r2);
-        TRACE("mk_and_bug", 
+        TRACE(mk_and_bug, 
               display(tout, r1);
               tout << "AND\n";
               display(tout, r2);
@@ -1357,7 +1382,7 @@ public:
             std::sort(args, args+num, aig_lit_lt());
             aig_lit r = mk_and(args[0], args[1]);
             inc_ref(r);
-            for (unsigned i = 2; i < num; i++) {
+            for (unsigned i = 2; i < num; ++i) {
                 aig_lit new_r = mk_and(r, args[i]);
                 inc_ref(new_r);
                 dec_ref(r);
@@ -1388,7 +1413,7 @@ public:
             std::sort(args, args+num, aig_lit_lt());
             aig_lit r = mk_or(args[0], args[1]);
             inc_ref(r);
-            for (unsigned i = 2; i < num; i++) {
+            for (unsigned i = 2; i < num; ++i) {
                 aig_lit new_r = mk_or(r, args[i]);
                 inc_ref(new_r);
                 dec_ref(r);
@@ -1501,7 +1526,7 @@ public:
         try {
         expr2aig proc(*this);
             unsigned sz = s.size();
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < sz; ++i) {
                 SASSERT(ref_count(r) >= 1);
                 expr * t = s.form(i);
                 aig_lit n = proc(t);
@@ -1516,18 +1541,14 @@ public:
             }
             SASSERT(ref_count(r) >= 1);
         }
-    catch (const aig_exception & ex) {
-        dec_ref(r);
-        throw ex;
-    }
+        catch (const aig_exception & ex) {
+            dec_ref(r);
+            throw ex;
+        }
         dec_ref_result(r);
         return r;
     }
 
-    void to_formula(aig_lit const & r, goal & g) {
-        aig2expr proc(*this);
-        proc(r, g);
-    }
     
     void to_formula(aig_lit const & r, expr_ref & result) {
         aig2expr proc(*this);
@@ -1563,7 +1584,7 @@ public:
             qhead++;
             display_ref(out, n); out << ": ";
             if (is_var(n)) {
-                out << mk_ismt2_pp(m_var2exprs[n->m_id], m()) << "\n";
+                out << mk_bounded_pp(m_var2exprs[n->m_id], m()) << "\n";
             }
             else {
                 display_ref(out, n->m_children[0]);
@@ -1582,14 +1603,14 @@ public:
                 }
             }
         }
-        unmark(queue.size(), queue.c_ptr());
+        unmark(queue.size(), queue.data());
     }
 
     void display_smt2_ref(std::ostream & out, aig_lit const & r) const {
         if (r.is_inverted())
             out << "(not ";
         if (is_var(r)) {
-            out << mk_ismt2_pp(var2expr(r.ptr()), m());
+            out << mk_bounded_pp(var2expr(r.ptr()), m());
         }
         else {
             out << "aig" << to_idx(r.ptr());
@@ -1615,11 +1636,11 @@ public:
                 continue;
             }
             bool visited = true;
-            for (unsigned i = 0; i < 2; i++) {
+            for (unsigned i = 0; i < 2; ++i) {
                 aig_lit c = t->m_children[i];
-                aig * c_ptr = c.ptr();
-                if (!c_ptr->m_mark) {
-                    todo.push_back(c_ptr);
+                aig * data = c.ptr();
+                if (!data->m_mark) {
+                    todo.push_back(data);
                     visited = false;
                 }
             }
@@ -1628,7 +1649,7 @@ public:
             to_unmark.push_back(t);
             t->m_mark = true;
             out << "(define-fun aig" << to_idx(t) << " () Bool (and";
-            for (unsigned i = 0; i < 2; i++) {
+            for (unsigned i = 0; i < 2; ++i) {
                 out << " ";
                 display_smt2_ref(out, t->m_children[i]);
             }
@@ -1638,7 +1659,7 @@ public:
         out << "(assert ";
         display_smt2_ref(out, r);
         out << ")\n";
-        unmark(to_unmark.size(), to_unmark.c_ptr());
+        unmark(to_unmark.size(), to_unmark.data());
     }
 
     unsigned get_num_aigs() const {
@@ -1720,11 +1741,6 @@ void aig_manager::max_sharing(aig_ref & r) {
     r = aig_ref(*this, m_imp->max_sharing(aig_lit(r)));
 }
 
-void aig_manager::to_formula(aig_ref const & r, goal & g) {
-    SASSERT(!g.proofs_enabled());
-    SASSERT(!g.unsat_core_enabled());
-    return m_imp->to_formula(aig_lit(r), g);
-}
 
 void aig_manager::to_formula(aig_ref const & r, expr_ref & res) {
     return m_imp->to_formula(aig_lit(r), res);

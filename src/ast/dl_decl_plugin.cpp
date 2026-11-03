@@ -17,6 +17,7 @@ Revision History:
 
 --*/
 #include<sstream>
+#include<format>
 
 #include "ast/ast_pp.h"
 #include "ast/array_decl_plugin.h"
@@ -52,9 +53,7 @@ namespace datalog {
         if (low <= val && val <= up) {
             return true;
         }
-        std::ostringstream buffer;
-        buffer << msg << ", value is not within bound " << low << " <= " << val << " <= " << up;
-        m_manager->raise_exception(buffer.str().c_str());
+        m_manager->raise_exception(std::format("{}, value is not within bound {} <= {} <= {}", msg, low, val, up));
         return false;
     }
 
@@ -75,7 +74,7 @@ namespace datalog {
                 return nullptr;
             }
             sort* s = to_sort(parameters[i].get_ast());
-            sort_size sz1 = s->get_num_elements();
+            sort_size const& sz1 = s->get_num_elements();
             if (sz1.is_finite()) {
                 r *= rational(sz1.size(),rational::ui64());
             }
@@ -147,7 +146,7 @@ namespace datalog {
         for (unsigned i = 0; i < n; ++i) {
             parameter const& p = r->get_parameter(i);
             if (!p.is_ast() || !is_sort(p.get_ast())) {
-                m_manager->raise_exception("exptected sort parameter");
+                m_manager->raise_exception("expected sort parameter");
                 return false;
             }
             sorts.push_back(to_sort(p.get_ast()));
@@ -185,7 +184,7 @@ namespace datalog {
                            verbose_stream() << "Domain: " << mk_pp(domain[0], m) << "\n" <<
                            mk_pp(sorts[i], m) << "\n" <<
                            mk_pp(domain[i+1], m) << "\n";);
-                m_manager->raise_exception("sort miss-match for relational access");
+                m_manager->raise_exception("sort mismatch for relational access");
                 return nullptr;
             }
         }
@@ -211,7 +210,7 @@ namespace datalog {
         ast_manager& m = *m_manager;
         ptr_vector<sort> sorts;
         vector<parameter> ps;
-        TRACE("dl_decl_plugin", 
+        TRACE(dl_decl_plugin, 
                 tout << mk_pp(r, m) << " ";
                 for (unsigned i = 0; i < num_params; ++i) {
                     tout << params[i] << " ";
@@ -244,7 +243,7 @@ namespace datalog {
             ps.push_back(parameter(sorts[j]));
         }
         SASSERT(ps.size() + num_params == sorts.size());
-        sort* r2 = m.mk_sort(m_family_id, DL_RELATION_SORT, ps.size(), ps.c_ptr());        
+        sort* r2 = m.mk_sort(m_family_id, DL_RELATION_SORT, ps.size(), ps.data());        
         func_decl_info info(m_family_id, OP_RA_PROJECT, num_params, params);            
         return m.mk_func_decl(m_project_sym, 1, &r, r2, info);
     }
@@ -252,7 +251,7 @@ namespace datalog {
     func_decl * dl_decl_plugin::mk_unionw(decl_kind k, sort* s1, sort* s2) {
         ast_manager& m = *m_manager;
         if (s1 != s2) {
-            m_manager->raise_exception("sort miss-match for arguments to union");
+            m_manager->raise_exception("sort mismatch for arguments to union");
             return nullptr;
         }
         if (!is_rel_sort(s1)) {                
@@ -297,8 +296,8 @@ namespace datalog {
                     m_manager->raise_exception("illegal index");
                     return nullptr;
                 }
-                if (sorts[idx] != m.get_sort(e)) {
-                    m_manager->raise_exception("sort miss-match in filter");
+                if (sorts[idx] != e->get_sort()) {
+                    m_manager->raise_exception("sort mismatch in filter");
                     return nullptr;
                 }
                 break;
@@ -353,7 +352,7 @@ namespace datalog {
         for (unsigned i = 0; i < sorts.size(); ++i) {
             params2.push_back(parameter(sorts[i]));
         }
-        sort* rng = m_manager->mk_sort(m_family_id, DL_RELATION_SORT, params2.size(), params2.c_ptr());
+        sort* rng = m_manager->mk_sort(m_family_id, DL_RELATION_SORT, params2.size(), params2.data());
         func_decl_info info(m_family_id, OP_RA_RENAME, num_params, params);            
         return m_manager->mk_func_decl(m_rename_sym, 1, &r, rng, info);
     }
@@ -391,12 +390,12 @@ namespace datalog {
                 return nullptr;
             }
             if (sorts1[i1] != sorts2[i2]) {
-                m_manager->raise_exception("sort miss-match in join");
+                m_manager->raise_exception("sort mismatch in join");
                 return nullptr;
             }
         }
         sort* args[2] = { r1, r2 };
-        sort* rng = m_manager->mk_sort(m_family_id, DL_RELATION_SORT, params2.size(), params2.c_ptr());
+        sort* rng = m_manager->mk_sort(m_family_id, DL_RELATION_SORT, params2.size(), params2.data());
         func_decl_info info(m_family_id, OP_RA_JOIN, num_params, params);            
         return m_manager->mk_func_decl(m_join_sym, 2, args, rng, info);
     }
@@ -435,7 +434,7 @@ namespace datalog {
                 return nullptr;
             }
             if (sorts1[i1] != sorts2[i2]) {
-                m_manager->raise_exception("sort miss-match in join");
+                m_manager->raise_exception("sort mismatch in join");
                 return nullptr;
             }
         }
@@ -624,7 +623,7 @@ namespace datalog {
                 return nullptr;
             }
 
-        TRACE("dl_decl_plugin", tout << mk_pp(result, *m_manager) << "\n";);
+        TRACE(dl_decl_plugin, tout << mk_pp(result, *m_manager) << "\n";);
         return result;
     }
 
@@ -632,40 +631,45 @@ namespace datalog {
     }
 
     void dl_decl_plugin::get_sort_names(svector<builtin_name> & sort_names, symbol const & logic) {
-
-    }
-
-
-    dl_decl_util::ast_plugin_registrator::ast_plugin_registrator(ast_manager& m)
-    {
-        // ensure required plugins are installed into the ast_manager
-        reg_decl_plugins(m);
     }
 
     dl_decl_util::dl_decl_util(ast_manager& m):
-        m_plugin_registrator(m),
         m(m), 
-        m_arith(m),
-        m_bv(m),
-        m_fid(m.mk_family_id(symbol("datalog_relation")))
+        m_fid(null_family_id)
     {}
+
+    bv_util& dl_decl_util::bv() const {
+        if (!m_bv) m_bv = alloc(bv_util, m);
+        return *m_bv;
+    }
+
+    family_id dl_decl_util::get_family_id() const {
+        if (m_fid == null_family_id) {
+            m_fid = m.mk_family_id(symbol("datalog_relation"));
+        }
+        return m_fid;
+    }
+
+    arith_util& dl_decl_util::arith() const {
+        if (!m_arith) m_arith = alloc(arith_util, m);
+        return *m_arith;
+    }
 
     // create a constant belonging to a given finite domain.
 
     app* dl_decl_util::mk_numeral(uint64_t value, sort* s) {
         if (is_finite_sort(s)) {
-            uint64_t sz = 0;
-            if (try_get_size(s, sz) && sz <= value) {
+            if (auto sz = try_get_size(s); sz.has_value() && *sz <= value) {
                 m.raise_exception("value is out of bounds");
             }
             parameter params[2] = { parameter(rational(value, rational::ui64())), parameter(s) };
-            return m.mk_const(m.mk_func_decl(m_fid, OP_DL_CONSTANT, 2, params, 0, (sort*const*)nullptr));
+            return m.mk_const(m.mk_func_decl(get_family_id(), OP_DL_CONSTANT, 2, params, 0, (sort*const*)nullptr));
         }        
-        if (m_arith.is_int(s) || m_arith.is_real(s)) {
-            return m_arith.mk_numeral(rational(value, rational::ui64()), s);
+        if (arith().is_int(s) || arith().is_real(s)) {
+            return arith().mk_numeral(rational(value, rational::ui64()), s);
         }
-        if (m_bv.is_bv_sort(s)) {
-            return m_bv.mk_numeral(rational(value, rational::ui64()), s);
+        if (bv().is_bv_sort(s)) {
+            return bv().mk_numeral(rational(value, rational::ui64()), s);
         }
         if (m.is_bool(s)) {
             if (value == 0) {
@@ -676,7 +680,7 @@ namespace datalog {
         }
         std::stringstream strm;
         strm << "sort '" << mk_pp(s, m) << "' is not recognized as a sort that contains numeric values.\nUse Bool, BitVec, Int, Real, or a Finite domain sort";
-        m.raise_exception(strm.str().c_str());
+        m.raise_exception(strm.str());
         return nullptr;
     }
 
@@ -694,16 +698,8 @@ namespace datalog {
     }
 
     bool dl_decl_util::is_numeral_ext(expr* e, uint64_t& v) const {
-        if (is_numeral(e, v)) {
+        if (is_numeral(e, v)) 
             return true;
-        }
-        rational val;
-        unsigned bv_size = 0;
-        if (m_bv.is_numeral(e, val, bv_size) && bv_size < 64) {
-            SASSERT(val.is_uint64());
-            v = val.get_uint64();
-            return true;
-        }
         if (m.is_true(e)) {
             v = 1;
             return true;
@@ -712,16 +708,43 @@ namespace datalog {
             v = 0;
             return true;
         }
+
+        rational val;
+        unsigned bv_size = 0;
+        if (bv().is_numeral(e, val, bv_size) && bv_size < 64) {
+            SASSERT(val.is_uint64());
+            v = val.get_uint64();
+            return true;
+        }
+
+        datatype::util dt(m);
+        if (dt.is_enum_sort(e->get_sort()) && dt.is_constructor(e)) {
+            auto& cs = *dt.get_datatype_constructors(e->get_sort());
+            v = 0;
+            for (func_decl* f : cs) {
+                if (f == to_app(e)->get_decl())
+                    return true;
+                ++v;
+            }
+        }
         return false;
     }
 
     bool dl_decl_util::is_numeral_ext(expr* c) const {
-        if (is_numeral(c)) return true;
+        if (is_numeral(c))
+            return true;
         rational val;
         unsigned bv_size = 0;        
-        if (m_arith.is_numeral(c, val) && val.is_uint64()) return true;
-        if (m_bv.is_numeral(c, val, bv_size) && bv_size < 64) return true;
-        return m.is_true(c) || m.is_false(c);
+        if (arith().is_numeral(c, val) && val.is_uint64())
+            return true;
+        if (bv().is_numeral(c, val, bv_size) && bv_size < 64)
+            return true;
+        if (m.is_true(c) || m.is_false(c))
+            return true;
+        datatype::util dt(m);
+        if (dt.is_enum_sort(c->get_sort()) && dt.is_constructor(c))
+            return true;
+        return false;
     }
 
     sort* dl_decl_util::mk_sort(const symbol& name, uint64_t  domain_size) {
@@ -731,39 +754,38 @@ namespace datalog {
             throw default_exception(sstm.str());
         }
         parameter params[2] = { parameter(name), parameter(rational(domain_size, rational::ui64())) };
-        return m.mk_sort(m_fid, DL_FINITE_SORT, 2, params);
+        return m.mk_sort(get_family_id(), DL_FINITE_SORT, 2, params);
     }
 
-    bool dl_decl_util::try_get_size(const sort * s, uint64_t& size) const {
+    std::optional<uint64_t> dl_decl_util::try_get_size(const sort * s) const {
         sort_size sz = s->get_info()->get_num_elements();
         if (sz.is_finite()) {
-            size = sz.size();
-            return true;
+            return sz.size();
         }
-        return false;
+        return std::nullopt;
     }
 
     app* dl_decl_util::mk_lt(expr* a, expr* b) {
         expr* args[2] = { a, b };
-        return m.mk_app(m_fid, OP_DL_LT, 0, nullptr, 2, args);
+        return m.mk_app(get_family_id(), OP_DL_LT, 0, nullptr, 2, args);
     }
 
     app* dl_decl_util::mk_le(expr* a, expr* b) {
         expr* args[2] = { b, a };
-        return m.mk_not(m.mk_app(m_fid, OP_DL_LT, 0, nullptr, 2, args));
+        return m.mk_not(m.mk_app(get_family_id(), OP_DL_LT, 0, nullptr, 2, args));
     }
 
     sort* dl_decl_util::mk_rule_sort() {
-        return m.mk_sort(m_fid, DL_RULE_SORT);
+        return m.mk_sort(get_family_id(), DL_RULE_SORT);
     }
 
     app* dl_decl_util::mk_rule(symbol const& name, unsigned num_args, expr* const* args) {
         ptr_buffer<sort> sorts;
         for (unsigned i = 0; i < num_args; ++i) {
-            sorts.push_back(m.get_sort(args[i]));
+            sorts.push_back(args[i]->get_sort());
         }
-        func_decl* f = m.mk_func_decl(name, num_args, sorts.c_ptr(), mk_rule_sort());
+        func_decl* f = m.mk_func_decl(name, num_args, sorts.data(), mk_rule_sort());
         return m.mk_app(f, num_args, args);
     }
 
-};
+}

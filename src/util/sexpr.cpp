@@ -26,12 +26,12 @@ Notes:
 #endif
 
 struct sexpr_composite : public sexpr {
-    unsigned m_num_chilren;
+    unsigned m_num_children;
     sexpr *  m_children[0];
     sexpr_composite(unsigned num_children, sexpr * const * children, unsigned line, unsigned pos):
-        sexpr(COMPOSITE, line, pos),
-        m_num_chilren(num_children) {
-        for (unsigned i = 0; i < num_children; i++) {
+        sexpr(kind_t::COMPOSITE, line, pos),
+        m_num_children(num_children) {
+        for (unsigned i = 0; i < num_children; ++i) {
             m_children[i] = children[i];
             children[i]->inc_ref();
         }
@@ -45,7 +45,7 @@ struct sexpr_numeral : public sexpr {
         m_val(val) {
     }
     sexpr_numeral(rational const & val, unsigned line, unsigned pos):
-        sexpr(NUMERAL, line, pos),
+        sexpr(kind_t::NUMERAL, line, pos),
         m_val(val) {
     }
 };
@@ -53,7 +53,7 @@ struct sexpr_numeral : public sexpr {
 struct sexpr_bv : public sexpr_numeral {
     unsigned m_size;
     sexpr_bv(rational const & val, unsigned size, unsigned line, unsigned pos):
-        sexpr_numeral(BV_NUMERAL, val, line, pos),
+        sexpr_numeral(kind_t::BV_NUMERAL, val, line, pos),
         m_size(size) {
     }
 };
@@ -61,11 +61,11 @@ struct sexpr_bv : public sexpr_numeral {
 struct sexpr_string : public sexpr {
     std::string m_val;
     sexpr_string(std::string const & val, unsigned line, unsigned pos):
-        sexpr(STRING, line, pos),
+        sexpr(kind_t::STRING, line, pos),
         m_val(val) {
     }
     sexpr_string(char const * val, unsigned line, unsigned pos):
-        sexpr(STRING, line, pos),
+        sexpr(kind_t::STRING, line, pos),
         m_val(val) {
     }
 };
@@ -73,7 +73,7 @@ struct sexpr_string : public sexpr {
 struct sexpr_symbol : public sexpr {
     symbol m_val;
     sexpr_symbol(bool keyword, symbol const & val, unsigned line, unsigned pos):
-        sexpr(keyword ? KEYWORD : SYMBOL, line, pos),
+        sexpr(keyword ? kind_t::KEYWORD : kind_t::SYMBOL, line, pos),
         m_val(val) {
     }
 };
@@ -107,7 +107,7 @@ std::string const & sexpr::get_string() const {
 
 unsigned sexpr::get_num_children() const {
     SASSERT(is_composite());
-    return static_cast<sexpr_composite const *>(this)->m_num_chilren;
+    return static_cast<sexpr_composite const *>(this)->m_num_children;
 }
 
 sexpr * sexpr::get_child(unsigned idx) const {
@@ -122,12 +122,12 @@ sexpr * const * sexpr::get_children() const {
 
 void sexpr::display_atom(std::ostream & out) const {
     switch (get_kind()) {
-    case sexpr::COMPOSITE:
-        UNREACHABLE();
-    case sexpr::NUMERAL:
+    case sexpr::kind_t::COMPOSITE:
+        Z3_unreachable_case();
+    case sexpr::kind_t::NUMERAL:
         out << static_cast<sexpr_numeral const *>(this)->m_val;
         break;
-    case sexpr::BV_NUMERAL: {
+    case sexpr::kind_t::BV_NUMERAL: {
         out << '#';
         unsigned bv_size = static_cast<sexpr_bv const *>(this)->m_size;
         rational val  = static_cast<sexpr_bv const *>(this)->m_val;
@@ -169,24 +169,24 @@ void sexpr::display_atom(std::ostream & out) const {
         }
         std::reverse(buf.begin(), buf.end());
         buf.push_back(0);
-        out << buf.c_ptr();
+        out << buf.data();
         break;
     }
-    case sexpr::STRING:
+    case sexpr::kind_t::STRING:
         out << "\"" << escaped(static_cast<sexpr_string const *>(this)->m_val.c_str()) << "\"";
         break;
-    case sexpr::SYMBOL: 
-    case sexpr::KEYWORD:
+    case sexpr::kind_t::SYMBOL:
+    case sexpr::kind_t::KEYWORD:
         out << static_cast<sexpr_symbol const *>(this)->m_val;
         break;
-    default:
-        UNREACHABLE();
     }
 }
 
 void sexpr::display(std::ostream & out) const {
-    if (!is_composite())
+    if (!is_composite()) {
         display_atom(out);
+        return;
+    }
     vector<std::pair<sexpr_composite const *, unsigned> > todo;
     todo.push_back(std::make_pair(static_cast<sexpr_composite const *>(this), 0));
     while (!todo.empty()) {
@@ -194,6 +194,8 @@ void sexpr::display(std::ostream & out) const {
         sexpr_composite const * n = todo.back().first;
         unsigned & idx = todo.back().second;
         unsigned num = n->get_num_children();
+        if (num == 0)
+            out << "(";
         while (idx < num) {
             sexpr const * child = n->get_child(idx);
             if (idx == 0)
@@ -220,9 +222,9 @@ void sexpr_manager::del(sexpr * n) {
         sexpr * n = m_to_delete.back();
         m_to_delete.pop_back();
         switch (n->get_kind()) {
-        case sexpr::COMPOSITE: {
+        case sexpr::kind_t::COMPOSITE: {
             unsigned num = n->get_num_children();
-            for (unsigned i = 0; i < num; i++) {
+            for (unsigned i = 0; i < num; ++i) {
                 sexpr * child = n->get_child(i);
                 SASSERT(child->m_ref_count > 0);
                 child->m_ref_count--;
@@ -233,25 +235,23 @@ void sexpr_manager::del(sexpr * n) {
             m_allocator.deallocate(sizeof(sexpr_composite) + num * sizeof(sexpr*), n);
             break;
         }
-        case sexpr::NUMERAL:
+        case sexpr::kind_t::NUMERAL:
             static_cast<sexpr_numeral*>(n)->~sexpr_numeral();
             m_allocator.deallocate(sizeof(sexpr_numeral), n);
             break;
-        case sexpr::BV_NUMERAL:
+        case sexpr::kind_t::BV_NUMERAL:
             static_cast<sexpr_bv*>(n)->~sexpr_bv();
             m_allocator.deallocate(sizeof(sexpr_bv), n);
             break;
-        case sexpr::STRING:
+        case sexpr::kind_t::STRING:
             static_cast<sexpr_string*>(n)->~sexpr_string();
             m_allocator.deallocate(sizeof(sexpr_string), n);
             break;
-        case sexpr::SYMBOL: 
-        case sexpr::KEYWORD:
+        case sexpr::kind_t::SYMBOL:
+        case sexpr::kind_t::KEYWORD:
             static_cast<sexpr_symbol*>(n)->~sexpr_symbol();
             m_allocator.deallocate(sizeof(sexpr_symbol), n);
             break;
-        default:
-            UNREACHABLE();
         }
     }
 }

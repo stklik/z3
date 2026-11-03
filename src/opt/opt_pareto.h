@@ -17,8 +17,7 @@ Notes:
 
    
 --*/
-#ifndef OPT_PARETO_H_
-#define OPT_PARETO_H_
+#pragma once
 
 #include "solver/solver.h"
 #include "model/model.h"
@@ -27,11 +26,15 @@ namespace opt {
    
     class pareto_callback {
     public:
+        virtual ~pareto_callback() = default;
         virtual unsigned num_objectives() = 0;
         virtual expr_ref mk_gt(unsigned i, model_ref& model) = 0;
         virtual expr_ref mk_ge(unsigned i, model_ref& model) = 0;
         virtual expr_ref mk_le(unsigned i, model_ref& model) = 0;
         virtual void fix_model(model_ref& m) = 0;
+        // Replace model by a model of the assertions of s whose objective
+        // values are all at least those of model; keeping model is valid.
+        virtual void maximize_in_cone(solver& s, model_ref& model) {}
     };
     class pareto_base {
     protected:
@@ -52,7 +55,7 @@ namespace opt {
             m_solver(s),
             m_params(p) {
         }
-        virtual ~pareto_base() {}
+        virtual ~pareto_base() = default;
         virtual void updt_params(params_ref & p) {
             m_solver->updt_params(p);
             m_params.copy(p);
@@ -63,6 +66,7 @@ namespace opt {
         virtual void collect_statistics(statistics & st) const {
             m_solver->collect_statistics(st);
         }
+        std::string reason_unknown() const { return m_solver->reason_unknown(); }
         virtual void display(std::ostream & out) const {
             m_solver->display(out);
         }
@@ -87,7 +91,6 @@ namespace opt {
                    params_ref & p):
             pareto_base(m, cb, s, p) {            
         }
-        ~gia_pareto() override {}
 
         lbool operator()() override;
     };
@@ -101,10 +104,7 @@ namespace opt {
                    params_ref & p):
             pareto_base(m, cb, s, p) {            
         }
-        ~oia_pareto() override {}
 
         lbool operator()() override;
     };
 }
-
-#endif

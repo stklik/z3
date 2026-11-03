@@ -30,8 +30,6 @@ namespace datalog {
         m_refs(m) {        
     }
 
-    mk_loop_counter::~mk_loop_counter() { }
-
     app_ref mk_loop_counter::add_arg(rule_set const& src, rule_set& dst, app* fn, unsigned idx) {
         expr_ref_vector args(m);
         func_decl* new_fn, *old_fn = fn->get_decl();
@@ -42,7 +40,7 @@ namespace datalog {
             ptr_vector<sort> domain;
             domain.append(fn->get_num_args(), old_fn->get_domain());
             domain.push_back(a.mk_int());
-            new_fn = m.mk_func_decl(old_fn->get_name(), domain.size(), domain.c_ptr(), old_fn->get_range());
+            new_fn = m.mk_func_decl(old_fn->get_name(), domain.size(), domain.data(), old_fn->get_range());
             m_old2new.insert(old_fn, new_fn);
             m_new2old.insert(new_fn, old_fn);
             m_refs.push_back(new_fn);
@@ -51,7 +49,7 @@ namespace datalog {
                 dst.set_output_predicate(new_fn);
             }
         }
-        return app_ref(m.mk_app(new_fn, args.size(), args.c_ptr()), m);
+        return app_ref(m.mk_app(new_fn, args.size(), args.data()), m);
     }
 
     app_ref mk_loop_counter::del_arg(app* fn) {        
@@ -60,7 +58,7 @@ namespace datalog {
         SASSERT(fn->get_num_args() > 0);
         args.append(fn->get_num_args()-1, fn->get_args());
         VERIFY (m_new2old.find(new_fn, old_fn));
-        return app_ref(m.mk_app(old_fn, args.size(), args.c_ptr()), m);
+        return app_ref(m.mk_app(old_fn, args.size(), args.data()), m);
     }
         
     rule_set * mk_loop_counter::operator()(rule_set const & source) {
@@ -68,12 +66,12 @@ namespace datalog {
         m_old2new.reset();
         m_new2old.reset();
         rule_manager& rm = source.get_rule_manager();
-        rule_set * result = alloc(rule_set, m_ctx);
+        scoped_ptr<rule_set> result = alloc(rule_set, m_ctx);
         unsigned sz = source.get_num_rules();
         rule_ref new_rule(rm);
         app_ref_vector tail(m);
         app_ref head(m);
-        svector<bool> neg;
+        bool_vector neg;
         rule_counter& vc = rm.get_counter();
         for (unsigned i = 0; i < sz; ++i) {            
             tail.reset();
@@ -108,17 +106,17 @@ namespace datalog {
                 expr_ref_vector args(m);
                 args.append(head->get_num_args(), head->get_args());
                 args[last] = a.mk_numeral(rational(0), true);
-                head = m.mk_app(head->get_decl(), args.size(), args.c_ptr());
+                head = m.mk_app(head->get_decl(), args.size(), args.data());
             }            
 
-            new_rule = rm.mk(head, tail.size(), tail.c_ptr(), neg.c_ptr(), r.name(), true);
+            new_rule = rm.mk(head, tail.size(), tail.data(), neg.data(), r.name(), true);
             result->add_rule(new_rule);
         }
 
         // model converter: remove references to extra argument.
         // proof converter: remove references to extra argument as well.
 
-        return result;
+        return result.detach();
     }
 
     rule_set * mk_loop_counter::revert(rule_set const & source) {
@@ -129,7 +127,7 @@ namespace datalog {
         rule_ref new_rule(rm);
         app_ref_vector tail(m);
         app_ref head(m);
-        svector<bool> neg;
+        bool_vector neg;
         for (unsigned i = 0; i < sz; ++i) {            
             tail.reset();
             neg.reset();
@@ -145,7 +143,7 @@ namespace datalog {
                 neg.push_back(false);
             }
             head = del_arg(r.get_head());
-            new_rule = rm.mk(head, tail.size(), tail.c_ptr(), neg.c_ptr(), r.name(), true);
+            new_rule = rm.mk(head, tail.size(), tail.data(), neg.data(), r.name(), true);
             result->add_rule(new_rule);            
         }
 
@@ -155,4 +153,4 @@ namespace datalog {
         return result;
 
     }
-};
+}

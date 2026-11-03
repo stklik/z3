@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_MAGIC_SETS_H_
-#define DL_MK_MAGIC_SETS_H_
+#pragma once
 
 #include<utility>
 
@@ -48,7 +47,7 @@ namespace datalog {
         };
 
         struct a_flag_hash {
-            typedef a_flag data;
+            typedef a_flag data_t;
             unsigned operator()(a_flag x) const { return x; }
         };
 
@@ -66,7 +65,7 @@ namespace datalog {
             func_decl * m_pred;
             adornment m_adornment;
 
-            adornment_desc() {}
+            adornment_desc() = default;
             adornment_desc(func_decl * pred) : m_pred(pred) {}
             adornment_desc(func_decl * pred, const adornment & a) 
                 : m_pred(pred), m_adornment(a) {}
@@ -129,7 +128,6 @@ namespace datalog {
         rule_set * operator()(rule_set const & source) override;
     };
 
-};
+}
 
-#endif /* DL_MK_MAGIC_SETS_H_ */
 

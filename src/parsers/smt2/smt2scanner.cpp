@@ -24,10 +24,11 @@ namespace smt2 {
     void scanner::next() {
         if (m_cache_input)
             m_cache.push_back(m_curr);
-        SASSERT(!m_at_eof);
+        if (m_at_eof)
+            throw scanner_exception("unexpected end of file");
         if (m_interactive) {
-            m_curr = m_stream.get();
-            if (m_stream.eof())
+            m_curr = m_stream->get();
+            if (m_stream->eof())
                 m_at_eof = true;
         }
         else if (m_bpos < m_bend) {
@@ -35,8 +36,8 @@ namespace smt2 {
             m_bpos++;
         }
         else {
-            m_stream.read(m_buffer, SCANNER_BUFFER_SIZE);
-            m_bend = static_cast<unsigned>(m_stream.gcount());
+            m_stream->read(m_buffer, SCANNER_BUFFER_SIZE);
+            m_bend = static_cast<unsigned>(m_stream->gcount());
             m_bpos = 0;
             if (m_bpos == m_bend) {
                 m_at_eof = true;
@@ -57,17 +58,36 @@ namespace smt2 {
             if (m_at_eof)
                 return;
             if (c == '\n') {
-                new_line();
                 next();
+                new_line();
                 return;
             }
             next();
         }
     }
+    
+    void scanner::read_multiline_comment() {
+        SASSERT(curr() == '|');
+        next();
+        while (true) {
+            char c = curr();
+            if (m_at_eof)
+                return;
+            if (c == '\n') {
+                next();
+                new_line();
+                continue;
+            }
+            next();
+            if (c == '|' && curr() == '#') {
+                next();
+                return;
+            }
+        }
+    }
 
     scanner::token scanner::read_quoted_symbol() {
         SASSERT(curr() == '|');
-        bool escape = false;
         m_string.reset();
         next();
         while (true) {
@@ -75,17 +95,19 @@ namespace smt2 {
             if (m_at_eof) {
                 throw scanner_exception("unexpected end of quoted symbol", m_line, m_spos);
             }
-            else if (c == '\n') {
-                new_line();
-            }
-            else if (c == '|' && !escape) {
+            else if (c == '|') {
                 next();
                 m_string.push_back(0);
                 m_id = m_string.begin();
-                TRACE("scanner", tout << "new quoted symbol: " << m_id << "\n";);
+                TRACE(scanner, tout << "new quoted symbol: " << m_id << "\n";);
                 return SYMBOL_TOKEN;
             }
-            escape = (c == '\\');
+            else if (c == '\\') {
+                // SMT-LIB 2.5+ gives '\' no special meaning inside a quoted symbol
+                throw scanner_exception("invalid character '\\' in quoted symbol", m_line, m_spos);
+            }
+            else if (c == '\n')
+                new_line();
             m_string.push_back(c);
             next();
         }
@@ -102,9 +124,14 @@ namespace smt2 {
             else {
                 m_string.push_back(0);
                 m_id = m_string.begin();
-                TRACE("scanner", tout << "new symbol: " << m_id << "\n";);
+                TRACE(scanner, tout << "new symbol: " << m_id << "\n";);
                 return SYMBOL_TOKEN;
             }
+        }
+        if (!m_string.empty()) {
+            m_string.push_back(0);
+            m_id = m_string.begin();
+            return SYMBOL_TOKEN;
         }
         return EOF_TOKEN;
     }
@@ -144,7 +171,7 @@ namespace smt2 {
         }
         if (is_float)
             m_number /= q;
-        TRACE("scanner", tout << "new number: " << m_number << "\n";);
+        TRACE(scanner, tout << "new number: " << m_number << "\n";);
         return is_float ? FLOAT_TOKEN : INT_TOKEN;
     }
 
@@ -191,6 +218,15 @@ namespace smt2 {
         SASSERT(curr() == '#');
         next();
         char c = curr();
+        if (c == 'f') {
+            std::string value("#f");
+            next();
+            while ((curr() >= '0' && curr() <= '9') || curr() == 'm' || curr() == '-') {
+                value.push_back(curr()); next();
+            }
+            m_id = symbol(value.c_str());
+            return SYMBOL_TOKEN;
+        }
         if (c == 'x') {
             next();
             c = curr();
@@ -235,12 +271,17 @@ namespace smt2 {
                 throw scanner_exception("invalid empty bit-vector literal", m_line, m_spos);
             return BV_TOKEN;
         }
+        else if (c == '|') {
+            read_multiline_comment();
+            return NULL_TOKEN;
+        }
         else {
             throw scanner_exception("invalid bit-vector literal, expecting 'x' or 'b'", m_line, m_spos);
         }
     }
 
     scanner::scanner(cmd_context & ctx, std::istream& stream, bool interactive) :
+        ctx(ctx),
         m_interactive(interactive),
         m_spos(0),
         m_curr(0), // avoid Valgrind warning
@@ -250,10 +291,9 @@ namespace smt2 {
         m_bv_size(UINT_MAX),
         m_bpos(0),
         m_bend(0),
-        m_stream(stream),
+        m_stream(&stream),
         m_cache_input(false) {
 
-        m_smtlib2_compliant = ctx.params().m_smtlib2_compliant;
 
         for (int i = 0; i < 256; ++i) {
             m_normalized[i] = (signed char) i;
@@ -289,12 +329,15 @@ namespace smt2 {
         m_normalized[static_cast<int>('.')] = 'a';
         m_normalized[static_cast<int>('?')] = 'a';
         m_normalized[static_cast<int>('/')] = 'a';
+        m_normalized[static_cast<int>(',')] = 'a';
         next();
     }
 
     scanner::token scanner::scan() {
         while (true) {
             signed char c = curr();
+            token t;
+            
             m_pos = m_spos;
 
             if (m_at_eof)
@@ -329,9 +372,11 @@ namespace smt2 {
             case '0':
                 return read_number();
             case '#':
-                return read_bv_literal();
+                t = read_bv_literal();
+                if (t == NULL_TOKEN) break;
+                return t;
             case '-':
-                if (m_smtlib2_compliant)
+                if (ctx.params().m_smtlib2_compliant)
                     return read_symbol();
                 else
                     return read_signed_number();
@@ -345,15 +390,25 @@ namespace smt2 {
 
     char const * scanner::cached_str(unsigned begin, unsigned end) {
         m_cache_result.reset();
-        while (isspace(m_cache[begin]) && begin < end)
+        // A signed char may be negative; isspace accepts only unsigned-char values or EOF.
+        while (begin < end && isspace(static_cast<unsigned char>(m_cache[begin])))
             begin++;
-        while (begin < end && isspace(m_cache[end-1]))
+        // The trailing byte also needs conversion to avoid a negative isspace argument.
+        while (begin < end && isspace(static_cast<unsigned char>(m_cache[end-1])))
             end--;
-        for (unsigned i = begin; i < end; i++)
+        for (unsigned i = begin; i < end; ++i)
             m_cache_result.push_back(m_cache[i]);
         m_cache_result.push_back(0);
         return m_cache_result.begin();
     }
 
-};
+    void scanner::reset_input(std::istream & stream, bool interactive) {
+        m_stream = &stream;
+        m_interactive = interactive;
+        m_at_eof = false;
+        m_bpos = 0;
+        m_bend = 0;
+        next();
+    }
+}
 

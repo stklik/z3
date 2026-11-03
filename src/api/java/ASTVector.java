@@ -17,6 +17,8 @@ Notes:
 
 package com.microsoft.z3;
 
+import java.lang.ref.ReferenceQueue;
+
 /**
  * Vectors of ASTs.
  **/
@@ -91,24 +93,14 @@ public class ASTVector extends Z3Object {
         return Native.astVectorToString(getContext().nCtx(), getNativeObject());
     }
 
-    ASTVector(Context ctx, long obj)
+    public ASTVector(Context ctx, long obj)
     {
         super(ctx, obj);
     }
 
-    ASTVector(Context ctx)
+    public ASTVector(Context ctx)
     {
         super(ctx, Native.mkAstVector(ctx.nCtx()));
-    }
-
-    @Override
-    void incRef() {
-        Native.astVectorIncRef(getContext().nCtx(), getNativeObject());
-    }
-
-    @Override
-    void addToReferenceQueue() {
-        getContext().getASTVectorDRQ().storeReference(getContext(), this);
     }
 
     /**
@@ -126,9 +118,9 @@ public class ASTVector extends Z3Object {
     /**
      * Translates the AST vector into an Expr[]
      * */
-    public Expr[] ToExprArray() {
+    public Expr<?>[] ToExprArray() {
         int n = size();
-        Expr[] res = new Expr[n];
+        Expr<?>[] res = new Expr[n];
         for (int i = 0; i < n; i++)
             res[i] = Expr.create(getContext(), get(i).getNativeObject());
         return res;    
@@ -161,36 +153,36 @@ public class ASTVector extends Z3Object {
     /**
      * Translates the AST vector into an ArithExpr[]
      * */   
-    public ArithExpr[] ToArithExprExprArray()
+    public ArithExpr<?>[] ToArithExprExprArray()
     {
         int n = size();
-        ArithExpr[] res = new ArithExpr[n];
+        ArithExpr<?>[] res = new ArithExpr[n];
         for (int i = 0; i < n; i++)
-            res[i] = (ArithExpr)Expr.create(getContext(), get(i).getNativeObject());
+            res[i] = (ArithExpr<?>)Expr.create(getContext(), get(i).getNativeObject());
         return res;
     }
 
     /**
      * Translates the AST vector into an ArrayExpr[]
      * */  
-    public ArrayExpr[] ToArrayExprArray()
+    public ArrayExpr<?, ?>[] ToArrayExprArray()
     {
         int n = size();
-        ArrayExpr[] res = new ArrayExpr[n];
+        ArrayExpr<?, ?>[] res = new ArrayExpr[n];
         for (int i = 0; i < n; i++)
-            res[i] = (ArrayExpr)Expr.create(getContext(), get(i).getNativeObject());
+            res[i] = (ArrayExpr<?, ?>)Expr.create(getContext(), get(i).getNativeObject());
         return res;
     }
 
     /**
      * Translates the AST vector into an DatatypeExpr[]
      * */ 
-    public DatatypeExpr[] ToDatatypeExprArray()
+    public DatatypeExpr<?>[] ToDatatypeExprArray()
     {
         int n = size();
-        DatatypeExpr[] res = new DatatypeExpr[n];
+        DatatypeExpr<?>[] res = new DatatypeExpr[n];
         for (int i = 0; i < n; i++)
-            res[i] = (DatatypeExpr)Expr.create(getContext(), get(i).getNativeObject());
+            res[i] = (DatatypeExpr<?>)Expr.create(getContext(), get(i).getNativeObject());
         return res;
     }
 
@@ -240,5 +232,27 @@ public class ASTVector extends Z3Object {
         for (int i = 0; i < n; i++)
             res[i] = (RealExpr)Expr.create(getContext(), get(i).getNativeObject());
         return res;
+    }
+
+    @Override
+    void incRef() {
+        Native.astVectorIncRef(getContext().nCtx(), getNativeObject());
+    }
+
+    @Override
+    void addToReferenceQueue() {
+        getContext().getReferenceQueue().storeReference(this, ASTVectorRef::new);
+    }
+
+    private static class ASTVectorRef extends Z3ReferenceQueue.Reference<ASTVector> {
+
+        private ASTVectorRef(ASTVector referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.astVectorDecRef(ctx.nCtx(), z3Obj);
+        }
     }
 }

@@ -20,6 +20,7 @@ Revision History:
 #include "api/api_context.h"
 #include "api/api_util.h"
 #include "ast/array_decl_plugin.h"
+#include "util/manage_warnings.h"
 
 extern "C" {
 
@@ -38,10 +39,14 @@ extern "C" {
         Z3_TRY;
         LOG_Z3_mk_array_sort_n(c, n, domain, range);
         RESET_ERROR_CODE();
+        if (n == 0) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, "array sort requires at least one domain sort");
+            RETURN_Z3(nullptr);
+        }
         vector<parameter> params;
         for (unsigned i = 0; i < n; ++i) params.push_back(parameter(to_sort(domain[i])));
         params.push_back(parameter(to_sort(range)));
-        sort * ty =  mk_c(c)->m().mk_sort(mk_c(c)->get_array_fid(), ARRAY_SORT, params.size(), params.c_ptr());
+        sort * ty =  mk_c(c)->m().mk_sort(mk_c(c)->get_array_fid(), ARRAY_SORT, params.size(), params.data());
         mk_c(c)->save_ast_trail(ty);
         RETURN_Z3(of_sort(ty));
         Z3_CATCH_RETURN(nullptr);
@@ -53,10 +58,12 @@ extern "C" {
         LOG_Z3_mk_select(c, a, i);
         RESET_ERROR_CODE();
         ast_manager & m = mk_c(c)->m();
+        CHECK_IS_EXPR(a, nullptr);
+        CHECK_IS_EXPR(i, nullptr);
         expr * _a        = to_expr(a);
         expr * _i        = to_expr(i);
-        sort * a_ty = m.get_sort(_a);
-        sort * i_ty = m.get_sort(_i);
+        sort * a_ty = _a->get_sort();
+        sort * i_ty = _i->get_sort();
         if (a_ty->get_family_id() != mk_c(c)->get_array_fid()) {
             SET_ERROR_CODE(Z3_SORT_ERROR, nullptr);
             RETURN_Z3(nullptr);
@@ -76,10 +83,9 @@ extern "C" {
         LOG_Z3_mk_select_n(c, a, n, idxs);
         RESET_ERROR_CODE();
         ast_manager & m = mk_c(c)->m();
+        CHECK_IS_EXPR(a, nullptr);
         expr * _a        = to_expr(a);
-        // expr * _i        = to_expr(i);
-        sort * a_ty = m.get_sort(_a);
-        // sort * i_ty = m.get_sort(_i);
+        sort * a_ty = _a->get_sort();
         if (a_ty->get_family_id() != mk_c(c)->get_array_fid()) {
             SET_ERROR_CODE(Z3_SORT_ERROR, nullptr);
             RETURN_Z3(nullptr);
@@ -89,11 +95,12 @@ extern "C" {
         args.push_back(_a);
         domain.push_back(a_ty);
         for (unsigned i = 0; i < n; ++i) {
+            CHECK_IS_EXPR(idxs[i], nullptr);
             args.push_back(to_expr(idxs[i]));
-            domain.push_back(m.get_sort(to_expr(idxs[i])));
+            domain.push_back(to_expr(idxs[i])->get_sort());
         }
-        func_decl * d   = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_SELECT, 2, a_ty->get_parameters(), domain.size(), domain.c_ptr());
-        app * r        = m.mk_app(d, args.size(), args.c_ptr());
+        func_decl * d   = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_SELECT, 2, a_ty->get_parameters(), domain.size(), domain.data());
+        app * r        = m.mk_app(d, args.size(), args.data());
         mk_c(c)->save_ast_trail(r);
         check_sorts(c, r);
         RETURN_Z3(of_ast(r));
@@ -106,12 +113,15 @@ extern "C" {
         LOG_Z3_mk_store(c, a, i, v);
         RESET_ERROR_CODE();
         ast_manager & m = mk_c(c)->m();
+        CHECK_IS_EXPR(a, nullptr);
+        CHECK_IS_EXPR(i, nullptr);
+        CHECK_IS_EXPR(v, nullptr);
         expr * _a        = to_expr(a);
         expr * _i        = to_expr(i);
         expr * _v        = to_expr(v);
-        sort * a_ty = m.get_sort(_a);
-        sort * i_ty = m.get_sort(_i);
-        sort * v_ty = m.get_sort(_v);
+        sort * a_ty = _a->get_sort();
+        sort * i_ty = _i->get_sort();
+        sort * v_ty = _v->get_sort();
         if (a_ty->get_family_id() != mk_c(c)->get_array_fid()) {
             SET_ERROR_CODE(Z3_SORT_ERROR, nullptr);
             RETURN_Z3(nullptr);
@@ -133,8 +143,8 @@ extern "C" {
         ast_manager & m = mk_c(c)->m();
         expr * _a        = to_expr(a);
         expr * _v        = to_expr(v);
-        sort * a_ty = m.get_sort(_a);
-        sort * v_ty = m.get_sort(_v);
+        sort * a_ty = _a->get_sort();
+        sort * v_ty = _v->get_sort();
         if (a_ty->get_family_id() != mk_c(c)->get_array_fid()) {
             SET_ERROR_CODE(Z3_SORT_ERROR, nullptr);
             RETURN_Z3(nullptr);
@@ -145,12 +155,12 @@ extern "C" {
         domain.push_back(a_ty);
         for (unsigned i = 0; i < n; ++i) {
             args.push_back(to_expr(idxs[i]));
-            domain.push_back(m.get_sort(to_expr(idxs[i])));
+            domain.push_back(to_expr(idxs[i])->get_sort());
         }
         args.push_back(_v);
         domain.push_back(v_ty);
-        func_decl * d   = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_STORE, 2, a_ty->get_parameters(), domain.size(), domain.c_ptr());
-        app * r        = m.mk_app(d, args.size(), args.c_ptr());
+        func_decl * d   = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_STORE, 2, a_ty->get_parameters(), domain.size(), domain.data());
+        app * r        = m.mk_app(d, args.size(), args.data());
         mk_c(c)->save_ast_trail(r);
         check_sorts(c, r);
         RETURN_Z3(of_ast(r));
@@ -168,14 +178,14 @@ extern "C" {
         }
         ast_manager & m = mk_c(c)->m();
         func_decl* _f      = to_func_decl(f);
-        expr* const* _args = to_exprs(args);
+        expr* const* _args = to_exprs(n, args);
 
         ptr_vector<sort> domain;
         for (unsigned i = 0; i < n; ++i) {
-            domain.push_back(m.get_sort(_args[i]));
+            domain.push_back(_args[i]->get_sort());
         }
         parameter param(_f);
-        func_decl * d = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_ARRAY_MAP, 1, &param, n, domain.c_ptr());
+        func_decl * d = m.mk_func_decl(mk_c(c)->get_array_fid(), OP_ARRAY_MAP, 1, &param, n, domain.data());
         app* r = m.mk_app(d, n, _args);
         mk_c(c)->save_ast_trail(r);
         check_sorts(c, r);
@@ -189,7 +199,7 @@ extern "C" {
         RESET_ERROR_CODE();
         ast_manager & m = mk_c(c)->m();
         expr * _v        = to_expr(v);
-        sort * _range = m.get_sort(_v);
+        sort * _range = _v->get_sort();
         sort * _domain = to_sort(domain);
         parameter params[2]  = { parameter(_domain), parameter(_range) };
         sort * a_ty    = mk_c(c)->m().mk_sort(mk_c(c)->get_array_fid(), ARRAY_SORT, 2, params);
@@ -221,7 +231,7 @@ extern "C" {
         RESET_ERROR_CODE();
         ast_manager & m = mk_c(c)->m();
         expr * _v        = to_expr(v);
-        sort * _range = m.get_sort(_v);
+        sort * _range = _v->get_sort();
         sort * _domain = to_sort(domain);
         parameter params[2]  = { parameter(_domain), parameter(_range) };
         sort * a_ty    = mk_c(c)->m().mk_sort(mk_c(c)->get_array_fid(), ARRAY_SORT, 2, params);
@@ -257,12 +267,14 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
+    START_DISABLE_EXTRA_SEMI_WARNING;
     MK_NARY(Z3_mk_set_union, mk_c(c)->get_array_fid(), OP_SET_UNION, SKIP);
     MK_NARY(Z3_mk_set_intersect, mk_c(c)->get_array_fid(), OP_SET_INTERSECT, SKIP);
     MK_BINARY(Z3_mk_set_difference, mk_c(c)->get_array_fid(), OP_SET_DIFFERENCE, SKIP);
     MK_UNARY(Z3_mk_set_complement, mk_c(c)->get_array_fid(), OP_SET_COMPLEMENT, SKIP);
     MK_BINARY(Z3_mk_set_subset, mk_c(c)->get_array_fid(), OP_SET_SUBSET, SKIP);
     MK_BINARY(Z3_mk_array_ext, mk_c(c)->get_array_fid(), OP_ARRAY_EXT, SKIP);
+    END_DISABLE_WARNING;
 
     Z3_ast Z3_API Z3_mk_as_array(Z3_context c, Z3_func_decl f) {
         Z3_TRY;
@@ -276,16 +288,35 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
-    Z3_ast Z3_mk_set_member(Z3_context c, Z3_ast elem, Z3_ast set) {
+    Z3_ast Z3_API Z3_mk_set_member(Z3_context c, Z3_ast elem, Z3_ast set) {
         return Z3_mk_select(c, set, elem);
     }
 
-    Z3_ast Z3_mk_set_add(Z3_context c, Z3_ast set, Z3_ast elem) {
+    Z3_ast Z3_API Z3_mk_set_add(Z3_context c, Z3_ast set, Z3_ast elem) {
         return Z3_mk_store(c, set, elem, Z3_mk_true(c));
     }
 
-    Z3_ast Z3_mk_set_del(Z3_context c, Z3_ast set, Z3_ast elem) {
+    Z3_ast Z3_API Z3_mk_set_del(Z3_context c, Z3_ast set, Z3_ast elem) {
         return Z3_mk_store(c, set, elem, Z3_mk_false(c));
+    }
+
+    static bool is_array_sort(Z3_context c, Z3_sort t) {
+        return 
+            to_sort(t)->get_family_id() == mk_c(c)->get_array_fid() &&
+            to_sort(t)->get_decl_kind() == ARRAY_SORT;
+    }
+
+    unsigned Z3_API Z3_get_array_arity(Z3_context c, Z3_sort s) {
+        Z3_TRY;
+        LOG_Z3_get_array_arity(c, s);
+        RESET_ERROR_CODE();
+        sort * a = to_sort(s);
+        if (Z3_get_sort_kind(c, s) != Z3_ARRAY_SORT) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, "sort should be an array");
+            return 0;
+        }
+        return get_array_arity(a);
+        Z3_CATCH_RETURN(0);
     }
 
     Z3_sort Z3_API Z3_get_array_sort_domain(Z3_context c, Z3_sort t) {
@@ -293,9 +324,22 @@ extern "C" {
         LOG_Z3_get_array_sort_domain(c, t);
         RESET_ERROR_CODE();
         CHECK_VALID_AST(t, nullptr);
-        if (to_sort(t)->get_family_id() == mk_c(c)->get_array_fid() &&
-            to_sort(t)->get_decl_kind() == ARRAY_SORT) {
-            Z3_sort r = reinterpret_cast<Z3_sort>(to_sort(t)->get_parameter(0).get_ast());
+        if (is_array_sort(c, t)) {
+            Z3_sort r = of_sort(get_array_domain(to_sort(t), 0));
+            RETURN_Z3(r);
+        }
+        SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+        RETURN_Z3(nullptr);
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    Z3_sort Z3_API Z3_get_array_sort_domain_n(Z3_context c, Z3_sort t, unsigned idx) {
+        Z3_TRY;
+        LOG_Z3_get_array_sort_domain_n(c, t, idx);
+        RESET_ERROR_CODE();
+        CHECK_VALID_AST(t, nullptr);
+        if (is_array_sort(c, t) && get_array_arity(to_sort(t)) > idx) {
+            Z3_sort r = of_sort(get_array_domain(to_sort(t), idx));
             RETURN_Z3(r);
         }
         SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
@@ -308,10 +352,8 @@ extern "C" {
         LOG_Z3_get_array_sort_range(c, t);
         RESET_ERROR_CODE();
         CHECK_VALID_AST(t, nullptr);
-        if (to_sort(t)->get_family_id() == mk_c(c)->get_array_fid() &&
-            to_sort(t)->get_decl_kind() == ARRAY_SORT) {
-            unsigned n = to_sort(t)->get_num_parameters();
-            Z3_sort r = reinterpret_cast<Z3_sort>(to_sort(t)->get_parameter(n-1).get_ast());
+        if (is_array_sort(c, t)) {
+            Z3_sort r = of_sort(get_array_range(to_sort(t)));
             RETURN_Z3(r);
         }
         SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
@@ -319,4 +361,4 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
-};
+}

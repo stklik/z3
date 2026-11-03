@@ -81,29 +81,11 @@ void expr_context_simplifier::reduce_rec(expr * m, expr_ref & result) {
 
 void expr_context_simplifier::reduce_rec(quantifier* q, expr_ref & result) {
     result = q;
-
-#if 0
-    //
-    // The context assumes that asserted expressions are in NNF with
-    // respect to the quantifier occurrences.
-    // This can be disabled if the strong context simplifier
-    // is called from the API over the Z3_simplify method.
-    //
-    expr_context_simplifier nested(m_manager);
-    expr_ref body_r(m_manager);
-    nested.reduce(q->get_expr(), body_r);
-    if (body_r.get() != q->get_expr()) {
-        result = m_manager.update_quantifier(q, body_r.get());
-    }
-    else {
-        result = q;
-    }
-#endif
 }
 
 void expr_context_simplifier::reduce_rec(app * a, expr_ref & result) {    
     if (m_manager.get_basic_family_id() == a->get_family_id()) {
-        switch(a->get_decl_kind()) {
+        switch (a->get_decl_kind()) {
         case OP_AND: 
             reduce_and(a->get_num_args(), a->get_args(), result);
             return;
@@ -168,24 +150,24 @@ void expr_context_simplifier::reduce_rec(app * a, expr_ref & result) {
     }
 
     expr_ref_vector args(m_manager);
-    for (unsigned i = 0; i < a->get_num_args(); ++i) {
+    for (expr* arg : *a) {
         expr_ref tmp(m_manager);
-        reduce_rec(a->get_arg(i), tmp);
+        reduce_rec(arg, tmp);
         args.push_back(tmp.get());
     }
-    result = m_manager.mk_app(a->get_decl(), args.size(), args.c_ptr());
+    result = m_manager.mk_app(a->get_decl(), args);
 }
 
 void expr_context_simplifier::clean_trail(unsigned old_lim) {
     for (unsigned i = m_trail.size(); i > old_lim; ) {
         --i;
-        m_context.erase(m_trail[i].get());
+        m_context.erase(m_trail.get(i));
     }
     m_trail.resize(old_lim);
 }
 
 void expr_context_simplifier::insert_context(expr* e, bool polarity) {
-    TRACE("expr_context_simplifier", tout << mk_pp(e, m_manager) << "\n";);
+    TRACE(expr_context_simplifier, tout << mk_pp(e, m_manager) << "\n";);
     if (m_manager.is_not(e)) {
         e = to_app(e)->get_arg(0);
         polarity = !polarity;
@@ -199,7 +181,7 @@ void expr_context_simplifier::insert_context(expr* e, bool polarity) {
 bool expr_context_simplifier::insert_arg(bool is_and, expr* arg, expr_ref_vector& args) {
     expr_ref tmp(m_manager);
     reduce_rec(arg, tmp);
-    TRACE("expr_context_simplifier", tout << mk_pp(arg, m_manager) << " -> " << mk_pp(tmp.get(), m_manager) << "\n";);    
+    TRACE(expr_context_simplifier, tout << mk_pp(arg, m_manager) << " -> " << mk_pp(tmp.get(), m_manager) << "\n";);    
     if (is_true(tmp.get()) && is_and) {
         // skip.
     }
@@ -249,10 +231,10 @@ void expr_context_simplifier::reduce_and_or(bool is_and, unsigned num_args, expr
     clean_trail(trail_size);
 
     if (is_and) {
-        m_simp.mk_and(args1.size(), args1.c_ptr(), result);
+        m_simp.mk_and(args1.size(), args1.data(), result);
     }
     else {
-        m_simp.mk_or(args1.size(), args1.c_ptr(), result);
+        m_simp.mk_or(args1.size(), args1.data(), result);
     }
 }
 
@@ -315,7 +297,7 @@ bool expr_context_simplifier::is_false(expr* e) const {
 expr_strong_context_simplifier::expr_strong_context_simplifier(smt_params& p, ast_manager& m): 
     m_manager(m), m_arith(m), m_fn(nullptr,m), m_solver(m, p) {
     sort* i_sort = m_arith.mk_int();
-    m_fn = m.mk_func_decl(symbol(0xbeef101), i_sort, m.mk_bool_sort());
+    m_fn = m.mk_func_decl(symbol(0xbeef101u), i_sort, m.mk_bool_sort());
 }
 
 
@@ -334,7 +316,7 @@ void expr_strong_context_simplifier::simplify_basic(expr* fml, expr_ref& result)
 
     ptr_vector<expr> todo;
     ptr_vector<expr> names;
-    svector<bool>    is_checked;
+    bool_vector    is_checked;
     svector<unsigned> parent_ids, self_ids;
     expr_ref_vector  fresh_vars(m);
     expr_ref_vector trail(m);
@@ -419,10 +401,7 @@ void expr_strong_context_simplifier::simplify_basic(expr* fml, expr_ref& result)
                     args.push_back(arg);
                 }
             }
-            else if (!m.is_bool(arg)) {
-                args.push_back(arg);
-            }
-            else if (!n2) {                
+            else if (!n2 && m.is_bool(arg)) {                
                 n2 = m.mk_app(m_fn, m_arith.mk_numeral(rational(id++), true));
                 todo.push_back(arg);
                 parent_ids.push_back(self_pos);
@@ -436,7 +415,7 @@ void expr_strong_context_simplifier::simplify_basic(expr* fml, expr_ref& result)
                 args.push_back(arg);
             }
         }
-        r = m.mk_app(a->get_decl(), args.size(), args.c_ptr());
+        r = m.mk_app(a->get_decl(), args);
         trail.push_back(r);
         if (n2) {
             m_solver.push();
@@ -449,7 +428,7 @@ void expr_strong_context_simplifier::simplify_basic(expr* fml, expr_ref& result)
             cache.insert(e, std::make_pair(pos, r));
         }
 
-        TRACE("expr_context_simplifier", 
+        TRACE(expr_context_simplifier, 
               tout << mk_pp(e, m_manager) 
               << " checked: " << checked 
               << " cached: " 
@@ -484,7 +463,7 @@ void expr_strong_context_simplifier::simplify_model_based(expr* fml, expr_ref& r
 
     ptr_vector<expr> todo;
     ptr_vector<expr> names;
-    svector<bool>    is_checked;
+    bool_vector    is_checked;
     svector<unsigned> parent_ids, self_ids;
     expr_ref_vector  fresh_vars(m);
     expr_ref_vector trail(m);
@@ -695,10 +674,7 @@ void expr_strong_context_simplifier::simplify_model_based(expr* fml, expr_ref& r
                     args.push_back(arg);
                 }
             }
-            else if (!m.is_bool(arg)) {
-                args.push_back(arg);
-            }
-            else if (!n2) {                
+            else if (!n2 && m.is_bool(arg)) {                
                 n2 = m.mk_app(m_fn, m_arith.mk_numeral(rational(id++), true));
                 todo.push_back(arg);
                 parent_ids.push_back(self_pos);
@@ -712,7 +688,7 @@ void expr_strong_context_simplifier::simplify_model_based(expr* fml, expr_ref& r
                 args.push_back(arg);
             }
         }
-        r = m.mk_app(a->get_decl(), args.size(), args.c_ptr());
+        r = m.mk_app(a->get_decl(), args);
         trail.push_back(r);
         if (n2) {
             m_solver.push();
@@ -725,7 +701,7 @@ void expr_strong_context_simplifier::simplify_model_based(expr* fml, expr_ref& r
             cache.insert(e, std::make_pair(pos, r));
         }
 
-        TRACE("expr_context_simplifier", 
+        TRACE(expr_context_simplifier, 
               tout << mk_pp(e, m_manager) 
               << " checked: " << checked 
               << " cached: " 

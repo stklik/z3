@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef GROBNER_H_
-#define GROBNER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/arith_decl_plugin.h"
@@ -49,7 +48,7 @@ public:
         friend class grobner;
         friend struct monomial_lt;
 
-        monomial() {}
+        monomial() = default;
     public:
         rational const & get_coeff() const { return m_coeff; }
         unsigned get_degree() const { return m_vars.size(); }
@@ -64,11 +63,11 @@ public:
         ptr_vector<monomial> m_monomials;     //!< sorted monomials
         v_dependency *         m_dep;           //!< justification for the equality
         friend class grobner;
-        equation() {}
+        equation() = default;
     public:
         unsigned get_num_monomials() const { return m_monomials.size(); }
         monomial const * get_monomial(unsigned idx) const { return m_monomials[idx]; }
-        monomial * const * get_monomials() const { return m_monomials.c_ptr(); }
+        monomial * const * get_monomials() const { return m_monomials.data(); }
         v_dependency * get_dependency() const { return m_dep; }
         unsigned hash() const { return m_bidx; }
         bool is_linear_combination() const { return m_lc; }
@@ -121,9 +120,16 @@ protected:
 
     void display_var(std::ostream & out, expr * var) const;
 
-    void display_monomials(std::ostream & out, unsigned num_monomials, monomial * const * monomials) const;
+    void display_monomials(std::ostream & out, unsigned num_monomials, monomial * const * monomials, std::function<void(std::ostream&, expr*)>& display_var) const;
 
-    void display_equations(std::ostream & out, equation_set const & v, char const * header) const;
+
+    void display_monomials(std::ostream & out, unsigned num_monomials, monomial * const * monomials) const {
+        std::function<void(std::ostream& out, expr* v)> _fn = [&](std::ostream& out, expr* v) { display_var(out, v); };
+        display_monomials(out, num_monomials, monomials, _fn);
+    }
+
+
+    void display_equations(std::ostream & out, equation_set const & v, char const * header, std::function<void(std::ostream&, expr*)>& display_var) const;
 
     void del_equations(unsigned old_size);
 
@@ -156,6 +162,8 @@ protected:
     void normalize_coeff(ptr_vector<monomial> & monomials);
 
     void simplify(ptr_vector<monomial> & monomials);
+
+    void inc(monomial const & m);
 
     void simplify(equation * eq);
 
@@ -282,12 +290,25 @@ public:
 
     void pop_scope(unsigned num_scopes);
 
-    void display_equation(std::ostream & out, equation const & eq) const;
+    void display_equation(std::ostream & out, equation const & eq) const {
+        std::function<void(std::ostream& out, expr* v)> _fn = [&](std::ostream& out, expr* v) { display_var(out, v); };
+        display_equation(out, eq, _fn);
+    }
 
-    void display_monomial(std::ostream & out, monomial const & m) const;
+    void display_monomial(std::ostream & out, monomial const & m) const {
+        std::function<void(std::ostream& out, expr* v)> _fn = [&](std::ostream& out, expr* v) { display_var(out, v); };
+        display_monomial(out, m, _fn);
+    }
+    
+    void display_equation(std::ostream & out, equation const & eq, std::function<void(std::ostream&, expr*)>& display_var) const;
 
-    void display(std::ostream & out) const;
+    void display_monomial(std::ostream & out, monomial const & m, std::function<void(std::ostream&, expr*)>& display_var) const;
+
+    void display(std::ostream & out) const {
+        std::function<void(std::ostream& out, expr* v)> _fn = [&](std::ostream& out, expr* v) { display_var(out, v); };
+        display(out, _fn);        
+    }
+    
+    void display(std::ostream & out, std::function<void(std::ostream&, expr*)>& display_var) const;
 };
-
-#endif /* GROBNER_H_ */
 

@@ -16,7 +16,9 @@ Author:
 Revision History:
 
 --*/
-#include<sstream>
+#include <sstream>
+#include <cstring>
+#include <iostream>
 #include "util/mpff.h"
 #include "util/mpz.h"
 #include "util/mpq.h"
@@ -30,13 +32,13 @@ static void tst1() {
         m.set(b, -33);
         std::cout << "a: " << a << ", b: " << b << "\n";
         std::cout << "a*b: " << a*b << "\n";
-        for (unsigned i = 0; i < 100; i++) {
+        for (unsigned i = 0; i < 100; ++i) {
             a = a*a;
             std::cout << i << ": " << a << "\n";
         }
     }
     catch (const z3_exception & ex) {
-        std::cout << ex.msg() << "\n";
+        std::cout << ex.what() << "\n";
     }
 }
 
@@ -113,12 +115,12 @@ static void tst7() {
     m.display_smt2(std::cout, a); std::cout << "\n";
 }
 
-//  if (!qm.le(qa, qt)) { TRACE("mpff_bug", tout << fa << "\n" << qa << "\n" << qt << "\n";); UNREACHABLE(); }
+//  if (!qm.le(qa, qt)) { TRACE(mpff_bug, tout << fa << "\n" << qa << "\n" << qt << "\n";); UNREACHABLE(); }
 
 
 #define MK_BIN_OP(OP)                                                   \
 static void tst_ ## OP ## _core(int64_t n1, uint64_t d1, int64_t n2, uint64_t d2, unsigned precision = 2, unsigned exp = 0) { \
-    TRACE("mpff_bug", tout << n1 << "/" << d1 << ", " << n2 << "/" << d2 << "\n";); \
+    TRACE(mpff_bug, tout << n1 << "/" << d1 << ", " << n2 << "/" << d2 << "\n";); \
     unsynch_mpq_manager qm;                                             \
     scoped_mpq  qa(qm), qb(qm), qc(qm), qt(qm);                         \
                                                                         \
@@ -146,14 +148,14 @@ static void tst_ ## OP ## _core(int64_t n1, uint64_t d1, int64_t n2, uint64_t d2
     ENSURE(fm.le(fc2, fc1));                                           \
 }
 
-MK_BIN_OP(add);
-MK_BIN_OP(sub);
-MK_BIN_OP(mul);
-MK_BIN_OP(div);
+MK_BIN_OP(add)
+MK_BIN_OP(sub)
+MK_BIN_OP(mul)
+MK_BIN_OP(div)
 
 #define MK_BIN_RANDOM_TST(OP)                                           \
     static void tst_ ## OP(unsigned N, unsigned max, unsigned prec = 2, bool is_div = false) { \
-    for (unsigned i = 0; i < N; i++) {                                  \
+    for (unsigned i = 0; i < N; ++i) {                                  \
         int n1 = rand() % max;                                          \
         int d1 = rand() % max + 1;                                      \
         int n2 = rand() % max;                                          \
@@ -206,6 +208,7 @@ static void tst_bug2() {
 static void tst_set64(unsigned N, unsigned prec) {
     mpff_manager fm(prec);
     scoped_mpff a(fm);
+    random_gen rng;
 
     fm.set(a, static_cast<int64_t>(INT64_MAX));
     ENSURE(fm.is_int64(a));
@@ -248,26 +251,26 @@ static void tst_set64(unsigned N, unsigned prec) {
     ENSURE(fm.is_uint64(a));
     ENSURE(!fm.is_int64(a));
 
-    for (unsigned i = 0; i < N; i++) {
+    for (unsigned i = 0; i < N; ++i) {
         {
-            uint64_t v = (static_cast<uint64_t>(rand()) << 32) + static_cast<uint64_t>(rand()); 
+            uint64_t v = rng.next_uint64();
             fm.set(a, v);
             ENSURE(fm.is_uint64(a));
             
-            v = (static_cast<uint64_t>(rand() % 3) << 32) + static_cast<uint64_t>(rand()); 
+            v = rng.next_uint64() % (uint64_t{3} << 32);
             fm.set(a, v);
             ENSURE(fm.is_uint64(a));
         }
         {
-            int64_t v = (static_cast<uint64_t>(rand() % INT_MAX) << 32) + static_cast<uint64_t>(rand());
-            if (rand()%2 == 0)
+            int64_t v = static_cast<int64_t>(rng.next_uint64() & INT64_MAX);
+            if (rng(2) == 0)
                 v = -v;
             fm.set(a, v);
             ENSURE(fm.is_int64(a));
 
 
-            v = (static_cast<uint64_t>(rand() % 3) << 32) + static_cast<uint64_t>(rand());
-            if (rand()%2 == 0)
+            v = static_cast<int64_t>(rng.next_uint64() % (uint64_t{3} << 32));
+            if (rng(2) == 0)
                 v = -v;
             fm.set(a, v);
             ENSURE(fm.is_int64(a));
@@ -279,14 +282,14 @@ static void tst_capacity(unsigned prec = 2) {
     mpff_manager m(prec);
     scoped_mpff_vector v(m);
     scoped_mpff a(m);
-    for (unsigned i = 0; i < 50000; i++) {
+    for (unsigned i = 0; i < 50000; ++i) {
         m.set(a, i);
         v.push_back(a);
         ENSURE(m.is_int(v.back()));
         ENSURE(m.is_int64(v.back()));
         ENSURE(m.is_uint64(v.back()));
     }
-    for (unsigned i = 0; i < 50000; i++) {
+    for (unsigned i = 0; i < 50000; ++i) {
         ENSURE(m.get_int64(v[i]) == i);
     }
 }
@@ -484,7 +487,7 @@ static void tst_limits(unsigned prec) {
     ENSURE(!m.is_plus_epsilon(a));
     ENSURE(m.is_minus_epsilon(a));
     
-    for (unsigned i = 0; i < 2; i++) {
+    for (unsigned i = 0; i < 2; ++i) {
         m.set_rounding(i == 0);
         
         m.set_plus_epsilon(a);
@@ -608,8 +611,8 @@ static void tst_div(unsigned prec) {
 }
 
 void tst_mpff() {
-    disable_trace("mpff");
-    enable_trace("mpff_trace");
+    // disable_trace("mpff");
+    // enable_trace("mpff_trace");
     // enable_trace("mpff_bug");
     // enable_trace("mpff_to_mpq");
     //

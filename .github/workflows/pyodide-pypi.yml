@@ -1,0 +1,57 @@
+name: Pyodide Wheel (PyPI)
+
+# Builds a PEP 783 `pyemscripten_*_wasm32` wheel for z3-solver using cibuildwheel
+# and publishes it to PyPI on tag pushes. Unlike the legacy pyodide.yml (which
+# uses `pyodide build` and produces a Pyodide-version-locked emscripten_* wheel
+# uploaded only as a CI artifact), this wheel is installable at runtime with
+# micropip from PyPI. See src/api/python/pyproject.toml [tool.cibuildwheel].
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-pyodide:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build Pyodide wheel
+        uses: pypa/cibuildwheel@b9e566a2b284570af229f6c2a33673410d0389a3 # v4.3.4
+        with:
+          # The Python bindings live in a subdirectory of the repo.
+          package-dir: src/api/python
+        env:
+          CIBW_PLATFORM: pyodide
+          # Exception/longjmp/bigint flags are declared in
+          # src/api/python/pyproject.toml ([tool.pyodide.build]) and combined
+          # with Pyodide's -fwasm-exceptions defaults. Don't set CFLAGS/CXXFLAGS
+          # here — a JS-EH -fexceptions value conflicts with the wasm-EH ABI.
+
+      - name: Store Pyodide wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pyodide-wheel
+          path: wheelhouse/*.whl
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-pyodide]
+    environment: release
+    permissions:
+      id-token: write  # trusted publishing (OIDC), no API token needed
+    steps:
+      - name: Download Pyodide wheel
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pyodide-wheel
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

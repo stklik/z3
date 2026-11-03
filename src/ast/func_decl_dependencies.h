@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef FUNC_DECL_DEPENDENCIES_H_
-#define FUNC_DECL_DEPENDENCIES_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -58,7 +57,7 @@ public:
     void reset();
 
     /**
-       \brief Create a dependecy set.
+       \brief Create a dependency set.
        This set should be populated using #collect_func_decls.
        After populating the set, it must be used as an argument for the #insert method.
 
@@ -107,4 +106,3 @@ public:
 };
 
 
-#endif

@@ -16,9 +16,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef REF_BUFFER_H_
-#define REF_BUFFER_H_
+#pragma once
 
+#include <span>
 #include "util/buffer.h"
 #include "util/obj_ref.h"
 #include "util/ref_vector.h"
@@ -43,20 +43,31 @@ protected:
             dec_ref(*it);
     }
 
+    void dec_all_ref() {
+        for (T* elem : m_buffer)
+            dec_ref(elem);
+    }
+
 public:
-    typedef T * data;
+    typedef T * data_t;
 
     ref_buffer_core(Ref const & r = Ref()):
         Ref(r) {
     }
 
     ~ref_buffer_core() {
-        dec_range_ref(m_buffer.begin(), m_buffer.end());
+        dec_all_ref();
     }
 
     void push_back(T * n) {
         inc_ref(n);
         m_buffer.push_back(n);
+    }
+
+    template <typename M>
+    void push_back(obj_ref<T,M> && n) {
+        m_buffer.push_back(n.get());
+        n.steal();
     }
     
     void pop_back() {
@@ -74,16 +85,16 @@ public:
         return m_buffer.back();
     }
     
-    T ** c_ptr() const {
-        return m_buffer.c_ptr();
+    T ** data() const {
+        return m_buffer.data();
     }
 
     T * operator[](unsigned idx) const {
         return m_buffer[idx];
     }
 
-    T* const* begin() const { return c_ptr(); }
-    T* const* end() const { return c_ptr() + size(); }
+    T* const* begin() const { return data(); }
+    T* const* end() const { return data() + size(); }
 
     void set(unsigned idx, T * n) {
         inc_ref(n);
@@ -100,23 +111,28 @@ public:
     }
 
     void reset() {
-        dec_range_ref(m_buffer.begin(), m_buffer.end());
+        dec_all_ref();
         m_buffer.reset();
     }
 
     void finalize() {
-        dec_range_ref(m_buffer.begin(), m_buffer.end());
+        dec_all_ref();
         m_buffer.finalize();
     }        
 
-    void append(unsigned n, T * const * elems) {
-        for (unsigned i = 0; i < n; i++) {
-            push_back(elems[i]);
+    void append(std::span<T * const> elems) {
+        for (auto elem : elems) {
+            push_back(elem);
         }
     }
 
+    // Backward compatibility overload
+    void append(unsigned n, T * const * elems) {
+        append(std::span<T * const>(elems, n));
+    }
+
     void append(ref_buffer_core const & other) {
-        append(other.size(), other.c_ptr());
+        append(other.size(), other.data());
     }
 
     void resize(unsigned sz) {
@@ -163,7 +179,9 @@ public:
         super(ref_manager_wrapper<T, TManager>(other.m_manager)) {
         SASSERT(this->m_buffer.size() == 0);
         append(other);
-    }        
+    }
+
+    ref_buffer &operator=(const ref_buffer &) = default;
 };
 
 /**
@@ -173,5 +191,3 @@ template<typename T, unsigned INITIAL_SIZE=16>
 class sref_buffer : public ref_buffer_core<T, ref_unmanaged_wrapper<T>, INITIAL_SIZE> {
 public:
 };
-
-#endif /* REF_BUFFER_H_ */

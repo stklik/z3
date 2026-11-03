@@ -19,8 +19,7 @@ Revision History:
 
 --*/
 
-#ifndef EXPR_FUNCTORS_H_
-#define EXPR_FUNCTORS_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/expr_map.h"
@@ -28,14 +27,14 @@ Revision History:
 class i_expr_pred {
 public:
     virtual bool operator()(expr* e) = 0;
-    virtual ~i_expr_pred() {}
+    virtual ~i_expr_pred() = default;
 };
 
 
 class i_sort_pred {
 public:
     virtual bool operator()(sort* s) = 0;
-    virtual ~i_sort_pred() {}
+    virtual ~i_sort_pred() = default;
 };
 
 
@@ -53,8 +52,10 @@ class check_pred {
     ast_mark        m_pred_holds;
     ast_mark        m_visited;
     expr_ref_vector m_refs;
+    bool            m_check_quantifiers;
 public:        
-    check_pred(i_expr_pred& p, ast_manager& m) : m_pred(p), m_refs(m) {}
+    check_pred(i_expr_pred& p, ast_manager& m, bool check_quantifiers = true) : 
+        m_pred(p), m_refs(m), m_check_quantifiers(check_quantifiers) {}
         
     bool operator()(expr* e);
 
@@ -90,7 +91,7 @@ public:
     }
     
     bool operator()(expr_ref_vector const& v) {
-        return (*this)(v.size(), v.c_ptr());
+        return (*this)(v.size(), v.data());
     }
     
     bool operator()(unsigned size, expr* const* es);
@@ -126,4 +127,3 @@ public:
 };
 
 
-#endif

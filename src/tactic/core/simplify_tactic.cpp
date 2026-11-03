@@ -31,9 +31,6 @@ struct simplify_tactic::imp {
         m_num_steps(0) {
     }
 
-    ~imp() {
-    }
-
     ast_manager & m() const { return m_manager; }
 
 
@@ -42,17 +39,19 @@ struct simplify_tactic::imp {
         m_num_steps = 0;
     }
 
+    void collect_statistics(statistics& st) {
+        st.update("rewriter.steps", m_num_steps);
+    }
+
     void operator()(goal & g) {
-        SASSERT(g.is_well_sorted());
         tactic_report report("simplifier", g);
-        TRACE("before_simplifier", g.display(tout););
         m_num_steps = 0;
         if (g.inconsistent())
             return;
         expr_ref   new_curr(m());
         proof_ref  new_pr(m());
         unsigned size = g.size();
-        for (unsigned idx = 0; idx < size; idx++) {
+        for (unsigned idx = 0; idx < size; ++idx) {
             if (g.inconsistent())
                 break;
             expr * curr = g.form(idx);
@@ -64,11 +63,9 @@ struct simplify_tactic::imp {
             }
             g.update(idx, new_curr, new_pr, g.dep(idx));
         }
-        TRACE("after_simplifier_bug", g.display(tout););
+        TRACE(simplifier, g.display(tout););
         g.elim_redundancies();
-        TRACE("after_simplifier", g.display(tout););
-        TRACE("after_simplifier_detail", g.display_with_dependencies(tout););
-        SASSERT(g.is_well_sorted());
+        TRACE(after_simplifier_detail, g.display_with_dependencies(tout););
     }
 
     unsigned get_num_steps() const { return m_num_steps; }
@@ -84,8 +81,8 @@ simplify_tactic::~simplify_tactic() {
 }
 
 void simplify_tactic::updt_params(params_ref const & p) {
-    m_params = p;
-    m_imp->m_r.updt_params(p);
+    m_params.append(p);
+    m_imp->m_r.updt_params(m_params);
 }
 
 void simplify_tactic::get_param_descrs(param_descrs & r) {
@@ -98,18 +95,27 @@ void simplify_tactic::operator()(goal_ref const & in,
         (*m_imp)(*(in.get()));
         in->inc_depth();
         result.push_back(in.get());
+        m_clean = false;
     }
     catch (rewriter_exception & ex) {
-        throw tactic_exception(ex.msg());
+        throw tactic_exception(ex.what());
     }
 }
 
 
 void simplify_tactic::cleanup() {
+    if (m_clean)
+        return;
     ast_manager & m = m_imp->m();
     params_ref p = std::move(m_params);
     m_imp->~imp();
     new (m_imp) imp(m, p);
+    m_clean = true;
+}
+
+void simplify_tactic::collect_statistics(statistics& st) const {
+    if (m_imp)
+        m_imp->collect_statistics(st);
 }
 
 unsigned simplify_tactic::get_num_steps() const {

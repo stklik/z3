@@ -16,13 +16,12 @@ Author:
 Revision History:
 
 --*/
-#ifndef NLSAT_INTERVAL_SET_H_
-#define NLSAT_INTERVAL_SET_H_
+#pragma once
 
 #include "nlsat/nlsat_types.h"
 
 namespace nlsat {
-
+      
     class interval_set;
 
     class interval_set_manager {
@@ -30,12 +29,14 @@ namespace nlsat {
         small_object_allocator & m_allocator;
         svector<char>            m_already_visited;
         random_gen               m_rand;
+
         void del(interval_set * s);
+        bool find_complement_sup(interval_set const * s, unsigned & i);
     public:
         interval_set_manager(anum_manager & m, small_object_allocator & a);
-        ~interval_set_manager();
         
         void set_seed(unsigned s) { m_rand.set_seed(s); }
+        unsigned get_seed() const { return m_rand.get_seed(); }
 
         /**
            \brief Return the empty set.
@@ -47,7 +48,7 @@ namespace nlsat {
         */
         interval_set * mk(bool lower_open, bool lower_inf, anum const & lower, 
                           bool upper_open, bool upper_inf, anum const & upper,
-                          literal justification);
+                          literal justification, clause const* cls);
         
         /**
            \brief Return the union of two sets.
@@ -91,9 +92,9 @@ namespace nlsat {
         /**
            \brief Return a set of literals that justify s.
         */
-        void get_justifications(interval_set const * s, literal_vector & js);
+        void get_justifications(interval_set const * s, literal_vector & js, ptr_vector<clause>& clauses );
         
-        void display(std::ostream & out, interval_set const * s) const;
+        std::ostream& display(std::ostream & out, interval_set const * s) const;
         
         unsigned num_intervals(interval_set const * s) const;
         
@@ -108,7 +109,23 @@ namespace nlsat {
            
            \pre !is_full(s)
         */
-        void peek_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize);
+        void pick_in_complement(interval_set const * s, bool is_int, anum & w, bool randomize);
+
+        /**
+           \brief Pick the largest element of the complement of s.
+           Return false if the complement is unbounded above (w is not modified).
+           Otherwise w is set to the maximum of the complement when it is attained,
+           or to some element of the complement below its supremum when it is not.
+        */
+        bool pick_max_in_complement(interval_set const * s, anum & w);
+
+        /**
+           \brief Compute the supremum of the complement of s.
+           Return false if the complement is unbounded above (sup is not modified).
+           Otherwise sup is set to the supremum of the complement, and attained
+           to true iff sup itself belongs to the complement.
+        */
+        bool query_max_in_complement(interval_set const * s, anum & sup, bool & attained);
     };
 
     typedef obj_ref<interval_set, interval_set_manager> interval_set_ref;
@@ -118,6 +135,5 @@ namespace nlsat {
         return out;
     }
 
-};
+}
 
-#endif

@@ -19,8 +19,7 @@ Revision History:
 --*/
 
 
-#ifndef SMT_VALUE_SORT_H_
-#define SMT_VALUE_SORT_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -31,7 +30,6 @@ namespace smt {
 
     bool is_value_sort(ast_manager& m, expr* e);
     
-};
+}
 
 
-#endif

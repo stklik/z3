@@ -13,7 +13,8 @@ Copyright (c) 2015 Microsoft Corporation
 #include "ast/ast_util.h"
 #include "model/model_smt2_pp.h"
 #include "smt/smt_kernel.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
+#include <iostream>
 
 struct ast_ext {
     ast_manager& m;
@@ -162,7 +163,7 @@ struct ast_ext2 {
         return trail(m.mk_or(n, lits));
     }
     pliteral mk_min(unsigned n, pliteral const* lits) {
-        return trail(m.mk_and(n, lits));
+        return trail(m.mk_and(std::span<expr* const>(lits, n)));
     }
     pliteral mk_not(pliteral a) { if (m.is_not(a,a)) return a;
         return trail(m.mk_not(a));
@@ -196,7 +197,7 @@ static void test_eq1(unsigned n, sorting_network_encoding enc) {
 
     // equality:
     solver.push();
-    result1 = sn.eq(true, 1, in.size(), in.c_ptr());
+    result1 = sn.eq(true, 1, in.size(), in.data());
     for (expr* cls : ext.m_clauses) {
         solver.assert_expr(cls);
     }
@@ -218,7 +219,7 @@ static void test_eq1(unsigned n, sorting_network_encoding enc) {
         model_ref model;
         solver.get_model(model);
         model_smt2_pp(std::cout, m, *model, 0);
-        TRACE("pb", model_smt2_pp(tout, m, *model, 0););
+        TRACE(pb, model_smt2_pp(tout, m, *model, 0););
     }
     ENSURE(l_false == res);
     ext.m_clauses.reset();
@@ -242,7 +243,7 @@ static void test_sorting_eq(unsigned n, unsigned k, sorting_network_encoding enc
     // equality:
     std::cout << "eq " << k << " out of " << n << " for encoding " << enc << "\n";
     solver.push();
-    result = sn.eq(false, k, in.size(), in.c_ptr());
+    result = sn.eq(false, k, in.size(), in.data());
     solver.assert_expr(result);
     for (expr* cl : ext.m_clauses) {
         solver.assert_expr(cl);
@@ -266,7 +267,7 @@ static void test_sorting_eq(unsigned n, unsigned k, sorting_network_encoding enc
     solver.assert_expr(in[k].get());
     res = solver.check();
     if (res == l_true) {
-        TRACE("pb",
+        TRACE(pb,
               unsigned sz = solver.size();
               for (unsigned i = 0; i < sz; ++i) {
                   tout << mk_pp(solver.get_formula(i), m) << "\n";
@@ -274,7 +275,7 @@ static void test_sorting_eq(unsigned n, unsigned k, sorting_network_encoding enc
         model_ref model;
         solver.get_model(model);
         model_smt2_pp(std::cout, m, *model, 0);
-        TRACE("pb", model_smt2_pp(tout, m, *model, 0););
+        TRACE(pb, model_smt2_pp(tout, m, *model, 0););
     }
     ENSURE(res == l_false);
     solver.pop(1);
@@ -297,7 +298,7 @@ static void test_sorting_le(unsigned n, unsigned k, sorting_network_encoding enc
     // B <= k
     std::cout << "le " << k << "\n";
     solver.push();
-    result = sn.le(false, k, in.size(), in.c_ptr());
+    result = sn.le(false, k, in.size(), in.data());
     solver.assert_expr(result);
     for (expr* cls : ext.m_clauses) {
         solver.assert_expr(cls);
@@ -323,7 +324,7 @@ static void test_sorting_le(unsigned n, unsigned k, sorting_network_encoding enc
     solver.assert_expr(in[k].get());
     res = solver.check();
     if (res == l_true) {
-        TRACE("pb",
+        TRACE(pb,
               unsigned sz = solver.size();
               for (unsigned i = 0; i < sz; ++i) {
                   tout << mk_pp(solver.get_formula(i), m) << "\n";
@@ -331,7 +332,7 @@ static void test_sorting_le(unsigned n, unsigned k, sorting_network_encoding enc
         model_ref model;
         solver.get_model(model);
         model_smt2_pp(std::cout, m, *model, 0);
-        TRACE("pb", model_smt2_pp(tout, m, *model, 0););
+        TRACE(pb, model_smt2_pp(tout, m, *model, 0););
     }
     ENSURE(res == l_false);
     solver.pop(1);
@@ -355,7 +356,7 @@ void test_sorting_ge(unsigned n, unsigned k, sorting_network_encoding enc) {
     // k <= B
     std::cout << "ge " << k << "\n";
     solver.push();
-    result = sn.ge(false, k, in.size(), in.c_ptr());
+    result = sn.ge(false, k, in.size(), in.data());
     solver.assert_expr(result);
     for (expr* cls : ext.m_clauses) {
         solver.assert_expr(cls);
@@ -372,7 +373,7 @@ void test_sorting_ge(unsigned n, unsigned k, sorting_network_encoding enc) {
     solver.assert_expr(m.mk_not(in[n - k].get()));
     res = solver.check();
     if (res == l_true) {
-        TRACE("pb",
+        TRACE(pb,
               unsigned sz = solver.size();
               for (unsigned i = 0; i < sz; ++i) {
                   tout << mk_pp(solver.get_formula(i), m) << "\n";
@@ -380,7 +381,7 @@ void test_sorting_ge(unsigned n, unsigned k, sorting_network_encoding enc) {
         model_ref model;
         solver.get_model(model);
         model_smt2_pp(std::cout, m, *model, 0);
-        TRACE("pb", model_smt2_pp(tout, m, *model, 0););
+        TRACE(pb, model_smt2_pp(tout, m, *model, 0););
     }
     ENSURE(res == l_false);
     solver.pop(1);
@@ -416,7 +417,7 @@ void test_at_most_1(unsigned n, bool full, sorting_network_encoding enc) {
     psort_nw<ast_ext2> sn(ext);
     sn.cfg().m_encoding = enc;
     expr_ref result1(m), result2(m);
-    result1 = sn.le(full, 1, in.size(), in.c_ptr());
+    result1 = sn.le(full, 1, in.size(), in.data());
     result2 = naive_at_most1(in);
 
 
@@ -494,7 +495,7 @@ static void test_at_most1(sorting_network_encoding enc) {
     psort_nw<ast_ext2> sn(ext);
     sn.cfg().m_encoding = enc;
     expr_ref result(m);
-    result = sn.le(true, 1, in.size(), in.c_ptr());
+    result = sn.le(true, 1, in.size(), in.data());
     //std::cout << result << "\n";
     //std::cout << ext.m_clauses << "\n";
 }
@@ -522,7 +523,144 @@ static void tst_sorting_network(sorting_network_encoding enc) {
     test_sorting5(enc);
 }
 
+static void test_pb(unsigned max_w, unsigned sz, unsigned_vector& ws) {
+    if (ws.empty()) {
+        for (unsigned w = 1; w <= max_w; ++w) {
+            ws.push_back(w);
+            test_pb(max_w, sz, ws);
+            ws.pop_back();
+        }        
+    }
+    else if (ws.size() < sz) {
+        for (unsigned w = ws.back(); w <= max_w; ++w) {
+            ws.push_back(w);
+            test_pb(max_w, sz, ws);
+            ws.pop_back();
+        }        
+    }
+    else {
+        ENSURE(ws.size() == sz);
+        ast_manager m;
+        reg_decl_plugins(m);
+        expr_ref_vector xs(m), nxs(m);
+        expr_ref ge(m), eq(m);
+        smt_params fp;
+        smt::kernel solver(m, fp);
+        for (unsigned i = 0; i < sz; ++i) {
+            xs.push_back(m.mk_const(symbol(i), m.mk_bool_sort()));
+            nxs.push_back(m.mk_not(xs.back()));
+        }
+        std::cout << ws << " " << "\n";
+        for (unsigned k = max_w + 1; k < ws.size()*max_w; ++k) {
+
+            ast_ext2 ext(m);
+            psort_nw<ast_ext2> sn(ext);
+            solver.push();
+            //std::cout << "bound: " << k << "\n";
+            //std::cout << ws << " " << xs << "\n";
+            ge = sn.ge(k, sz, ws.data(), xs.data());
+            //std::cout << "ge: " << ge << "\n";            
+            for (expr* cls : ext.m_clauses) {
+                solver.assert_expr(cls);
+            }
+            // solver.display(std::cout);
+            // for each truth assignment to xs, validate 
+            // that circuit computes the right value for ge
+            for (unsigned i = 0; i < (1ul << sz); ++i) {
+                solver.push();
+                unsigned sum = 0;
+                for (unsigned j = 0; j < sz; ++j) {
+                    if (0 == ((1 << j) & i)) {
+                        solver.assert_expr(xs.get(j));
+                        sum += ws[j];
+                    }
+                    else {
+                        solver.assert_expr(nxs.get(j));
+                    }
+                }
+                // std::cout << "bound: " << k << "\n";
+                // std::cout << ws << " " << xs << "\n";
+                // std::cout << sum << " >= " << k << " : " << (sum >= k) << " ";
+                solver.push();
+                if (sum < k) {
+                    solver.assert_expr(m.mk_not(ge));
+                }
+                else {
+                    solver.assert_expr(ge);
+                }
+                // solver.display(std::cout) << "\n";
+                VERIFY(solver.check() == l_true);
+                solver.pop(1);
+
+                solver.push();
+                if (sum >= k) {
+                    solver.assert_expr(m.mk_not(ge));
+                }
+                else {
+                    solver.assert_expr(ge);
+                }
+                // solver.display(std::cout) << "\n";
+                VERIFY(l_false == solver.check());
+                solver.pop(1);
+                solver.pop(1);
+            }            
+            solver.pop(1);
+
+            solver.push();
+            eq = sn.eq(k, sz, ws.data(), xs.data());
+
+            for (expr* cls : ext.m_clauses) {
+                solver.assert_expr(cls);
+            }
+            // for each truth assignment to xs, validate 
+            // that circuit computes the right value for ge
+            for (unsigned i = 0; i < (1ul << sz); ++i) {
+                solver.push();
+                unsigned sum = 0;
+                for (unsigned j = 0; j < sz; ++j) {
+                    if (0 == ((1 << j) & i)) {
+                        solver.assert_expr(xs.get(j));
+                        sum += ws[j];
+                    }
+                    else {
+                        solver.assert_expr(nxs.get(j));
+                    }
+                }
+                solver.push();
+                if (sum != k) {
+                    solver.assert_expr(m.mk_not(eq));
+                }
+                else {
+                    solver.assert_expr(eq);
+                }
+                // solver.display(std::cout) << "\n";
+                VERIFY(solver.check() == l_true);
+                solver.pop(1);
+
+                solver.push();
+                if (sum == k) {
+                    solver.assert_expr(m.mk_not(eq));
+                }
+                else {
+                    solver.assert_expr(eq);
+                }
+                VERIFY(l_false == solver.check());
+                solver.pop(1);
+                solver.pop(1);
+            }            
+            
+            solver.pop(1);
+        }
+    }
+}
+
+static void tst_pb() {
+    unsigned_vector ws;
+    test_pb(3, 3, ws);
+}
+
 void tst_sorting_network() {
+    tst_pb();
     tst_sorting_network(sorting_network_encoding::unate_at_most);
     tst_sorting_network(sorting_network_encoding::circuit_at_most);
     tst_sorting_network(sorting_network_encoding::ordered_at_most);

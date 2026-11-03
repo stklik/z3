@@ -13,20 +13,30 @@ Author:
 
     Nikolaj (nbjorner) 2011-05-31
 
-Notes:
+
+Tactic Documentation:
+
+## Tactic symmetry-reduce
+
+### Short Description
+
+Apply symmetry reduction
+
+### Long Description
+
+The tactic applies symmetry reduction for uninterpreted functions and equalities.
+It applies a straight-forward adaption of an algorithm proposed for veriT.
+
 
 --*/
-#ifndef SYMMETRY_REDUCE_TACTIC_H_
-#define SYMMETRY_REDUCE_TACTIC_H_
+#pragma once
 
 #include "util/params.h"
+#include "tactic/tactic.h"
 class ast_manager;
 class tactic;
 
 tactic * mk_symmetry_reduce_tactic(ast_manager & m, params_ref const & p);
 
-/*
-  ADD_TACTIC("symmetry-reduce", "apply symmetry reduction.", "mk_symmetry_reduce_tactic(m, p)")
-*/
+Z3_ADD_TACTIC(symmetry_reduce, "symmetry-reduce", "apply symmetry reduction.", mk_symmetry_reduce_tactic(m, p));
 
-#endif

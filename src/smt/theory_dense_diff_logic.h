@@ -18,11 +18,10 @@ Revision History:
 TODO: eager equality propagation
 
 --*/
-#ifndef THEORY_DENSE_DIFF_LOGIC_H_
-#define THEORY_DENSE_DIFF_LOGIC_H_
+#pragma once
 
 #include "smt/theory_arith.h"
-#include "smt/params/theory_arith_params.h"
+#include "params/theory_arith_params.h"
 #include "ast/arith_decl_plugin.h"
 #include "smt/arith_eq_adapter.h"
 #include "smt/theory_opt.h"
@@ -124,7 +123,7 @@ namespace smt {
         atoms                 m_bv2atoms;
         edges                 m_edges;  // list of asserted edges
         matrix                m_matrix;
-        svector<bool>         m_is_int;
+        bool_vector         m_is_int;
         vector<cell_trail>    m_cell_trail;
         svector<scope>        m_scopes;
         bool                  m_non_diff_logic_exprs;
@@ -162,7 +161,7 @@ namespace smt {
         struct var_value_eq {
             theory_dense_diff_logic & m_th;
             var_value_eq(theory_dense_diff_logic & th):m_th(th) {}
-            bool operator()(theory_var v1, theory_var v2) const { return m_th.m_assignment[v1] == m_th.m_assignment[v2] && m_th.is_int(v1) == m_th.is_int(v2); }
+            bool operator()(theory_var v1, theory_var v2) const { return m_th.m_assignment[v1] == m_th.m_assignment[v2]; }
         };
 
         typedef int_hashtable<var_value_hash, var_value_eq> var_value_table;
@@ -231,7 +230,7 @@ namespace smt {
         
         void restart_eh() override;
         void init_search_eh() override;
-        final_check_status final_check_eh() override;
+        final_check_status final_check_eh(unsigned) override;
         
         bool can_propagate() override;
         void propagate() override;
@@ -239,9 +238,6 @@ namespace smt {
         void flush_eh() override;
         void reset_eh() override;
         
-        bool dump_lemmas() const { return m_params.m_arith_dump_lemmas; }
-
-        bool validate_eq_in_model(theory_var v1, theory_var v2, bool is_true) const override;
 
         void display(std::ostream & out) const override;
         virtual void display_atom(std::ostream & out, atom * a) const;
@@ -267,7 +263,7 @@ namespace smt {
         //
         // -----------------------------------
 
-        inf_eps_rational<inf_rational> maximize(theory_var v, expr_ref& blocker, bool& has_shared) override;
+        inf_eps_rational<inf_rational> maximize(theory_var v, expr_ref& blocker) override;
         inf_eps_rational<inf_rational> value(theory_var v) override;
         theory_var add_objective(app* term) override;
         virtual expr_ref mk_gt(theory_var v, inf_eps const& val);
@@ -279,7 +275,7 @@ namespace smt {
         //
         // -----------------------------------
     public:
-        theory_dense_diff_logic(ast_manager & m, theory_arith_params & p);
+        theory_dense_diff_logic(context& ctx);
         ~theory_dense_diff_logic() override { reset_eh(); }
         
         theory * mk_fresh(context * new_ctx) override;
@@ -296,7 +292,5 @@ namespace smt {
     typedef theory_dense_diff_logic<i_ext>   theory_dense_i;
     typedef theory_dense_diff_logic<smi_ext> theory_dense_smi;
     typedef theory_dense_diff_logic<si_ext>  theory_dense_si;
-};
-
-#endif /* THEORY_DENSE_DIFF_LOGIC_H_ */
+}
 

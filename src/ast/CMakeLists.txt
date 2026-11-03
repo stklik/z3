@@ -3,6 +3,7 @@ z3_add_component(ast
     act_cache.cpp
     arith_decl_plugin.cpp
     array_decl_plugin.cpp
+    array_peq.cpp
     ast.cpp
     ast_ll_pp.cpp
     ast_lt.cpp
@@ -14,8 +15,11 @@ z3_add_component(ast
     ast_translation.cpp
     ast_util.cpp
     bv_decl_plugin.cpp
+    char_decl_plugin.cpp
+    cost_evaluator.cpp
     datatype_decl_plugin.cpp
     decl_collector.cpp
+    display_dimacs.cpp
     dl_decl_plugin.cpp
     expr2polynomial.cpp
     expr2var.cpp
@@ -24,6 +28,8 @@ z3_add_component(ast
     expr_map.cpp
     expr_stat.cpp
     expr_substitution.cpp
+    ff_decl_plugin.cpp
+    finite_set_decl_plugin.cpp
     for_each_ast.cpp
     for_each_expr.cpp
     format.cpp
@@ -34,16 +40,34 @@ z3_add_component(ast
     num_occurs.cpp
     occurs.cpp
     pb_decl_plugin.cpp
+    polymorphism_inst.cpp
+    polymorphism_util.cpp
     pp.cpp
+    quantifier_stat.cpp
+    recfun_decl_plugin.cpp
     reg_decl_plugins.cpp
     seq_decl_plugin.cpp
     shared_occs.cpp
+    special_relations_decl_plugin.cpp
     static_features.cpp
     used_vars.cpp
+    value_generator.cpp
     well_sorted.cpp
   COMPONENT_DEPENDENCIES
     polynomial
     util # Unnecessary? polynomial already depends on util
-  PYG_FILES
-    pp_params.pyg
 )
+
+add_subdirectory(converters)
+add_subdirectory(euf)
+add_subdirectory(ff)
+add_subdirectory(fpa)
+add_subdirectory(macros)
+add_subdirectory(normal_forms)
+add_subdirectory(pattern)
+add_subdirectory(proofs)
+add_subdirectory(rewriter)
+add_subdirectory(seq)
+add_subdirectory(simplifiers)
+add_subdirectory(sls)
+add_subdirectory(substitution)

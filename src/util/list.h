@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef LIST_H_
-#define LIST_H_
+#pragma once
 
 #include "util/buffer.h"
 #include "util/region.h"
@@ -45,7 +44,6 @@ public:
         T const & operator*() const { return m_curr->head(); }
         iterator & operator++() { m_curr = m_curr->tail(); return *this; }
         iterator operator++(int) { iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(iterator const & it) { return m_curr == it.m_curr; }
         bool operator!=(iterator const & it) { return m_curr != it.m_curr; }
     };        
 
@@ -68,7 +66,7 @@ unsigned length(list<T> * l) {
 }
 
 /**
-   \brief Non destructive apppend operation.  The new nodes are allocated
+   \brief Non destructive append operation.  The new nodes are allocated
    using the given region allocator.
 */
 template<typename T>
@@ -92,5 +90,4 @@ list<T> * append(region & r, list<T> * l1, list<T> * l2) {
     return result;
 }
 
-#endif /* LIST_H_ */
 

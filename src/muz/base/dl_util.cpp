@@ -20,9 +20,6 @@ Revision History:
 #include <sstream>
 #include <sys/types.h>
 #include <sys/stat.h>
-#ifdef _WINDOWS
-#include <windows.h>
-#endif
 #include "ast/ast_pp.h"
 #include "ast/rewriter/bool_rewriter.h"
 #include "ast/for_each_expr.h"
@@ -31,6 +28,10 @@ Revision History:
 #include "muz/base/dl_rule.h"
 #include "muz/base/dl_util.h"
 #include "util/stopwatch.h"
+#ifdef _WINDOWS
+#include <windows.h>
+#endif
+
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
 #endif
@@ -70,7 +71,7 @@ namespace datalog {
         SASSERT(is_uninterp(pred));
         unsigned res = 0;
         unsigned n = pred->get_num_args();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             expr * arg = pred->get_arg(i);
             if (is_var(arg)) {
                 res++;
@@ -83,7 +84,7 @@ namespace datalog {
                           sort_ref_buffer & new_rule_domain, expr_ref_buffer & new_rule_args, app_ref & new_pred) {
         expr_ref_buffer new_args(m);
         unsigned n  = pred->get_num_args();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             expr * arg = pred->get_arg(i);
             if (m.is_value(arg)) {
                 new_args.push_back(arg);
@@ -106,7 +107,7 @@ namespace datalog {
                 new_args.push_back(new_var);
             }
         }
-        new_pred = m.mk_app(pred->get_decl(), new_args.size(), new_args.c_ptr());
+        new_pred = m.mk_app(pred->get_decl(), new_args.size(), new_args.data());
     }
 
     void apply_subst(expr_ref_vector& tgt, expr_ref_vector const& sub) {
@@ -115,7 +116,7 @@ namespace datalog {
         expr_ref tmp(m);
         for (unsigned i = 0; i < tgt.size(); ++i) {
             if (tgt[i].get()) {
-                tgt[i] = vs(tgt[i].get(), sub.size(), sub.c_ptr());
+                tgt[i] = vs(tgt[i].get(), sub.size(), sub.data());
             }
             else {
                 tgt[i] = sub[i];
@@ -134,7 +135,7 @@ namespace datalog {
 
         out << pred_decl->get_name() << '(';
 
-        for (unsigned i = 0; i < arity; i++) {
+        for (unsigned i = 0; i < arity; ++i) {
             expr * arg = f->get_arg(i);
             if (i != 0) {
                 out << ',';
@@ -162,7 +163,7 @@ namespace datalog {
 
         out << "\t(";
 
-        for(unsigned i = 0; i < arity; i++) {
+        for(unsigned i = 0; i < arity; ++i) {
             if (i != 0) {
                 out << ',';
             }
@@ -197,7 +198,7 @@ namespace datalog {
     bool variable_intersection::args_match(const app * f1, const app * f2)
     {
         unsigned n=size();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             unsigned f1_index, f2_index;
             get(i, f1_index, f2_index);
             if (!values_match(f1->get_arg(f1_index),f2->get_arg(f2_index))) {
@@ -214,7 +215,7 @@ namespace datalog {
         }
 
         unsigned n = m_const_indexes.size();
-        for(unsigned i=0; i<n; i++) {
+        for(unsigned i=0; i<n; ++i) {
             unsigned f_index = m_const_indexes[i];
             if(!values_match(f->get_arg(f_index), m_consts[i].get())) {
                 return false;
@@ -230,11 +231,11 @@ namespace datalog {
         //TODO: optimize quadratic complexity
         //TODO: optimize number of checks when variable occurs multiple times
         unsigned arity = a->get_num_args();
-        for(unsigned i1=0; i1<arity; i1++) {
+        for(unsigned i1=0; i1<arity; ++i1) {
             expr * e1=a->get_arg(i1);
             if(is_var(e1)) {
                 var* v1=to_var(e1);
-                for(unsigned i2=i1+1; i2<arity; i2++) {
+                for(unsigned i2=i1+1; i2<arity; ++i2) {
                     expr * e2=a->get_arg(i2);
                     if(!is_var(e2)) {
                         continue;
@@ -263,7 +264,7 @@ namespace datalog {
         reset();
         count_vars(r->get_head(), 1);
         unsigned n = r->get_tail_size();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             count_vars(r->get_tail(i), coef);
         }
     }
@@ -273,21 +274,26 @@ namespace datalog {
         m_scopes.push_back(0);
         unsigned n = r.get_tail_size();
         bool has_var = false;
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             m_todo.push_back(r.get_tail(i));
             m_scopes.push_back(0);
         }
         return get_max_var(has_var);
     }
 
-    void del_rule(horn_subsume_model_converter* mc, rule& r, bool unreachable) {
+    void del_rule(horn_subsume_model_converter* mc, rule& r, lbool unreachable) {
         if (mc) {
             ast_manager& m = mc->get_manager();
             expr_ref_vector body(m);
-            if (unreachable) {
+            TRACE(dl, tout << "unreachable: " << unreachable << " " << r.get_decl()->get_name() << "\n");
+            switch (unreachable) {
+            case l_true:
+                body.push_back(m.mk_true());
+                break;
+            case l_false:
                 body.push_back(m.mk_false());
-            }
-            else {
+                break;
+            default:
                 for (unsigned i = 0; i < r.get_tail_size(); ++i) {
                     if (r.is_neg_tail(i)) {
                         body.push_back(m.mk_not(r.get_tail(i)));
@@ -296,14 +302,15 @@ namespace datalog {
                         body.push_back(r.get_tail(i));
                     }
                 }
+                break;
             }
-            TRACE("dl_dr", 
+            TRACE(dl, 
                   tout << mk_pp(r.get_head(), m) << " :- \n";
                   for (unsigned i = 0; i < body.size(); ++i) {
-                      tout << mk_pp(body[i].get(), m) << "\n";
+                      tout << mk_pp(body.get(i), m) << "\n";
                   });
                       
-            mc->insert(r.get_head(), body.size(), body.c_ptr());
+            mc->insert(r.get_head(), body.size(), body.data());
         }
     }
 
@@ -329,7 +336,7 @@ namespace datalog {
         premises.push_back(m.mk_asserted(fml2));
         positions.push_back(std::make_pair(idx+1, 0));
 
-        TRACE("dl", 
+        TRACE(dl, 
               tout << premises[0]->get_id() << " " << mk_pp(premises[0].get(), m) << "\n";
               for (unsigned i = 0; i < s1.size(); ++i) {
                   tout << mk_pp(s1[i], m) << " ";
@@ -342,13 +349,13 @@ namespace datalog {
               tout << "\n";
               ); 
 
-        pr = m.mk_hyper_resolve(2, premises.c_ptr(), fml3, positions, substs);
+        pr = m.mk_hyper_resolve(2, premises.data(), fml3, positions, substs);
         pc->insert(pr);
     }
 
     void resolve_rule(rule_manager& rm, rule const& r1, rule const& r2, unsigned idx, 
                       expr_ref_vector const& s1, expr_ref_vector const& s2, rule& res) {
-        if (!r1.get_proof()) {
+        if (!r1.get_proof() || !r2.get_proof()) {
             return;
         }
         SASSERT(r2.get_proof());
@@ -367,7 +374,7 @@ namespace datalog {
         premises.push_back(r2.get_proof());
         positions.push_back(std::make_pair(idx+1, 0));
 
-        TRACE("dl", 
+        TRACE(dl, 
               tout << premises[0]->get_id() << " " << mk_pp(premises[0].get(), m) << "\n";
               for (unsigned i = 0; i < s1.size(); ++i) {
                   tout << mk_pp(s1[i], m) << " ";
@@ -380,14 +387,12 @@ namespace datalog {
               tout << "\n";
               ); 
 
-        pr = m.mk_hyper_resolve(2, premises.c_ptr(), fml, positions, substs);
+        pr = m.mk_hyper_resolve(2, premises.data(), fml, positions, substs);
         res.set_proof(m, pr);
     }
 
     class skip_model_converter : public model_converter {
     public:
-        skip_model_converter() {}
- 
         model_converter * translate(ast_translation & translator) override { 
             return alloc(skip_model_converter);
         }
@@ -420,32 +425,31 @@ namespace datalog {
 
 
 
-    void reverse_renaming(ast_manager & m, const expr_ref_vector & src, expr_ref_vector & tgt) {
+    void reverse_renaming(const var_ref_vector & src, var_ref_vector & tgt) {
+        ast_manager& m = src.m();
         SASSERT(tgt.empty());
         unsigned src_sz = src.size();
-        unsigned src_ofs = src_sz-1;
+        unsigned src_ofs = src_sz - 1;
 
         unsigned max_var_idx = 0;
-        for(unsigned i=0; i<src_sz; i++) {
-            if(!src[i]) {
+        for(unsigned i=0; i<src_sz; ++i) {
+            if (!src[i]) {
                 continue;
             }
-            SASSERT(is_var(src[i]));
-            unsigned var_idx = to_var(src[i])->get_idx();
-            if(var_idx>max_var_idx) {
-                max_var_idx=var_idx;
+            unsigned var_idx = src[i]->get_idx();
+            if (var_idx > max_var_idx) {
+                max_var_idx = var_idx;
             }
         }
 
         unsigned tgt_sz = max_var_idx+1;
-        unsigned tgt_ofs = tgt_sz-1;
+        unsigned tgt_ofs = tgt_sz - 1;
         tgt.resize(tgt_sz, nullptr);
-        for(unsigned i=0; i<src_sz; i++) {
-            expr * e = src[src_ofs-i];
-            if(!e) {
+        for(unsigned i = 0; i < src_sz; ++i) {
+            var* v = src[src_ofs-i];
+            if (!v) {
                 continue;
             }
-            var * v = to_var(e);
             unsigned var_idx = v->get_idx();
             tgt[tgt_ofs-var_idx] = m.mk_var(i, v->get_sort());
         }
@@ -482,11 +486,11 @@ namespace datalog {
         DEBUG_CODE(
             counter ctr;
             ctr.count(permutation);
-            SASSERT(permutation.empty() || ctr.get_max_positive()==permutation.size()-1);
+            SASSERT(permutation.empty() || ctr.get_max_positive().value_or(0)==permutation.size()-1);
             SASSERT(permutation.empty() || ctr.get_positive_count()==permutation.size());
             );
         unsigned sz = permutation.size();
-        for(unsigned i=0; i<sz; i++) {
+        for(unsigned i=0; i<sz; ++i) {
             if(i==permutation[i]) {
                 continue;
             }
@@ -510,7 +514,7 @@ namespace datalog {
         SASSERT(res.empty());
         identity = true;
         unsigned sz = permutation.size();
-        for(unsigned new_i=0; new_i<sz; new_i++) {
+        for(unsigned new_i=0; new_i<sz; ++new_i) {
             unsigned idx = permutation[new_i];
             bool is_selected = translation[idx]!=UINT_MAX;
             if(is_selected) {
@@ -542,7 +546,7 @@ namespace datalog {
 
     void add_sequence(unsigned start, unsigned count, unsigned_vector & v) {
         unsigned after_last = start+count;
-        for(unsigned i=start; i<after_last; i++) {
+        for(unsigned i=start; i<after_last; ++i) {
             v.push_back(i);
         }
     }
@@ -677,5 +681,5 @@ namespace datalog {
         stm<<num;
         return stm.str();
     }
-};
+}
 

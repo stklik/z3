@@ -16,12 +16,12 @@ Author:
 Notes:
     
 --*/
+using System.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-using System.Diagnostics.Contracts;
 
 namespace Microsoft.Z3
 {    
@@ -38,14 +38,14 @@ namespace Microsoft.Z3
         /// <summary>
         /// The number of significand bits.
         /// </summary>
-        public uint SBits { get { return ((FPSort)Sort).EBits; } }
+        public uint SBits { get { return ((FPSort)Sort).SBits; } }
 
         #region Internal
         /// <summary> Constructor for FPExpr </summary>
         internal FPExpr(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
         }
         #endregion
     }

@@ -15,7 +15,6 @@ Author:
 Revision History:
 
 --*/
-#include<iostream>
 #include "api/z3.h"
 #include "api/api_log_macros.h"
 #include "api/api_context.h"
@@ -29,12 +28,11 @@ extern "C" {
         RESET_ERROR_CODE();
         std::ostringstream buffer;
         to_stats_ref(s).display_smt2(buffer);
-        std::string result = buffer.str();
+        std::string result = std::move(buffer).str();
         // Hack for removing the trailing '\n'
-        result = buffer.str();
         SASSERT(result.size() > 0);
         result.resize(result.size()-1);
-        return mk_c(c)->mk_external_string(result);
+        return mk_c(c)->mk_external_string(std::move(result));
         Z3_CATCH_RETURN("");
     }
 
@@ -50,7 +48,8 @@ extern "C" {
         Z3_TRY;
         LOG_Z3_stats_dec_ref(c, s);
         RESET_ERROR_CODE();
-        to_stats(s)->dec_ref();
+        if (s)
+            to_stats(s)->dec_ref();
         Z3_CATCH;
     }
     
@@ -74,28 +73,28 @@ extern "C" {
         Z3_CATCH_RETURN("");
     }
 
-    Z3_bool Z3_API Z3_stats_is_uint(Z3_context c, Z3_stats s, unsigned idx) {
+    bool Z3_API Z3_stats_is_uint(Z3_context c, Z3_stats s, unsigned idx) {
         Z3_TRY;
         LOG_Z3_stats_is_uint(c, s, idx);
         RESET_ERROR_CODE();
         if (idx >= to_stats_ref(s).size()) {
             SET_ERROR_CODE(Z3_IOB, nullptr);
-            return Z3_FALSE;
+            return false;
         }
         return to_stats_ref(s).is_uint(idx);
         Z3_CATCH_RETURN(0);
     }
 
-    Z3_bool Z3_API Z3_stats_is_double(Z3_context c, Z3_stats s, unsigned idx) {
+    bool Z3_API Z3_stats_is_double(Z3_context c, Z3_stats s, unsigned idx) {
         Z3_TRY;
         LOG_Z3_stats_is_double(c, s, idx);
         RESET_ERROR_CODE();
         if (idx >= to_stats_ref(s).size()) {
             SET_ERROR_CODE(Z3_IOB, nullptr);
-            return Z3_FALSE;
+            return false;
         }
         return !to_stats_ref(s).is_uint(idx);
-        Z3_CATCH_RETURN(Z3_FALSE);
+        Z3_CATCH_RETURN(false);
     }
     
     unsigned Z3_API Z3_stats_get_uint_value(Z3_context c, Z3_stats s, unsigned idx) {
@@ -134,4 +133,4 @@ extern "C" {
         return memory::get_allocation_size();
     }
 
-};
+}

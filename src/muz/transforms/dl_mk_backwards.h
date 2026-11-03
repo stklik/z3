@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_BACKWARDS_H_
-#define DL_MK_BACKWARDS_H_
+#pragma once
 
 #include "muz/base/dl_rule_transformer.h"
 
@@ -28,11 +27,9 @@ namespace datalog {
         context&     m_ctx;
     public:
         mk_backwards(context & ctx, unsigned priority = 33000);
-        ~mk_backwards() override;
         rule_set * operator()(rule_set const & source) override;
     };
 
-};
+}
 
-#endif /* DL_MK_BACKWARDS_H_ */
 

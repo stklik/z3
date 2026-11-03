@@ -77,16 +77,6 @@ namespace smt {
                 m_value(m),
                 m_eq(true)
             {}
-            clause(clause const& cls):
-                m_lits(cls.m_lits),
-                m_weights(cls.m_weights.m()),
-                m_k(cls.m_k),
-                m_value(cls.m_value),
-                m_eq(cls.m_eq) {
-                for (unsigned i = 0; i < cls.m_weights.size(); ++i) {
-                    m_weights.push_back(cls.m_weights[i]);
-                }
-            }
         };
 
         struct stats {
@@ -108,8 +98,8 @@ namespace smt {
         rational         m_penalty;      // current penalty of soft constraints
         rational         m_best_penalty;
         vector<unsigned_vector>  m_hard_occ, m_soft_occ;  // variable occurrence
-        svector<bool>    m_assignment;   // current assignment.
-        svector<bool>    m_best_assignment;
+        bool_vector    m_assignment;   // current assignment.
+        bool_vector    m_best_assignment;
         expr_ref_vector  m_trail;
         obj_map<expr, unsigned> m_decl2var; // map declarations to Boolean variables.
         ptr_vector<expr> m_var2decl;        // reverse map
@@ -131,9 +121,6 @@ namespace smt {
         {
             reset();
             one = mpz(1);
-        }
-
-        ~imp() {
         }
 
         void reset() {
@@ -188,13 +175,13 @@ namespace smt {
             IF_VERBOSE(1, verbose_stream() << "(pb.sls initial penalty: " << m_best_penalty << ")\n";
                        verbose_stream() << "(pb.sls violated: " << m_hard_false.num_elems()
                        << " penalty: " << m_penalty << ")\n";);
-            svector<bool> assignment(m_assignment);
+            bool_vector assignment(m_assignment);
             for (unsigned round = 0; round < 40; ++round) {
                 init_max_flips();
                 while (m_max_flips > 0) {
                     --m_max_flips;
                     literal lit = flip();
-                    if (m.canceled()) {
+                    if (!m.inc()) {
                         return l_undef;
                     }
                     IF_VERBOSE(3, verbose_stream() 
@@ -357,7 +344,7 @@ namespace smt {
                 }
             }
             m_best_penalty = m_penalty;
-            TRACE("opt", display(tout););
+            TRACE(opt, display(tout););
         }
         
         literal flip() {
@@ -403,10 +390,8 @@ namespace smt {
                 }
                 int new_break_count = flip(~lit);
                 if (-break_count != new_break_count) {
-                    verbose_stream() << lit << "\n";
-                    IF_VERBOSE(0, display(verbose_stream(), cls););
-                    display(verbose_stream());
-                    exit(0);
+                    IF_VERBOSE(0, display(verbose_stream() << lit << "\n", cls);
+                               display(verbose_stream()));
                 }
                 // VERIFY(-break_count == flip(~lit));
             }            
@@ -511,7 +496,7 @@ namespace smt {
                 }
             }                
 
-            TRACE("opt", tout << "flip: " << l << " num false: " << m_hard_false.num_elems() 
+            TRACE(opt, tout << "flip: " << l << " num false: " << m_hard_false.num_elems() 
                   << " penalty: " << m_penalty << " break count: " << break_count << "\n";);
             return break_count;
         }
@@ -663,7 +648,6 @@ namespace smt {
                 // <=>
                 // a(1-x) + b(1-y) >= -k + a + b + 1
                 sz = to_app(f2)->get_num_args();
-                args = to_app(f2)->get_args();
                 k = pb.get_k(f2);
                 SASSERT(k.is_int());
                 k.neg();
@@ -675,7 +659,7 @@ namespace smt {
                     coeffs.push_back(pb.get_coeff(f2, i));
                     k += pb.get_coeff(f2, i);
                 }
-                tmp = pb.mk_ge(coeffs.size(), coeffs.c_ptr(), args.c_ptr(), k);
+                tmp = pb.mk_ge(coeffs.size(), coeffs.data(), args.data(), k);
                 return compile_clause(tmp, cls);
             }
             else if (pb.is_ge(f) || pb.is_eq(f)) {

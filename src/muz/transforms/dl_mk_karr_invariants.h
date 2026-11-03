@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_KARR_INVARIANTS_H_
-#define DL_MK_KARR_INVARIANTS_H_
+#pragma once
 
 #include "muz/base/dl_context.h"
 #include "muz/base/dl_rule_set.h"
@@ -34,10 +33,9 @@ namespace datalog {
     struct matrix {
         vector<vector<rational> > A;
         vector<rational>          b;
-        svector<bool>             eq;
+        bool_vector             eq;
         unsigned size() const { return A.size(); }
         void reset() { A.reset(); b.reset(); eq.reset(); }
-        matrix& operator=(matrix const& other);
         void append(matrix const& other) { A.append(other.A); b.append(other.b); eq.append(other.eq); }
         void display(std::ostream& out) const;
         static void display_row(
@@ -64,15 +62,12 @@ namespace datalog {
         rule_set* update_rules(rule_set const& src);
     public:
         mk_karr_invariants(context & ctx, unsigned priority);
-
-        ~mk_karr_invariants() override;
         
         rule_set * operator()(rule_set const & source) override;
 
     };
 
 
-};
+}
 
-#endif /* DL_MK_KARR_INVARIANTS_H_ */
 

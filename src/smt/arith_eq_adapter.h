@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef ARITH_EQ_ADAPTER_H_
-#define ARITH_EQ_ADAPTER_H_
+#pragma once
 
 #include "smt/smt_theory.h"
 #include "util/obj_pair_hashtable.h"
@@ -62,7 +61,6 @@ namespace smt {
         
     private:
         theory &                         m_owner;
-        theory_arith_params &            m_params;
         arith_util &                     m_util;
 
         already_processed                m_already_processed;
@@ -72,9 +70,10 @@ namespace smt {
         context & get_context() const { return m_owner.get_context(); }
         ast_manager & get_manager() const { return m_owner.get_manager(); }
         enode * get_enode(theory_var v) const { return m_owner.get_enode(v); }
+        expr * get_expr(theory_var v) const { return m_owner.get_expr(v); }
 
     public:
-        arith_eq_adapter(theory & owner, theory_arith_params & params, arith_util & u):m_owner(owner), m_params(params), m_util(u) {}
+        arith_eq_adapter(theory & owner, arith_util & u):m_owner(owner), m_util(u) {}
         void new_eq_eh(theory_var v1, theory_var v2);
         void new_diseq_eh(theory_var v1, theory_var v2);
         void reset_eh();
@@ -87,7 +86,6 @@ namespace smt {
         void collect_statistics(::statistics & st) const;
         void display_already_processed(std::ostream & out) const;
     };
-};
+}
 
-#endif /* ARITH_EQ_ADAPTER_H_ */
 

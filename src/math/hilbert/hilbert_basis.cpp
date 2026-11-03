@@ -17,6 +17,7 @@ Revision History:
 
 --*/
 
+#include <tuple>
 #include "math/hilbert/hilbert_basis.h"
 #include "util/heap.h"
 #include "util/map.h"
@@ -455,7 +456,6 @@ public:
         offset_t operator*() const { return p.m_passive[m_idx]; }
         iterator& operator++() { ++m_idx; fwd(); return *this; }
         iterator operator++(int) { iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(iterator const& it) const {return m_idx == it.m_idx; }
         bool operator!=(iterator const& it) const {return m_idx != it.m_idx; }
     };
 
@@ -614,7 +614,6 @@ public:
         offset_t sos() const { return (p.hb.vec(pas()).weight().is_pos()?p.m_neg_sos:p.m_pos_sos)[p.m_psos[m_idx]]; }
         iterator& operator++() { ++m_idx; fwd(); return *this; }
         iterator operator++(int) { iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(iterator const& it) const {return m_idx == it.m_idx; }
         bool operator!=(iterator const& it) const {return m_idx != it.m_idx; }
     };
 
@@ -773,7 +772,7 @@ unsigned hilbert_basis::get_num_vars() const {
 }
 
 hilbert_basis::values hilbert_basis::vec(offset_t offs) const {
-    return values(m_ineqs.size(), m_store.c_ptr() + offs.m_offset);
+    return values(m_ineqs.size(), m_store.data() + offs.m_offset);
 }
 
 void hilbert_basis::init_basis() {
@@ -835,7 +834,7 @@ lbool hilbert_basis::saturate_orig(num_vector const& ineq, bool is_eq) {
     m_zero.reset();
     m_index->reset(m_current_ineq+1);
     int_table support;
-    TRACE("hilbert_basis", display_ineq(tout, ineq, is_eq););
+    TRACE(hilbert_basis, display_ineq(tout, ineq, is_eq););
     iterator it = begin();
     for (; it != end(); ++it) {
         offset_t idx = *it;
@@ -849,7 +848,7 @@ lbool hilbert_basis::saturate_orig(num_vector const& ineq, bool is_eq) {
             support.insert(idx.m_offset);
         }
     }
-    TRACE("hilbert_basis", display(tout););
+    TRACE(hilbert_basis, display(tout););
     // resolve passive into active
     offset_t j = alloc_vector();
     while (!m_passive->empty()) {
@@ -857,7 +856,7 @@ lbool hilbert_basis::saturate_orig(num_vector const& ineq, bool is_eq) {
             return l_undef;
         }
         offset_t idx = m_passive->pop();
-        TRACE("hilbert_basis", display(tout););
+        TRACE(hilbert_basis, display(tout););
         if (is_subsumed(idx)) {
             recycle(idx);
             continue;
@@ -888,7 +887,7 @@ lbool hilbert_basis::saturate_orig(num_vector const& ineq, bool is_eq) {
     m_active.reset();
     m_passive->reset();
     m_zero.reset();
-    TRACE("hilbert_basis", display(tout););
+    TRACE(hilbert_basis, display(tout););
     return m_basis.empty()?l_false:l_true;
 }
 
@@ -900,7 +899,8 @@ bool hilbert_basis::vector_lt(offset_t idx1, offset_t idx2) const {
         a += abs(v[i]);
         b += abs(w[i]);
     }
-    return a < b;
+    // Offsets are indices in m_store, independent of allocation addresses.
+    return std::tuple(a, idx1) < std::tuple(b, idx2);
 }
 
 lbool hilbert_basis::saturate(num_vector const& ineq, bool is_eq) {
@@ -908,7 +908,7 @@ lbool hilbert_basis::saturate(num_vector const& ineq, bool is_eq) {
     m_index->reset(m_current_ineq+1);
     m_passive2->reset();
     m_sos.reset();
-    TRACE("hilbert_basis", display_ineq(tout, ineq, is_eq););
+    TRACE(hilbert_basis, display_ineq(tout, ineq, is_eq););
     unsigned init_basis_size = 0;
     for (unsigned i = 0; i < m_basis.size(); ++i) {
         offset_t idx = m_basis[i];
@@ -939,12 +939,12 @@ lbool hilbert_basis::saturate(num_vector const& ineq, bool is_eq) {
         }   
     }
 
-    TRACE("hilbert_basis", display(tout););
+    TRACE(hilbert_basis, display(tout););
     // resolve passive into active
     offset_t idx = alloc_vector();
     while (checkpoint() && !m_passive2->empty()) {
         offset_t sos, pas;
-        TRACE("hilbert_basis", display(tout); );
+        TRACE(hilbert_basis, display(tout); );
         unsigned offset = m_passive2->pop(sos, pas);
         SASSERT(can_resolve(sos, pas, true));
         resolve(sos, pas, idx);
@@ -980,7 +980,7 @@ lbool hilbert_basis::saturate(num_vector const& ineq, bool is_eq) {
     m_basis.append(m_zero);
     std::sort(m_basis.begin(), m_basis.end(), vector_lt_t(*this));
     m_zero.reset();
-    TRACE("hilbert_basis", display(tout););
+    TRACE(hilbert_basis, display(tout););
     return m_basis.empty()?l_false:l_true;
 }
 
@@ -1012,8 +1012,6 @@ void hilbert_basis::select_inequality() {
         unsigned non_zeros2 = get_num_nonzeros(m_ineqs[j]);
         unsigned prod2 = get_ineq_product(m_ineqs[j]);
         if (prod2 == 0) {
-            prod = prod2;
-            non_zeros = non_zeros2;
             best = j;
             break;
         }
@@ -1089,7 +1087,7 @@ void hilbert_basis::resolve(offset_t i, offset_t j, offset_t r) {
     for (unsigned k = 0; k < m_current_ineq; ++k) {
         u.weight(k) = v.weight(k) + w.weight(k);
     }
-    TRACE("hilbert_basis_verbose",
+    TRACE(hilbert_basis_verbose,
           display(tout, i); 
           display(tout, j); 
           display(tout, r); 
@@ -1117,7 +1115,7 @@ bool hilbert_basis::checkpoint() {
 }
 
 bool hilbert_basis::add_goal(offset_t idx) {
-    TRACE("hilbert_basis", display(tout, idx););
+    TRACE(hilbert_basis, display(tout, idx););
     values v = vec(idx);
     if (is_subsumed(idx)) {
         return false;
@@ -1310,7 +1308,7 @@ bool hilbert_basis::is_subsumed(offset_t i, offset_t j) const {
     for (unsigned k = 0; r && k < m_current_ineq; ++k) {
         r = v.weight(k) >= w.weight(k);
     }
-    CTRACE("hilbert_basis", r, 
+    CTRACE(hilbert_basis, r, 
            display(tout, i);
            tout << " <= \n";
            display(tout, j);

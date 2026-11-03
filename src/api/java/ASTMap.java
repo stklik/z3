@@ -17,10 +17,12 @@ Notes:
 
 package com.microsoft.z3;
 
+import java.lang.ref.ReferenceQueue;
+
 /**
  * Map from AST to AST
  **/
-class ASTMap extends Z3Object {
+public class ASTMap extends Z3Object {
     /**
      * Checks whether the map contains the key {@code k}. 
      * @param k An AST
@@ -123,6 +125,18 @@ class ASTMap extends Z3Object {
 
     @Override
     void addToReferenceQueue() {
-        getContext().getASTMapDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, ASTMapRef::new);
+    }
+
+    private static class ASTMapRef extends Z3ReferenceQueue.Reference<ASTMap> {
+
+        private ASTMapRef(ASTMap referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.astMapDecRef(ctx.nCtx(), z3Obj);
+        }
     }
 }

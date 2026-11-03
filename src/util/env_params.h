@@ -16,17 +16,15 @@ Author:
 Notes:
 
 --*/
-#ifndef ENV_PARAMS_H_
-#define ENV_PARAMS_H_
+#pragma once
 
-class param_descrs;
+#include "util/params.h"
+#include "util/gparams.h"
 
 struct env_params {
     static void updt_params();
     static void collect_param_descrs(param_descrs & p);
-    /*
-      REG_PARAMS('env_params::collect_param_descrs')
-    */
 };
 
-#endif
+Z3_REGISTER_GLOBAL_PARAMS(env_params, env_params::collect_param_descrs);
+

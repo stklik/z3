@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_ARITH_EQ_H_
-#define THEORY_ARITH_EQ_H_
+#pragma once
 
 // #define PROFILE_OFFSET_ROW
 
@@ -38,13 +37,12 @@ namespace smt {
             return;
 
         SASSERT(is_fixed(v));
-        // WARNINING: it is not safe to use get_value(v) here, since
+        // WARNING: it is not safe to use get_value(v) here, since
         // get_value(v) may not satisfy v bounds at this point.
-        CTRACE("arith_bug", !lower_bound(v).is_rational(), display_var(tout, v););
-        SASSERT(lower_bound(v).is_rational());
+        if (!lower_bound(v).is_rational())
+            return;
         numeral const & val = lower_bound(v).get_rational();
         value_sort_pair key(val, is_int_src(v));
-        TRACE("arith_eq", tout << mk_pp(get_enode(v)->get_owner(), get_manager()) << " = " << val << "\n";);
         theory_var v2;
         if (m_fixed_var_table.find(key, v2)) {
             if (v2 < static_cast<int>(get_num_vars()) && is_fixed(v2) && lower_bound(v2).get_rational() == val) {
@@ -65,7 +63,7 @@ namespace smt {
                     lower(v2)->push_justification(ante, numeral::zero(), proofs_enabled());
                     upper(v)->push_justification(ante, numeral::zero(), proofs_enabled());
 
-                    TRACE("arith_eq", tout << "propagate eq: v" << v << " = v" << v2 << "\n";
+                    TRACE(arith_eq, tout << "propagate eq: v" << v << " = v" << v2 << "\n";
                           display_var(tout, v);
                           display_var(tout, v2););
                     m_stats.m_fixed_eqs++;
@@ -176,7 +174,7 @@ namespace smt {
         timer.stop();
         ok++;
         if (ok % 100000 == 0) {
-            TRACE("arith_eq", 
+            TRACE(arith_eq, 
                   tout << total << " " << ok << " " 
                   << static_cast<double>(ok)/static_cast<double>(total) 
                   << " " << timer.get_seconds() << "\n";
@@ -217,14 +215,13 @@ namespace smt {
     void theory_arith<Ext>::propagate_cheap_eq(unsigned rid) {
         if (!propagate_eqs())
             return;
-        TRACE("arith_eq_verbose", tout << "checking if row " << rid << " can propagate equality.\n";
+        TRACE(arith_eq_verbose, tout << "checking if row " << rid << " can propagate equality.\n";
               display_row_info(tout, rid););
         row const & r = m_rows[rid];
         theory_var x;
         theory_var y;
         numeral k;
-        if (is_offset_row(r, x, y, k)) {
-            
+        if (is_offset_row(r, x, y, k)) {            
             if (y == null_theory_var) {
                 // x is an implied fixed var at k.
                 value_sort_pair key(k, is_int_src(x));
@@ -248,19 +245,20 @@ namespace smt {
                     //
                     // x1 <= k1 x1 >= k1, x2 <= x1 + k2 x2 >= x1 + k2
                     // 
-                    TRACE("arith_eq_propagation", tout << "fixed\n";);
+                    TRACE(arith_eq, tout << "fixed\n";);
                     lower(x2)->push_justification(ante, numeral::zero(), proofs_enabled());
                     upper(x2)->push_justification(ante, numeral::zero(), proofs_enabled());
                     m_stats.m_fixed_eqs++;
                     propagate_eq_to_core(x, x2, ante);
                 }
+                //return;
             }
 
             if (k.is_zero() && y != null_theory_var && !is_equal(x, y) && is_int_src(x) == is_int_src(y)) {
                 // found equality x = y
                 antecedents ante(*this);
                 collect_fixed_var_justifications(r, ante);
-                TRACE("arith_eq", tout << "propagate eq using x-y=0 row:\n"; display_row_info(tout, r););
+                TRACE(arith_eq, tout << "propagate eq using x-y=0 row:\n"; display_row_info(tout, r););
                 m_stats.m_offset_eqs++;
                 propagate_eq_to_core(x, y, ante);
             }
@@ -278,16 +276,10 @@ namespace smt {
                 numeral    k2;
                 if (r2.get_base_var() != null_theory_var && is_offset_row(r2, x2, y2, k2)) {
                     bool new_eq  = false;
-#ifdef _TRACE
-                    bool swapped = false;
-#endif
                     if (y == y2 && k == k2) {
                         new_eq = true;
                     }
                     else if (y2 != null_theory_var) {
-#ifdef _TRACE
-                        swapped = true;
-#endif
                         std::swap(x2, y2);
                         k2.neg();
                         if (y == y2 && k == k2) {
@@ -301,8 +293,7 @@ namespace smt {
                             antecedents ante(*this);
                             collect_fixed_var_justifications(r, ante);
                             collect_fixed_var_justifications(r2, ante);
-                            TRACE("arith_eq", tout << "propagate eq two rows:\n"; 
-                                  tout << "swapped: " << swapped << "\n";
+                            TRACE(arith_eq, tout << "propagate eq two rows:\n"; 
                                   tout << "x  : v" << x << "\n";
                                   tout << "x2 : v" << x2 << "\n";
                                   display_row_info(tout, r); 
@@ -313,58 +304,48 @@ namespace smt {
                         return;
                     }
                 }
+
                 // the original row was delete or it is not offset row anymore ===> remove it from table 
-                m_var_offset2row_id.erase(key);
             }
             // add new entry
             m_var_offset2row_id.insert(key, rid);
-        }
-        
+        }        
     }
 
 
     template<typename Ext>
     void theory_arith<Ext>::propagate_eq_to_core(theory_var x, theory_var y, antecedents& antecedents) {
         // Ignore equality if variables are already known to be equal.
-        ast_manager& m = get_manager();
         if (is_equal(x, y))
             return;
-        // I doesn't make sense to propagate an equality (to the core) of variables of different sort.
-        if (m.get_sort(var2expr(x)) != m.get_sort(var2expr(y))) {
-            TRACE("arith", tout << mk_pp(var2expr(x), m) << " = " << mk_pp(var2expr(y), m) << "\n";);
-            return;
-        }
-        context & ctx      = get_context();
-        region & r         = ctx.get_region();
         enode * _x         = get_enode(x);
         enode * _y         = get_enode(y);
+        // I doesn't make sense to propagate an equality (to the core) of variables of different sort.
+        CTRACE(arith, _x->get_sort() != _y->get_sort(), tout << enode_pp(_x, ctx) << " = " << enode_pp(_y, ctx) << "\n");
+        if (_x->get_sort() != _y->get_sort())
+            return;
+
         eq_vector const& eqs = antecedents.eqs();
         literal_vector const& lits = antecedents.lits();
         justification * js = 
             ctx.mk_justification(
                 ext_theory_eq_propagation_justification(
-                    get_id(), r, 
-                    lits.size(), lits.c_ptr(),
-                    eqs.size(), eqs.c_ptr(),
+                    get_id(), ctx, 
+                    lits.size(), lits.data(),
+                    eqs.size(), eqs.data(),
                     _x, _y, 
                     antecedents.num_params(), antecedents.params("eq-propagate")));
-        TRACE("arith_eq", tout << "detected equality: #" << _x->get_owner_id() << " = #" << _y->get_owner_id() << "\n";
+        TRACE(arith_eq, tout << "detected equality: #" << _x->get_owner_id() << " = #" << _y->get_owner_id() << "\n";
               display_var(tout, x);
-              display_var(tout, y););
-        TRACE("arith_eq_propagation",
-              for (unsigned i = 0; i <  lits.size(); ++i) {
-                  ctx.display_detailed_literal(tout, lits[i]);
-                  tout << "\n";
-              } 
-              for (unsigned i = 0; i < eqs.size(); ++i) {
-                  tout << mk_pp(eqs[i].first->get_owner(), m) << " = " << mk_pp(eqs[i].second->get_owner(), m) << "\n";
-              } 
+              display_var(tout, y); 
+              for (literal lit : lits) 
+                  ctx.display_detailed_literal(tout, lit) << "\n";
+              for (auto const& p : eqs) 
+                  tout << enode_pp(p.first, ctx) << " = " << enode_pp(p.second, ctx) << "\n";
               tout << " ==> ";
-              tout << mk_pp(_x->get_owner(), m) << " = " << mk_pp(_y->get_owner(), m) << "\n";
-              );
+              tout << enode_pp(_x, ctx) << " = " << enode_pp(_y, ctx) << "\n";);
         ctx.assign_eq(_x, _y, eq_justification(js));
     }
-};
+}
 
-#endif /* THEORY_ARITH_EQ_H_ */
 

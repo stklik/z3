@@ -20,10 +20,13 @@ package com.microsoft.z3;
 
 import com.microsoft.z3.enumerations.Z3_lbool;
 
+import java.lang.ref.ReferenceQueue;
+
 
 /**
  * Object for managing optimization context
  **/
+@SuppressWarnings("unchecked")
 public class Optimize extends Z3Object {
 
     /**
@@ -55,10 +58,10 @@ public class Optimize extends Z3Object {
     /**
      * Assert a constraint (or multiple) into the optimize solver.
      **/
-    public void Assert(BoolExpr ... constraints)
+    public void Assert(Expr<BoolSort>... constraints)
     {
         getContext().checkContextMatch(constraints);
-        for (BoolExpr a : constraints)
+        for (Expr<BoolSort> a : constraints)
         {
             Native.optimizeAssert(getContext().nCtx(), getNativeObject(), a.getNativeObject());
         }
@@ -67,15 +70,39 @@ public class Optimize extends Z3Object {
     /**
      * Alias for Assert.
      **/
-    public void Add(BoolExpr ... constraints)
+    public void Add(Expr<BoolSort>... constraints)
     {
         Assert(constraints);
+    }
+
+    /** 
+     * Assert a constraint into the optimizer, and track it (in the unsat) core
+     * using the Boolean constant p. 
+     * 
+     * Remarks: 
+     * This API is an alternative to {@code Check} with assumptions for
+     * extracting unsat cores.
+     * Both APIs can be used in the same solver. The unsat core will contain a
+     * combination
+     * of the Boolean variables provided using {@code AssertAndTrack}
+     * and the Boolean literals
+     * provided using {@code Check} with assumptions.
+     * @see Optimize#Check
+     * @see Optimize#AssertAndTrack
+     */ 
+    public void AssertAndTrack(Expr<BoolSort> constraint, Expr<BoolSort> p)
+    {
+        getContext().checkContextMatch(constraint);
+        getContext().checkContextMatch(p);
+
+        Native.optimizeAssertAndTrack(getContext().nCtx(), getNativeObject(),
+                constraint.getNativeObject(), p.getNativeObject());
     }
 
     /**
      * Handle to objectives returned by objective functions.
      **/
-    public static class Handle {
+    public static class Handle<R extends Sort> {
 
         private final Optimize opt;
         private final int handle;
@@ -89,7 +116,7 @@ public class Optimize extends Z3Object {
         /**
          * Retrieve a lower bound for the objective handle.
          **/
-        public Expr getLower()
+        public Expr<R> getLower()
         {
             return opt.GetLower(handle);
         }
@@ -97,7 +124,7 @@ public class Optimize extends Z3Object {
         /**
          * Retrieve an upper bound for the objective handle.
          **/
-        public Expr getUpper()
+        public Expr<R> getUpper()
         {
             return opt.GetUpper(handle);
         }
@@ -110,7 +137,7 @@ public class Optimize extends Z3Object {
          * and otherwise is represented by the expression {@code value + eps * EPSILON},
          * where {@code EPSILON} is an arbitrarily small real number.
          */
-        public Expr[] getUpperAsVector()
+        public Expr<?>[] getUpperAsVector()
         {
             return opt.GetUpperAsVector(handle);
         }
@@ -120,7 +147,7 @@ public class Optimize extends Z3Object {
          *
          * <p>See {@link #getUpperAsVector()} for triple semantics.
          */
-        public Expr[] getLowerAsVector()
+        public Expr<?>[] getLowerAsVector()
         {
             return opt.GetLowerAsVector(handle);
         }
@@ -128,7 +155,7 @@ public class Optimize extends Z3Object {
         /**
          * Retrieve the value of an objective.
          **/
-        public Expr getValue()
+        public Expr<R> getValue()
         {
             return getLower();
         }
@@ -149,21 +176,46 @@ public class Optimize extends Z3Object {
      * Return an objective which associates with the group of constraints.
      *
      **/
-    public Handle AssertSoft(BoolExpr constraint, int weight, String group)
+    public Handle<?> AssertSoft(Expr<BoolSort> constraint, int weight, String group)
+    {
+        return AssertSoft(constraint, Integer.toString(weight), group);
+    }
+    
+    /**
+     * Assert soft constraint
+     *
+     * Return an objective which associates with the group of constraints.
+     *
+     **/
+    public Handle<?> AssertSoft(Expr<BoolSort> constraint, String weight, String group)
     {
         getContext().checkContextMatch(constraint);
         Symbol s = getContext().mkSymbol(group);
-        return new Handle(this, Native.optimizeAssertSoft(getContext().nCtx(), getNativeObject(), constraint.getNativeObject(), Integer.toString(weight), s.getNativeObject()));
+        return new Handle<>(this, Native.optimizeAssertSoft(getContext().nCtx(), getNativeObject(), constraint.getNativeObject(), weight, s.getNativeObject()));
     }
 
     /**
      * Check satisfiability of asserted constraints.
      * Produce a model that (when the objectives are bounded and 
-     * don't use strict inequalities) meets the objectives.
+     * don't use strict inequalities) is optimal.
      **/
-    public Status Check()
+    public Status Check(Expr<BoolSort>... assumptions)
     {
-        Z3_lbool r = Z3_lbool.fromInt(Native.optimizeCheck(getContext().nCtx(), getNativeObject()));
+        Z3_lbool r;
+        if (assumptions == null) {
+          r = Z3_lbool.fromInt(
+              Native.optimizeCheck(
+                  getContext().nCtx(), 
+                  getNativeObject(), 0, null));
+        }
+        else {
+          r = Z3_lbool.fromInt(
+              Native.optimizeCheck(
+                  getContext().nCtx(), 
+                  getNativeObject(), 
+                  assumptions.length, 
+                  AST.arrayToNative(assumptions)));
+        }
         switch (r) {
             case Z3_L_TRUE:
                 return Status.SATISFIABLE;
@@ -210,38 +262,53 @@ public class Optimize extends Z3Object {
     }
 
     /**
+     * The unsat core of the last {@code Check}.
+     * Remarks:  The unsat core
+     * is a subset of {@code Assumptions} The result is empty if
+     * {@code Check} was not invoked before, if its results was not
+     * {@code UNSATISFIABLE}, or if core production is disabled. 
+     * 
+     * @throws Z3Exception
+     **/
+    public BoolExpr[] getUnsatCore()
+    {
+        ASTVector core = new ASTVector(getContext(), Native.optimizeGetUnsatCore(getContext().nCtx(), getNativeObject()));        
+        return core.ToBoolExprArray();
+    }
+
+    /**
      *  Declare an arithmetical maximization objective.
      *  Return a handle to the objective. The handle is used as
      *  to retrieve the values of objectives after calling Check.
      **/            
-    public Handle MkMaximize(Expr e)
+    public <R extends Sort> Handle<R> MkMaximize(Expr<R> e)
     {
-        return new Handle(this, Native.optimizeMaximize(getContext().nCtx(), getNativeObject(), e.getNativeObject()));
+        return new Handle<>(this, Native.optimizeMaximize(getContext().nCtx(), getNativeObject(), e.getNativeObject()));
     }
 
     /**
      *  Declare an arithmetical minimization objective. 
      *  Similar to MkMaximize.
      **/
-    public Handle MkMinimize(Expr e)
+    public <R extends Sort> Handle<R> MkMinimize(Expr<R> e)
     {
-        return new Handle(this, Native.optimizeMinimize(getContext().nCtx(), getNativeObject(), e.getNativeObject()));
+        return new Handle<>(this, Native.optimizeMinimize(getContext().nCtx(), getNativeObject(), e.getNativeObject()));
     }
     
     /**
      *  Retrieve a lower bound for the objective handle.
      **/
-    private Expr GetLower(int index)
+    private <R extends Sort> Expr<R> GetLower(int index)
     {
-        return Expr.create(getContext(), Native.optimizeGetLower(getContext().nCtx(), getNativeObject(), index));
+        return (Expr<R>) Expr.create(getContext(), Native.optimizeGetLower(getContext().nCtx(), getNativeObject(), index));
     }
 
     /**
      *  Retrieve an upper bound for the objective handle.
      **/
-    private Expr GetUpper(int index)
+    private <R extends Sort> Expr<R> GetUpper(int index)
     {
-        return Expr.create(getContext(), Native.optimizeGetUpper(getContext().nCtx(), getNativeObject(), index));
+        return (Expr<R>) Expr.create(getContext(), Native.optimizeGetUpper(getContext().nCtx(), getNativeObject(), index));
     }
 
     /**
@@ -249,7 +316,7 @@ public class Optimize extends Z3Object {
      *
      * <p>See {@link Handle#getUpperAsVector}.
      */
-    private Expr[] GetUpperAsVector(int index) {
+    private Expr<?>[] GetUpperAsVector(int index) {
         return unpackObjectiveValueVector(
                 Native.optimizeGetUpperAsVector(
                         getContext().nCtx(), getNativeObject(), index
@@ -262,7 +329,7 @@ public class Optimize extends Z3Object {
      *
      * <p>See {@link Handle#getLowerAsVector}.
      */
-    private Expr[] GetLowerAsVector(int index) {
+    private Expr<?>[] GetLowerAsVector(int index) {
         return unpackObjectiveValueVector(
                 Native.optimizeGetLowerAsVector(
                         getContext().nCtx(), getNativeObject(), index
@@ -270,12 +337,12 @@ public class Optimize extends Z3Object {
         );
     }
 
-    private Expr[] unpackObjectiveValueVector(long nativeVec) {
+    private Expr<?>[] unpackObjectiveValueVector(long nativeVec) {
         ASTVector vec = new ASTVector(
                 getContext(), nativeVec
         );
         return new Expr[] {
-                (Expr) vec.get(0), (Expr) vec.get(1), (Expr) vec.get(2)
+                (Expr<?>) vec.get(0), (Expr<?>) vec.get(1), (Expr<?>) vec.get(2)
         };
 
     }
@@ -326,10 +393,26 @@ public class Optimize extends Z3Object {
     /**
      * The set of asserted formulas.
      */
-    public Expr[] getObjectives() 
+    public Expr<?>[] getObjectives()
     {
         ASTVector objectives = new ASTVector(getContext(), Native.optimizeGetObjectives(getContext().nCtx(), getNativeObject()));
         return objectives.ToExprArray();
+    }
+
+    /**
+     * Set an initial value for a variable to guide the optimizer's search heuristics.
+     * This can improve performance when a good initial value is known for the variable.
+     *
+     * @param var The variable to set an initial value for
+     * @param value The initial value for the variable
+     * @throws Z3Exception
+     **/
+    public void setInitialValue(Expr<?> var, Expr<?> value)
+    {
+        getContext().checkContextMatch(var);
+        getContext().checkContextMatch(value);
+        Native.optimizeSetInitialValue(getContext().nCtx(), getNativeObject(),
+            var.getNativeObject(), value.getNativeObject());
     }
 
     /**
@@ -358,6 +441,18 @@ public class Optimize extends Z3Object {
 
     @Override
     void addToReferenceQueue() {
-        getContext().getOptimizeDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, OptimizeRef::new);
+    }
+
+    private static class OptimizeRef extends Z3ReferenceQueue.Reference<Optimize> {
+
+        private OptimizeRef(Optimize referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.optimizeDecRef(ctx.nCtx(), z3Obj);
+        }
     }
 }

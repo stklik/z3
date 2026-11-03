@@ -25,13 +25,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef PROTO_MODEL_H_
-#define PROTO_MODEL_H_
+#pragma once
 
 #include "model/model_core.h"
 #include "model/model_evaluator.h"
-#include "smt/proto_model/value_factory.h"
-#include "util/plugin_manager.h"
+#include "model/value_factory.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/func_decl_dependencies.h"
 #include "model/model.h"
@@ -56,25 +54,27 @@ class proto_model : public model_core {
     // Invariant: m_const_decls subset m_decls
     
     void remove_aux_decls_not_in_set(ptr_vector<func_decl> & decls, func_decl_set const & s);
-    void cleanup_func_interp(func_interp * fi, func_decl_set & found_aux_fs);
-
+    void cleanup_func_interp(expr_ref_vector& trail, func_interp * fi, func_decl_set & found_aux_fs);
+    expr* cleanup_expr(expr_ref_vector& trail, expr* fi_else, func_decl_set& found_aux_fs);
 
 public:
     proto_model(ast_manager & m, params_ref const & p = params_ref());
-    ~proto_model() override {}
 
     void register_factory(value_factory * f) { m_factories.register_plugin(f); }
 
     bool eval(expr * e, expr_ref & result, bool model_completion = false);
+    bool are_equal(expr* a, expr* b) { return m_eval.are_equal(a, b); }
+    bool is_false(expr* e) { return m_eval.are_equal(e, m.mk_false()); }
+    expr_ref operator()(expr* e) { expr_ref result(e, m); eval(e, result, false); return result; }
 
     
     value_factory * get_factory(family_id fid);
 
     expr * get_some_value(sort * s) override;
+    expr * get_fresh_value(sort * s) override;
 
-    bool get_some_values(sort * s, expr_ref & v1, expr_ref & v2);
+    bool get_some_values(sort * s, expr_ref & v1, expr_ref & v2) override;
 
-    expr * get_fresh_value(sort * s);
 
     void register_value(expr * n);
 
@@ -112,5 +112,4 @@ public:
 
 typedef ref<proto_model> proto_model_ref;
 
-#endif /* PROTO_MODEL_H_ */
 

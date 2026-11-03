@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef OBJ_REF_H_
-#define OBJ_REF_H_
+#pragma once
 
 /**
    Smart pointer for T objects.
@@ -53,8 +52,8 @@ public:
         inc_ref();
     }
 
-    obj_ref(obj_ref && other) : m_obj(nullptr), m_manager(other.m_manager) {
-        std::swap(m_obj, other.m_obj);
+    obj_ref(obj_ref && other) noexcept : m_obj(other.m_obj), m_manager(other.m_manager) {
+        other.m_obj = nullptr;
     }
 
     ~obj_ref() { dec_ref(); }
@@ -84,19 +83,22 @@ public:
         return *this;
     }
     
-    obj_ref & operator=(obj_ref & n) {
+    obj_ref & operator=(const obj_ref & n) {
         SASSERT(&m_manager == &n.m_manager);
-        n.inc_ref();
-        dec_ref();
-        m_obj = n.m_obj;
+        if (m_obj != n.m_obj) {
+            dec_ref();
+            m_obj = n.m_obj;
+            inc_ref();
+        }
         return *this;
     }
 
-    obj_ref & operator=(obj_ref && n) {
+    obj_ref & operator=(obj_ref && n) noexcept {
         SASSERT(&m_manager == &n.m_manager);
         if (this != &n) {
-            std::swap(m_obj, n.m_obj);
-            n.reset();
+            dec_ref();
+            m_obj = n.m_obj;
+            n.m_obj = nullptr;
         }
         return *this;
     }
@@ -106,7 +108,7 @@ public:
         m_obj = nullptr;
     }
 
-    void swap(obj_ref & n) {
+    void swap(obj_ref & n) noexcept {
         std::swap(m_obj, n.m_obj);
     }
 
@@ -115,7 +117,7 @@ public:
     */
     T * steal() { 
         T * r = m_obj;
-        m_obj = 0;
+        m_obj = nullptr;
         return r;
     }
 };
@@ -148,5 +150,3 @@ inline void dec_range_ref(IT const & begin, IT const & end, TManager & m) {
         }
     }
 }
-
-#endif /* OBJ_REF_H_ */

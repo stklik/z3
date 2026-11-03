@@ -18,9 +18,10 @@ Revision History:
 --*/
 #include "ast/ast.h"
 #include "ast/expr_delta_pair.h"
+#include "ast/has_free_vars.h"
 #include "util/hashtable.h"
 
-class contains_vars {
+class contains_vars::imp {
     typedef hashtable<expr_delta_pair, obj_hash<expr_delta_pair>, default_eq<expr_delta_pair> > cache;
     cache                    m_cache;
     svector<expr_delta_pair> m_todo;
@@ -29,7 +30,7 @@ class contains_vars {
 
     void visit(expr * n, unsigned delta, bool & visited) {
         expr_delta_pair e(n, delta);
-        if (!m_cache.contains(e)) {
+        if (!is_ground(n) && !m_cache.contains(e)) {
             m_todo.push_back(e);
             visited = false;
         }
@@ -73,6 +74,7 @@ public:
         m_todo.push_back(expr_delta_pair(n, begin));
         while (!m_todo.empty()) {
             expr_delta_pair e = m_todo.back();
+            
             if (visit_children(e.m_node, e.m_delta)) {
                 m_cache.insert(e);
                 m_todo.pop_back();
@@ -85,6 +87,18 @@ public:
         return false;
     }
 };
+
+contains_vars::contains_vars() {
+    m_imp = alloc(imp);
+}
+
+contains_vars::~contains_vars() {
+    dealloc(m_imp);
+}
+
+bool contains_vars::operator()(expr* e) {
+    return (*m_imp)(e);
+}
 
 bool has_free_vars(expr * n) {
     contains_vars p;

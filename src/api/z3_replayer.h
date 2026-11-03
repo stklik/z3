@@ -16,10 +16,8 @@ Author:
 Notes:
     
 --*/
-#ifndef Z3_REPLAYER_H_
-#define Z3_REPLAYER_H_
+#pragma once
 
-#include<iostream>
 #include "api/z3.h"
 #include "util/z3_exception.h"
 
@@ -55,6 +53,7 @@ public:
     Z3_symbol * get_symbol_array(unsigned pos) const;
     void ** get_obj_array(unsigned pos) const;
 
+    bool * get_bool_addr(unsigned pos);
     int * get_int_addr(unsigned pos);
     int64_t * get_int64_addr(unsigned pos);
     unsigned * get_uint_addr(unsigned pos);
@@ -66,4 +65,3 @@ public:
     void register_cmd(unsigned id, z3_replayer_cmd cmd, char const* name);
 };
 
-#endif

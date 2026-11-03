@@ -53,12 +53,12 @@ namespace datalog {
     */
     bool mk_filter_rules::is_candidate(app * pred) {
         if (!m_context.is_predicate(pred)) {
-            TRACE("mk_filter_rules", tout << mk_pp(pred, m) << "\nis not a candidate because it is interpreted.\n";);
+            TRACE(mk_filter_rules, tout << mk_pp(pred, m) << "\nis not a candidate because it is interpreted.\n";);
             return false;
         }
         var_idx_set used_vars;
         unsigned n  = pred->get_num_args();
-        for (unsigned i = 0; i < n; i++) {
+        for (unsigned i = 0; i < n; ++i) {
             expr * arg = pred->get_arg(i);
             if (m.is_value(arg))
                 return true;
@@ -79,15 +79,14 @@ namespace datalog {
 
         filter_key * key = alloc(filter_key, m);
         mk_new_rule_tail(m, pred, non_local_vars, filter_domain, key->filter_args, key->new_pred);
-        filter_cache::obj_map_entry *entry = m_tail2filter.insert_if_not_there2(key, 0);
-        func_decl*& filter_decl = entry->get_data().m_value;
+        func_decl*& filter_decl = m_tail2filter.insert_if_not_there(key, 0);
         if (!filter_decl) {
             filter_decl = m_context.mk_fresh_head_predicate(pred->get_decl()->get_name(), symbol("filter"), 
-                filter_domain.size(), filter_domain.c_ptr(), pred->get_decl());
+                filter_domain.size(), filter_domain.data(), pred->get_decl());
 
             m_pinned.push_back(filter_decl);
             app_ref filter_head(m);
-            filter_head = m.mk_app(filter_decl, key->filter_args.size(), key->filter_args.c_ptr());
+            filter_head = m.mk_app(filter_decl, key->filter_args.size(), key->filter_args.data());
             app * filter_tail = key->new_pred;
             rule * filter_rule = m_context.get_rule_manager().mk(filter_head, 1, &filter_tail, (const bool *)nullptr);
             filter_rule->set_accounting_parent_object(m_context, m_current);
@@ -106,19 +105,19 @@ namespace datalog {
         m_current = r;
         app * new_head = r->get_head();
         app_ref_vector new_tail(m);
-        svector<bool>  new_is_negated;
+        bool_vector  new_is_negated;
         unsigned sz = r->get_tail_size();
         bool rule_modified = false;
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             app * tail = r->get_tail(i);
             if (is_candidate(tail) && !r->is_neg_tail(i)) {
-                TRACE("mk_filter_rules", tout << "is_candidate: " << mk_pp(tail, m) << "\n";);
+                TRACE(mk_filter_rules, tout << "is_candidate: " << mk_pp(tail, m) << "\n";);
                 var_idx_set non_local_vars = rm.collect_rule_vars_ex(r, tail);
                 func_decl * filter_decl = mk_filter_decl(tail, non_local_vars);
                 ptr_buffer<expr> new_args;
                 var_idx_set used_vars;
                 unsigned num_args = tail->get_num_args(); 
-                for (unsigned i = 0; i < num_args; i++) {
+                for (unsigned i = 0; i < num_args; ++i) {
                     expr * arg = tail->get_arg(i);
                     if (is_var(arg)) {
                         unsigned vidx = to_var(arg)->get_idx();
@@ -129,7 +128,7 @@ namespace datalog {
                     }
                 }
                 SASSERT(new_args.size() == filter_decl->get_arity());
-                new_tail.push_back(m.mk_app(filter_decl, new_args.size(), new_args.c_ptr()));
+                new_tail.push_back(m.mk_app(filter_decl, new_args.size(), new_args.data()));
                 rule_modified = true;
             }
             else {
@@ -140,7 +139,7 @@ namespace datalog {
         if (rule_modified) {
             remove_duplicate_tails(new_tail, new_is_negated);
             SASSERT(new_tail.size() == new_is_negated.size());
-            rule * new_rule = m_context.get_rule_manager().mk(new_head, new_tail.size(), new_tail.c_ptr(), new_is_negated.c_ptr(), r->name());
+            rule * new_rule = m_context.get_rule_manager().mk(new_head, new_tail.size(), new_tail.data(), new_is_negated.data(), r->name());
             new_rule->set_accounting_parent_object(m_context, m_current);
             m_result->add_rule(new_rule);
             m_context.get_rule_manager().mk_rule_rewrite_proof(*r, *new_rule);
@@ -156,7 +155,7 @@ namespace datalog {
         m_result           = alloc(rule_set, m_context);
         m_modified         = false;
         unsigned num_rules = source.get_num_rules();
-        for (unsigned i = 0; i < num_rules; i++) {
+        for (unsigned i = 0; i < num_rules; ++i) {
             process(source.get_rule(i));
         }
         if(!m_modified) {
@@ -167,4 +166,4 @@ namespace datalog {
         return m_result;
     }
 
-};
+}

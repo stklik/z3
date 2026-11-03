@@ -16,11 +16,12 @@ Author:
 Revision History:
 
 --*/
-#ifndef REF_VECTOR_H_
-#define REF_VECTOR_H_
+#pragma once
 
+#include<span>
 #include "util/vector.h"
 #include "util/obj_ref.h"
+#include "util/ref.h"
 
 /**
    \brief Vector of smart pointers.
@@ -41,42 +42,50 @@ protected:
             dec_ref(*it);
     }
 
+    struct hash_proc {
+        unsigned operator()(ref_vector_core const* v, unsigned idx) const {
+            return (*v)[idx]->get_id();
+        }
+    };
 public:
-    typedef T * data;
+    typedef T * data_t;
 
-    ref_vector_core(Ref const & r = Ref()):Ref(r) {}
+    ref_vector_core() = default;
+    ref_vector_core(Ref const & r) : Ref(r) {}
 
-    ref_vector_core(ref_vector_core && other) :
-        Ref(std::move(other)),
-        m_nodes(std::move(other.m_nodes)) {}
+    ref_vector_core(const ref_vector_core & other) {
+        append(other);
+    }
+
+    ref_vector_core(ref_vector_core &&) noexcept = default;
     
     ~ref_vector_core() {
-        dec_range_ref(m_nodes.begin(), m_nodes.end());
+        dec_range_ref(m_nodes.data(), m_nodes.data() + m_nodes.size());
     }
     
     void reset() {
-        dec_range_ref(m_nodes.begin(), m_nodes.end());
+        dec_range_ref(m_nodes.data(), m_nodes.data() + m_nodes.size());
         m_nodes.reset();
     }
 
     void finalize() {
-        dec_range_ref(m_nodes.begin(), m_nodes.end());
+        dec_range_ref(m_nodes.data(), m_nodes.data() + m_nodes.size());
         m_nodes.finalize();
     }
 
     void resize(unsigned sz) {
         if (sz < m_nodes.size())
-            dec_range_ref(m_nodes.begin() + sz, m_nodes.end());
+            dec_range_ref(m_nodes.data() + sz, m_nodes.data() + m_nodes.size());
         m_nodes.resize(sz);
     }
 
     void resize(unsigned sz, T * d) {
         if (sz < m_nodes.size()) {
-            dec_range_ref(m_nodes.begin() + sz, m_nodes.end());
+            dec_range_ref(m_nodes.data() + sz, m_nodes.data() + m_nodes.size());
             m_nodes.shrink(sz); 
         }
         else {
-            for (unsigned i = m_nodes.size(); i < sz; i++)
+            for (unsigned i = m_nodes.size(); i < sz; ++i)
                 push_back(d);
         }
     }
@@ -99,10 +108,15 @@ public:
         return *this;
     }
 
-    template <typename W, typename M>
-    ref_vector_core& push_back(obj_ref<W,M> && n) {
+    template <typename M>
+    ref_vector_core& push_back(obj_ref<T,M> && n) {
         m_nodes.push_back(n.get());
         n.steal();
+        return *this;
+    }
+
+    ref_vector_core& push_back(ref<T>&& n) {
+        m_nodes.push_back(n.detach());
         return *this;
     }
 
@@ -123,11 +137,19 @@ public:
 
     T * get(unsigned idx, T * d) const { return m_nodes.get(idx, d); }
 
-    T * const * c_ptr() const { return m_nodes.begin(); }
+    T * const * data() const { return m_nodes.data(); }
 
     typedef T* const* iterator;
 
-    T ** c_ptr() { return m_nodes.begin(); }
+    T ** data() { return m_nodes.data(); }
+
+    unsigned hash() const {
+        unsigned sz = size();
+        if (sz == 0) {
+            return 0;
+        }
+        return get_composite_hash(this, sz, default_kind_hash_proc<ref_vector_core const*>(), hash_proc());
+    }
 
     iterator begin() const { return m_nodes.begin(); }
     iterator end() const { return begin() + size(); }
@@ -146,7 +168,7 @@ public:
 
     void erase(T * elem) {
         unsigned sz = size();
-        for (unsigned idx = 0; idx < sz; idx++) {
+        for (unsigned idx = 0; idx < sz; ++idx) {
             if (m_nodes[idx] == elem) {
                 erase(idx);
                 return;
@@ -156,7 +178,7 @@ public:
 
     bool contains(T * elem) const {
         unsigned sz = size();
-        for (unsigned idx = 0; idx < sz; idx++)
+        for (unsigned idx = 0; idx < sz; ++idx)
             if (m_nodes[idx] == elem)
                 return true;
         return false;
@@ -171,12 +193,24 @@ public:
             push_back(other[i]);
     }
 
-    void append(unsigned sz, T * const * data) {
-        for(unsigned i = 0; i < sz; ++i)
-            push_back(data[i]);
+    void append(std::span<T * const> data) {
+        for(auto elem : data)
+            push_back(elem);
     }
 
-    void swap(unsigned idx1, unsigned idx2) {
+    // Backward compatibility overload
+    void append(unsigned sz, T * const * data) {
+        append(std::span<T * const>(data, sz));
+    }
+
+    void operator=(ref_vector_core && other) noexcept {
+        if (this != &other) {
+            reset();
+            m_nodes = std::move(other.m_nodes);
+        }
+    }
+
+    void swap(unsigned idx1, unsigned idx2) noexcept {
         std::swap(m_nodes[idx1], m_nodes[idx2]);
     }
 
@@ -186,6 +220,7 @@ public:
             std::swap(m_nodes[i], m_nodes[sz-i-1]);
         }
     }
+
 };
 
 template<typename T, typename TManager>
@@ -218,11 +253,17 @@ public:
         this->append(other);
     }
 
-    ref_vector(ref_vector && other) : super(std::move(other)) {}
+    ref_vector(ref_vector &&) noexcept = default;
 
+    ref_vector(TManager & m, std::span<T * const> data):
+        super(ref_manager_wrapper<T, TManager>(m)) {
+        this->append(data);
+    }
+
+    // Backward compatibility overload
     ref_vector(TManager & m, unsigned sz, T * const * data):
         super(ref_manager_wrapper<T, TManager>(m)) {
-        this->append(sz, data);
+        this->append(std::span<T * const>(data, sz));
     }
     
     TManager & get_manager() const {
@@ -233,9 +274,13 @@ public:
         return get_manager();
     }
 
-    void swap(ref_vector & other) {
+    void swap(ref_vector & other) noexcept {
         SASSERT(&(this->m_manager) == &(other.m_manager));
         this->m_nodes.swap(other.m_nodes);
+    }
+
+    void swap(unsigned idx1, unsigned idx2) noexcept {
+        this->super::swap(idx1, idx2);
     }
     
     class element_ref {
@@ -248,7 +293,6 @@ public:
         }
 
         element_ref & operator=(T * n) {
-            SASSERT(n);
             m_manager.inc_ref(n);
             m_manager.dec_ref(m_ref);
             m_ref = n;
@@ -293,6 +337,8 @@ public:
 
     void set(unsigned idx, T * n) { super::set(idx, n); }
 
+    void setx(unsigned idx, T* n) { super::reserve(idx + 1); super::set(idx, n); }
+
     // enable abuse:
     ref_vector & set(ref_vector const& other) {
         if (this != &other) {
@@ -302,8 +348,78 @@ public:
         return *this;
     }
     
-    // prevent abuse:
-    ref_vector & operator=(ref_vector const & other) = delete;
+    ref_vector & operator=(ref_vector && other) = default;
+
+    bool operator==(ref_vector const& other) const {
+        if (other.size() != this->size()) return false;
+        for (unsigned i = this->size(); i-- > 0; ) {
+            if (other[i] != (*this)[i]) return false;
+        }
+        return true;
+    }
+
+    bool operator!=(ref_vector const& other) const {
+        return !(*this == other);
+    }
+
+    bool forall(std::function<bool(T*)>& predicate) const {
+        for (T* t : *this)
+            if (!predicate(t)) 
+                return false;
+        return true;
+    }
+
+    bool exists(std::function<bool(T*)>& predicate) const {
+        for (T* t : *this)
+            if (predicate(t)) 
+                return true;
+        return false;
+    }
+
+    ref_vector filter_pure(std::function<bool(T*)>& predicate) const {
+        ref_vector result(m());
+        for (T* t : *this)
+            if (predicate(t)) 
+                result.push_back(t);
+        return result;
+    }
+
+#if 0
+    // TBD: 
+    ref_vector& filter_update(std::function<bool(T*)>& predicate) {
+        unsigned j = 0;
+        for (auto& t : *this)
+            if (predicate(t)) 
+                set(j++, t);
+        shrink(j);
+        return *this;
+    }
+#endif
+
+    template <typename S>
+    vector<S> mapv_pure(std::function<S(T*)>& f) const {
+        vector<S> result;
+        for (T* t : *this)
+            result.push_back(f(t));
+        return result;
+    }
+
+    ref_vector map_pure(std::function<T*(T*)>& f) const {
+        ref_vector result(m());
+        for (T* t : *this)
+            result.push_back(f(t));
+        return result;
+    }
+
+    ref_vector& map_update(std::function<T*(T*)>& f)  {
+        unsigned j = 0;
+        for (T* t : *this)
+            set(j++, f(t));
+        return *this;
+    }
+
+
+
 };
 
 template<typename T>
@@ -316,9 +432,8 @@ public:
 /**
    \brief Vector of unmanaged references.
 */
-template<typename T> 
-class sref_vector : public ref_vector_core<T, ref_unmanaged_wrapper<T> > {
-};
+template<typename T>
+using sref_vector = ref_vector_core<T, ref_unmanaged_wrapper<T>>;
 
 /**
    \brief Hash utilities on ref_vector pointers.
@@ -329,21 +444,8 @@ struct ref_vector_ptr_hash {
 
     typedef ref_vector<T,TM> RefV;
 
-    struct hash_proc {
-        unsigned operator()(RefV* v, unsigned idx) const {
-            return (*v)[idx]->get_id();
-        }
-    };
-
     unsigned operator()(RefV* v) const {
-        if (!v) {
-            return 0;
-        }
-        unsigned sz = v->size();
-        if (sz == 0) {
-            return 0;
-        }
-        return get_composite_hash(v, sz, default_kind_hash_proc<RefV*>(), hash_proc());
+        return v ? v->hash() : 0;
     }
 };
 
@@ -369,6 +471,3 @@ struct ref_vector_ptr_eq {
         return true;
     }
 };
-
-
-#endif /* REF_VECTOR_H_ */

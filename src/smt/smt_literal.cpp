@@ -22,28 +22,44 @@ Revision History:
 
 namespace smt {
 
-    void literal::display(std::ostream & out, ast_manager & m, expr * const * bool_var2expr_map) const {
-        if (*this == true_literal)
+    std::ostream& display(std::ostream & out, literal lit, ast_manager & m, expr * const * bool_var2expr_map) {
+        if (lit == true_literal)
             out << "true";
-        else if (*this == false_literal)
+        else if (lit == false_literal)
             out << "false";
-        else if (*this == null_literal)
+        else if (lit == null_literal)
             out << "null";
-        else if (sign())
-            out << "(not " << mk_pp(bool_var2expr_map[var()], m) << ")";
+        else if (lit.sign())
+            out << "(not " << mk_bounded_pp(bool_var2expr_map[lit.var()], m, 3) << ")";
         else
-            out << mk_pp(bool_var2expr_map[var()], m);
+            out << mk_bounded_pp(bool_var2expr_map[lit.var()], m, 3);
+        return out;
     }
 
-    void literal::display_compact(std::ostream & out, expr * const * bool_var2expr_map) const {
-        if (*this == true_literal)
+    std::ostream& display_smt2(std::ostream & out, literal lit, ast_manager & m, expr * const * bool_var2expr_map) {
+        if (lit == true_literal)
             out << "true";
-        else if (*this == false_literal)
+        else if (lit == false_literal)
             out << "false";
-        else if (sign())
-            out << "(not #" << bool_var2expr_map[var()]->get_id() << ")";
+        else if (lit == null_literal)
+            out << "null";
+        else if (lit.sign())
+            out << "(not " << mk_pp(bool_var2expr_map[lit.var()], m, 3) << ")";
         else
-            out << "#" << bool_var2expr_map[var()]->get_id();
+            out << mk_pp(bool_var2expr_map[lit.var()], m, 3);
+        return out;
+    }
+
+    std::ostream& display_compact(std::ostream & out, literal lit, expr * const * bool_var2expr_map) {
+        if (lit == true_literal)
+            out << "true";
+        else if (lit == false_literal)
+            out << "false";
+        else if (lit.sign())
+            out << "(not #" << bool_var2expr_map[lit.var()]->get_id() << ")";
+        else
+            out << "#" << bool_var2expr_map[lit.var()]->get_id();
+        return out;
     }
 
     std::ostream & operator<<(std::ostream & out, literal l) {
@@ -52,31 +68,33 @@ namespace smt {
         else if (l == false_literal)
             out << "false";
         else if (l.sign())
-            out << "(not p" << l.var() << ")";
+            out << "-" << l.var();
         else
-            out << "p" << l.var();
+            out << l.var();
         return out;
     }
 
     std::ostream & operator<<(std::ostream & out, const literal_vector & v) {
-        display(out, v.begin(), v.end());
+        ::display(out, v.begin(), v.end());
         return out;
     }
 
-    void display_compact(std::ostream & out, unsigned num_lits, literal const * lits, expr * const * bool_var2expr_map) {
-        for (unsigned i = 0; i < num_lits; i++) {
+    std::ostream& display_compact(std::ostream & out, unsigned num_lits, literal const * lits, expr * const * bool_var2expr_map) {
+        for (unsigned i = 0; i < num_lits; ++i) {
             if (i > 0)
                 out << " ";
-            lits[i].display_compact(out, bool_var2expr_map);
+            display_compact(out, lits[i], bool_var2expr_map);
         }
+        return out;
     }
 
-    void display_verbose(std::ostream & out, ast_manager& m, unsigned num_lits, literal const * lits, expr * const * bool_var2expr_map, char const* sep) {
-        for (unsigned i = 0; i < num_lits; i++) {
+    std::ostream& display_verbose(std::ostream & out, ast_manager& m, unsigned num_lits, literal const * lits, expr * const * bool_var2expr_map, char const* sep) {
+        for (unsigned i = 0; i < num_lits; ++i) {
             if (i > 0)
                 out << sep;
-            lits[i].display(out, m, bool_var2expr_map);
+            display(out, lits[i], m, bool_var2expr_map);
         }
+        return out;
     }
 
     /**
@@ -85,10 +103,10 @@ namespace smt {
     */
     bool backward_subsumption(unsigned num_lits1, literal const * lits1, unsigned num_lits2, literal const * lits2) {
         unsigned i = 0;
-        for (; i < num_lits1; i++) {
+        for (; i < num_lits1; ++i) {
             literal l1 = lits1[i];
             unsigned j = 0;
-            for (; j < num_lits2; j++)
+            for (; j < num_lits2; ++j)
                 if (l1 == lits2[j])
                     break;
             if (j == num_lits2)
@@ -98,5 +116,5 @@ namespace smt {
     }
 
 
-};
+}
 

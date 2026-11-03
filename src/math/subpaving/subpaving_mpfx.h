@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SUBPAVING_MPFX_H_
-#define SUBPAVING_MPFX_H_
+#pragma once
 
 #include "math/subpaving/subpaving_t.h"
 #include "util/mpfx.h"
@@ -40,6 +39,5 @@ struct config_mpfx {
 
 typedef context_t<config_mpfx> context_mpfx;
 
-};
+}
 
-#endif

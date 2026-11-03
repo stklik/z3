@@ -18,7 +18,7 @@ Revision History:
 --*/
 #include "opt/opt_context.h"
 #include "opt/opt_parse.h"
-
+#include <iostream>
 
 class opt_stream_buffer {
     std::istream & m_stream;
@@ -69,7 +69,7 @@ public:
 bool opt_stream_buffer::parse_token(char const* token) {
     skip_whitespace();
     char const* t = token;
-    while (ch() == *t) {
+    while (*t && ch() && ch() == *t) {
         next();
         ++t;
     }
@@ -130,11 +130,30 @@ class wcnf {
             if (parsed_lit == 0)
                 break;
             var = abs(parsed_lit);
-            p = m.mk_const(symbol(var), m.mk_bool_sort());
+            p = m.mk_const(symbol((unsigned)var), m.mk_bool_sort());
             if (parsed_lit < 0) p = m.mk_not(p);
             ors.push_back(p);
         }
-        result = to_app(mk_or(m, ors.size(), ors.c_ptr()));
+        result = to_app(mk_or(ors));
+        return result;
+    }
+
+    app_ref read_hard_clause() {
+        int parsed_lit;
+        int var;
+        app_ref result(m), p(m);
+        expr_ref_vector ors(m);
+        while (true) {
+            parsed_lit = in.parse_int();
+            if (parsed_lit == 0)
+                break;
+            var = abs(parsed_lit);
+            p = m.mk_const(symbol((unsigned)var), m.mk_bool_sort());
+            if (parsed_lit < 0)
+                p = m.mk_not(p);
+            ors.push_back(p);
+        }
+        result = to_app(mk_or(ors));
         return result;
     }
     
@@ -152,7 +171,7 @@ public:
     }
     
     void parse() {
-        unsigned num_vars = 0, num_clauses = 0, max_weight = 0;
+        unsigned num_vars = 0, num_clauses = 0, max_weight = UINT_MAX;
         while (true) {
             in.skip_whitespace();
             if (in.eof()) {
@@ -164,6 +183,11 @@ public:
             else if (*in == 'p') {
                 ++in;
                 parse_spec(num_vars, num_clauses, max_weight);
+            }
+            else if (*in == 'h') {
+                in.next();                
+                app_ref cls = read_hard_clause();
+                opt.add_hard_constraint(cls);
             }
             else {
                 unsigned weight = 0;
@@ -198,7 +222,7 @@ class opb {
         }
         app_ref p(m);
         int id = in.parse_int();
-        p = m.mk_const(symbol(id), m.mk_bool_sort());
+        p = m.mk_const(symbol((unsigned)id), m.mk_bool_sort());
         if (negated) p = m.mk_not(p);
         in.skip_whitespace();
         return p;
@@ -222,7 +246,7 @@ class opb {
         in.skip_whitespace();
         while ('0' <= *in && *in <='9') num.push_back(*in), ++in;
         num.push_back(0);
-        return rational(num.c_ptr());
+        return rational(num.data());
     }
 
     app_ref parse_coeff() {
@@ -323,6 +347,15 @@ struct asymbol {
     asymbol(rational const& r, unsigned l): m_is_num(true), m_num(r), m_line(l) {}
 };
 
+std::ostream& operator<<(std::ostream& out, asymbol const& c) {
+    if (c.m_is_num) {
+        return out << c.m_num;
+    }
+    else {
+        return out << c.m_sym;
+    }
+}
+
 class lp_tokenizer {
     vector<asymbol>    m_tokens;
     unsigned           m_pos;
@@ -401,14 +434,15 @@ private:
                         c = in.ch();
                     }
                     m_buffer.push_back(0);
-                    m_tokens.push_back(asymbol(symbol(m_buffer.c_ptr()), in.line()));
+                    m_tokens.push_back(asymbol(symbol(m_buffer.data()), in.line()));
+                    IF_VERBOSE(10, verbose_stream() << "tok: " << m_tokens.back() << "\n");
                     continue;
                 }
             }
 
             if (is_num(c)) {
                 rational n(0);
-                unsigned div = 1;
+                rational div(1);
                 while (is_num(c) && !in.eof()) {
                     n = n*rational(10) + rational(c - '0');
                     in.next();
@@ -416,16 +450,18 @@ private:
                 }
                 if (c == '.') {
                     in.next();
+                    c = in.ch();
                     while (is_num(c) && !in.eof()) {
                         n = n*rational(10) + rational(c - '0');
                         in.next();
-                        div *= 10;
+                        div *= rational(10);
                         c = in.ch();
                     }
                 }
-                if (div > 1) n = n / rational(div);
+                if (div > rational(1)) n = n / div;
                 if (neg) n.neg();
                 m_tokens.push_back(asymbol(n, in.line()));
+                IF_VERBOSE(10, verbose_stream() << "num: " << m_tokens.back() << "\n");
                 continue;
             }
             m_buffer.reset();
@@ -444,7 +480,8 @@ private:
                 }
             }
             m_buffer.push_back(0);
-            m_tokens.push_back(asymbol(symbol(m_buffer.c_ptr()), in.line()));
+            m_tokens.push_back(asymbol(symbol(m_buffer.data()), in.line()));
+            IF_VERBOSE(10, verbose_stream() << "tok: " << m_tokens.back() << "\n");
         }
     }
 
@@ -466,6 +503,7 @@ private:
             is_num(c) ||
             c == '!' ||
             c == '"' ||
+            c == '-' ||
             c == '#' ||
             c == '$' ||
             c == '%' ||
@@ -512,7 +550,7 @@ class lp_parse {
     };
 
     struct bound {
-        optional<rational>  m_lo, m_hi;
+        std::optional<rational>  m_lo, m_hi;
         bool m_int;
         bound() : m_int(false) {}
     };
@@ -612,6 +650,7 @@ private:
             name = peek(0);
             tok.next(2);
         }
+        IF_VERBOSE(10, verbose_stream() << name << "\n");
         rational val(0);
         symbol var;
         parse_indicator(var, val);
@@ -624,6 +663,9 @@ private:
     }
 
     void parse_expr(lin_term& terms) {
+        if (is_relation()) {
+            return;
+        }
         bool pos = true;
         if (peek(0) == "-") {
             pos = false;
@@ -669,12 +711,20 @@ private:
         return peek(pos) == "<=" || peek(pos) == "=<";
     }
 
-    bool peek_minus_infty(unsigned pos) {
+    bool peek_minus_infty_long(unsigned pos) {
         return peek(pos) == "-" && (peek(pos+1) == "inf" || peek(pos+1) == "infinity");
     }
 
-    bool peek_plus_infty(unsigned pos) {
+    bool peek_minus_infty_short(unsigned pos) {
+        return peek(pos) == "-inf" || peek(pos) == "-infinity";
+    }
+
+    bool peek_plus_infty_long(unsigned pos) {
         return peek(pos) == "+" && (peek(pos+1) == "inf" || peek(pos+1) == "infinity");
+    }
+
+    bool peek_plus_infty_short(unsigned pos) {
+        return peek(pos) == "+inf" || peek(pos) == "+infinity";
     }
 
     void parse_indicator(symbol& var, rational& val) {
@@ -693,6 +743,7 @@ private:
         return false;
     }
 
+    bool is_relation() { return peek(0) == "=" || peek(0) == "=<" || peek(0) == ">=" || peek(0) == "=>" || peek(0) == "<="; }
     bool is_section() { return is_general() || is_binary() || is_bounds() || is_end();}
     bool is_bounds() { return peek(0) == "bounds"; }
     bool is_general() { return peek(0) == "general" || peek(0) == "gen" || peek(0) == "generals"; }
@@ -712,13 +763,21 @@ private:
             tok.next(3);
             parse_upper(v);
         }
-        else if (peek_minus_infty(0) && peek_le(2)) {
+        else if (peek_minus_infty_long(0) && peek_le(2)) {
             v = peek(3);
             tok.next(4);
             parse_upper(v);
         }
-        else if (peek_plus_infty(2) && peek_le(1)) {
+        else if (peek_minus_infty_short(0) && peek_le(1)) {
+            v = peek(2);
+            tok.next(3);
+            parse_upper(v);
+        }
+        else if (peek_plus_infty_long(2) && peek_le(1)) {
             tok.next(4);            
+        }
+        else if (peek_plus_infty_short(2) && peek_le(1)) {
+            tok.next(3);
         }
         else if (peek_le(1) && tok.peek_num(2)) {
             v = peek(0);
@@ -738,9 +797,11 @@ private:
             update_upper(v, rhs);
             tok.next(2);
         }
-        else if (peek_le(0) && peek_plus_infty(1)) {
+        else if (peek_le(0) && peek_plus_infty_long(1)) {
             tok.next(3);            
         }
+        else if (peek_le(0) && peek_plus_infty_short(1)) {
+            tok.next(2);        }
 
     }
 
@@ -770,6 +831,11 @@ private:
     }
 
     void parse_general() {
+        if (peek(1) == ":" && peek(3) == "=") {
+            symbol const& v = peek(2);        
+            std::cout << "TBD: " << v << "\n";
+            return;
+        }
         symbol const& v = peek(0);        
         bound b;
         m_bounds.find(v, b);        
@@ -793,7 +859,11 @@ private:
             if (c.m_bvar != symbol::null) {
                 term = mk_var(c.m_bvar);
                 bool is_int = c.m_bval.is_int() && a.is_int(term);
-                term = m.mk_eq(mk_var(c.m_bvar), a.mk_numeral(c.m_bval, is_int));
+                {
+                    auto lhs = mk_var(c.m_bvar);
+                    expr_ref rhs(a.mk_numeral(c.m_bval, is_int), m);
+                    term = m.mk_eq(lhs, rhs);
+                }
                 fml = m.mk_implies(term, fml);
             }
             opt.add_hard_constraint(fml);
@@ -826,7 +896,7 @@ private:
             }
             result.push_back(term);
         }
-        return expr_ref(a.mk_add(result.size(), result.c_ptr()), m);
+        return expr_ref(a.mk_add(result.size(), result.data()), m);
     }
 
     expr_ref mk_var(symbol const& v) {

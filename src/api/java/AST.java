@@ -19,6 +19,8 @@ package com.microsoft.z3;
 
 import com.microsoft.z3.enumerations.Z3_ast_kind;
 
+import java.lang.ref.ReferenceQueue;
+
 /**
  * The abstract syntax tree (AST) class.
  **/
@@ -76,6 +78,16 @@ public class AST extends Z3Object implements Comparable<AST>
     public int getId()
     {
         return Native.getAstId(getContext().nCtx(), getNativeObject());
+    }
+
+    /**
+     * The depth of the AST (max nodes on any root-to-leaf path).
+     * @throws Z3Exception on error
+     * @return an int
+     **/
+    public int getDepth()
+    {
+        return Native.getDepth(getContext().nCtx(), getNativeObject());
     }
 
     /**
@@ -196,7 +208,7 @@ public class AST extends Z3Object implements Comparable<AST>
 
     @Override
     void addToReferenceQueue() {
-        getContext().getASTDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, ASTRef::new);
     }
 
     static AST create(Context ctx, long obj)
@@ -204,9 +216,15 @@ public class AST extends Z3Object implements Comparable<AST>
         switch (Z3_ast_kind.fromInt(Native.getAstKind(ctx.nCtx(), obj)))
         {
         case Z3_FUNC_DECL_AST:
-            return new FuncDecl(ctx, obj);
+            return new FuncDecl<>(ctx, obj);
         case Z3_QUANTIFIER_AST:
-            return new Quantifier(ctx, obj);
+            // a quantifier AST is a lambda iff it is neither a forall nor an exists. 
+            boolean isLambda = !Native.isQuantifierExists(ctx.nCtx(), obj) && !Native.isQuantifierForall(ctx.nCtx(), obj);
+            if (isLambda) {
+               return new Lambda(ctx, obj);
+            } else {
+               return new Quantifier(ctx, obj);
+            }
         case Z3_SORT_AST:
             return Sort.create(ctx, obj);
         case Z3_APP_AST:
@@ -215,6 +233,18 @@ public class AST extends Z3Object implements Comparable<AST>
             return Expr.create(ctx, obj);
         default:
             throw new Z3Exception("Unknown AST kind");
+        }
+    }
+
+    private static class ASTRef extends Z3ReferenceQueue.Reference<AST> {
+
+        private ASTRef(AST referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.decRef(ctx.nCtx(), z3Obj);
         }
     }
 }

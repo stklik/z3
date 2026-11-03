@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef ELIM_BOUNDS2_H_
-#define ELIM_BOUNDS2_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/arith_decl_plugin.h"
@@ -69,9 +68,6 @@ public:
         rewriter_tpl<elim_bounds_cfg>(m, m.proofs_enabled(), m_cfg),
         m_cfg(m)
     {} 
-
-    ~elim_bounds_rw() override {}
 };
 
-#endif /* ELIM_BOUNDS2_H_ */
 

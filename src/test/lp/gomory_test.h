@@ -1,4 +1,7 @@
+#pragma once
+
 namespace lp {
+#include "math/lp/lp_utils.h"
 struct gomory_test {
     gomory_test(
         std::function<std::string (unsigned)> name_function_p,
@@ -54,7 +57,7 @@ struct gomory_test {
     }
 
     void real_case_in_gomory_cut(const mpq & a, unsigned x_j, mpq & k, lar_term& pol, explanation & expl, const mpq& f_0, const mpq& one_minus_f_0) {
-        TRACE("gomory_cut_detail_real", tout << "real\n";);
+        TRACE(gomory_cut_detail_real, tout << "real\n";);
         mpq new_a;
         if (at_low(x_j)) {
             if (a.is_pos()) {
@@ -66,10 +69,10 @@ struct gomory_test {
             }
             k.addmul(new_a, lower_bound(x_j).x); // is it a faster operation than
             // k += lower_bound(x_j).x * new_a;  
-            expl.push_justification(column_lower_bound_constraint(x_j), new_a);
+            expl.add_pair(column_lower_bound_constraint(x_j), new_a);
         }
         else {
-            lp_assert(at_upper(x_j));
+            ENSURE(at_upper(x_j));
             if (a.is_pos()) {
                 new_a =   a / f_0; 
                 new_a.neg(); // the upper terms are inverted.
@@ -78,25 +81,25 @@ struct gomory_test {
                 new_a =   a / (mpq(1) - f_0); 
             }
             k.addmul(new_a, upper_bound(x_j).x); //  k += upper_bound(x_j).x * new_a; 
-            expl.push_justification(column_upper_bound_constraint(x_j), new_a);
+            expl.add_pair(column_upper_bound_constraint(x_j), new_a);
         }
-        TRACE("gomory_cut_detail_real", tout << a << "*v" << x_j << " k: " << k << "\n";);
+        TRACE(gomory_cut_detail_real, tout << a << "*v" << x_j << " k: " << k << "\n";);
         pol.add_monomial(new_a, x_j);
     }
     
     void int_case_in_gomory_cut(const mpq & a, unsigned x_j, mpq & k, lar_term & t, explanation& expl, mpq & lcm_den, const mpq& f_0, const mpq& one_minus_f_0) {
-        lp_assert(is_int(x_j));
-        lp_assert(!a.is_int());
-             lp_assert(f_0 > zero_of_type<mpq>() && f_0 < one_of_type<mpq>());
-        mpq f_j =  int_solver::fractional_part(a);
-        TRACE("gomory_cut_detail", 
+        ENSURE(is_integer(x_j));
+        ENSURE(!a.is_int());
+             ENSURE(f_0 > zero_of_type<mpq>() && f_0 < one_of_type<mpq>());
+        mpq f_j =  fractional_part(a);
+        TRACE(gomory_cut_detail, 
               tout << a << " x_j = " << x_j << ", k = " << k << "\n";
               tout << "f_j: " << f_j << "\n";
               tout << "f_0: " << f_0 << "\n";
               tout << "1 - f_0: " << one_minus_f_0 << "\n";
               tout << "at_low(" << x_j << ") = " << at_low(x_j) << std::endl;
               );
-        lp_assert (!f_j.is_zero());
+        ENSURE (!f_j.is_zero());
         mpq new_a;
         if (at_low(x_j)) {
             if (f_j <= one_minus_f_0) {
@@ -106,10 +109,10 @@ struct gomory_test {
                 new_a = (1 - f_j) / f_0;
             }
             k.addmul(new_a, lower_bound(x_j).x);
-            expl.push_justification(column_lower_bound_constraint(x_j), new_a);
+            expl.add_pair(column_lower_bound_constraint(x_j), new_a);
         }
         else {
-            lp_assert(at_upper(x_j));
+            ENSURE(at_upper(x_j));
             if (f_j <= f_0) {
                 new_a = f_j / f_0;
             }
@@ -118,26 +121,26 @@ struct gomory_test {
             }
             new_a.neg(); // the upper terms are inverted
             k.addmul(new_a, upper_bound(x_j).x);
-            expl.push_justification(column_upper_bound_constraint(x_j), new_a);
+            expl.add_pair(column_upper_bound_constraint(x_j), new_a);
         }
-        TRACE("gomory_cut_detail", tout << "new_a: " << new_a << " k: " << k << "\n";);
+        TRACE(gomory_cut_detail, tout << "new_a: " << new_a << " k: " << k << "\n";);
         t.add_monomial(new_a, x_j);
         lcm_den = lcm(lcm_den, denominator(new_a));
     }
 
 
     void report_conflict_from_gomory_cut(mpq &k) {
-        lp_assert(false);
+        UNREACHABLE();
     }
 
     void adjust_term_and_k_for_some_ints_case_gomory(lar_term& t, mpq& k, mpq &lcm_den) {
-        lp_assert(!t.is_empty());
+        ENSURE(!t.is_empty());
         auto pol = t.coeffs_as_vector();
         t.clear();
         if (pol.size() == 1) {
-            TRACE("gomory_cut_detail", tout << "pol.size() is 1" << std::endl;);
+            TRACE(gomory_cut_detail, tout << "pol.size() is 1" << std::endl;);
             unsigned v = pol[0].second;
-            lp_assert(is_int(v));
+            ENSURE(is_integer(v));
             const mpq& a = pol[0].first;
             k /= a;
             if (a.is_pos()) { // we have av >= k
@@ -152,24 +155,24 @@ struct gomory_test {
                 t.add_monomial(mpq(1), v);
             }
         } else {
-            TRACE("gomory_cut_detail", tout << "pol.size() > 1" << std::endl;);
+            TRACE(gomory_cut_detail, tout << "pol.size() > 1" << std::endl;);
             lcm_den = lcm(lcm_den, denominator(k));
-            TRACE("gomory_cut_detail", tout << "k: " << k << " lcm_den: " << lcm_den << "\n";
-                  for (unsigned i = 0; i < pol.size(); i++) {
+            TRACE(gomory_cut_detail, tout << "k: " << k << " lcm_den: " << lcm_den << "\n";
+                  for (unsigned i = 0; i < pol.size(); ++i) {
                       tout << pol[i].first << " " << pol[i].second << "\n";
                   }
                   tout << "k: " << k << "\n";);
-            lp_assert(lcm_den.is_pos());
+            ENSURE(lcm_den.is_pos());
             if (!lcm_den.is_one()) {
                 // normalize coefficients of integer parameters to be integers.
                 for (auto & pi: pol) {
                     pi.first *= lcm_den;
-                    SASSERT(!is_int(pi.second) || pi.first.is_int());
+                    ENSURE(!is_integer(pi.second) || pi.first.is_int());
                 }
                 k *= lcm_den;
             }
-            TRACE("gomory_cut_detail", tout << "after *lcm\n";
-                  for (unsigned i = 0; i < pol.size(); i++) {
+            TRACE(gomory_cut_detail, tout << "after *lcm\n";
+                  for (unsigned i = 0; i < pol.size(); ++i) {
                       tout << pol[i].first << " * v" << pol[i].second << "\n";
                   }
                   tout << "k: " << k << "\n";);
@@ -179,15 +182,14 @@ struct gomory_test {
                 t.add_monomial(-pi.first, pi.second);
             k.neg();
         }
-        TRACE("gomory_cut_detail", tout << "k = " << k << std::endl;);
-        lp_assert(k.is_int());
+        TRACE(gomory_cut_detail, tout << "k = " << k << std::endl;);
+        ENSURE(k.is_int());
     }
 
     void print_term(lar_term & t, std::ostream & out) {
-        lp_assert(is_zero(t.m_v));
         vector<std::pair<mpq, unsigned>>  row;
-        for (auto p : t.m_coeffs)
-            row.push_back(std::make_pair(p.second, p.first));
+        for (auto p : t)
+            row.push_back(std::make_pair(p.coeff(), p.j()));
         print_row(out, row);
     }
     
@@ -195,7 +197,7 @@ struct gomory_test {
         enable_trace("gomory_cut");
         enable_trace("gomory_cut_detail");
 
-        TRACE("gomory_cut",
+        TRACE(gomory_cut,
               tout << "applying cut at:\n"; print_row(tout, row); 
               tout << std::endl << "inf_col = " << inf_col << std::endl;
               );
@@ -206,7 +208,7 @@ struct gomory_test {
         unsigned x_j;
         mpq a;
         bool some_int_columns = false;
-        mpq f_0  = int_solver::fractional_part(get_value(inf_col));
+        mpq f_0  = fractional_part(get_value(inf_col));
         mpq one_min_f_0 = 1 - f_0;
         for ( auto pp : row) {
             a = pp.first;
@@ -229,7 +231,7 @@ struct gomory_test {
         if (some_int_columns)
             adjust_term_and_k_for_some_ints_case_gomory(t, k, lcm_den);
 
-        TRACE("gomory_cut", tout<<"new cut :"; print_term(t, tout); tout << " >= " << k << std::endl;);
+        TRACE(gomory_cut, tout<<"new cut :"; print_term(t, tout); tout << " >= " << k << std::endl;);
 
     }
 };

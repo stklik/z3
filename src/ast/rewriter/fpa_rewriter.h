@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef FLOAT_REWRITER_H_
-#define FLOAT_REWRITER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter.h"
@@ -39,7 +38,6 @@ class fpa_rewriter {
 
 public:
     fpa_rewriter(ast_manager & m, params_ref const & p = params_ref());
-    ~fpa_rewriter();
 
     ast_manager & m() const { return m_util.m(); }
     family_id get_fid() const { return m_util.get_fid(); }
@@ -90,6 +88,8 @@ public:
     br_status mk_max_i(func_decl * f, expr * arg1, expr * arg2, expr_ref & result);
 
     br_status mk_bvwrap(expr * arg, expr_ref & result);
+
+    // Helper: compute isInf(to_fp(rm, to_real(int_expr))) as integer constraint
+    expr_ref mk_is_inf_of_int(mpf_rounding_mode rm, unsigned ebits, unsigned sbits, expr * int_expr);
 };
 
-#endif

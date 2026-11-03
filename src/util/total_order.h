@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef TOTAL_ORDER_H_
-#define TOTAL_ORDER_H_
+#pragma once
 
 #include "util/util.h"
 #include "util/small_object_allocator.h"
@@ -88,7 +87,7 @@ class total_order {
         uint64_t vbn_a = vbn(a);
         SASSERT(vb_a < vbn_a);
         if (vbn_a < 2 || (vb_a > vbn_a - 2)) {
-            TRACE("total_order", tout << "relabeling...\n"; tout << "\n";);
+            TRACE(total_order, tout << "relabeling...\n"; tout << "\n";);
             uint64_t  v0       = v(a);
             unsigned sz        = size();
             uint64_t ideal_gap = UINT64_MAX / sz;
@@ -101,12 +100,12 @@ class total_order {
                 c         = c->m_next;
                 curr_gap  = (v(c) - v0) / j; 
             }
-            TRACE("total_order", tout << "j: " << j << " curr_gap: " << curr_gap << " sz: " << sz << "\n";);
+            TRACE(total_order, tout << "j: " << j << " curr_gap: " << curr_gap << " sz: " << sz << "\n";);
             if (j == sz)
                 curr_gap  = ideal_gap;
             c = a->m_next;
             uint64_t inc    = curr_gap;
-            for (unsigned i = 0; i < j; i++) {
+            for (unsigned i = 0; i < j; ++i) {
                 c->m_val  = v0 + inc;
                 c         = c->m_next;
                 inc      += curr_gap;
@@ -406,5 +405,4 @@ std::ostream & operator<<(std::ostream & out, total_order<T, Map> const & to) {
 }
 
 
-#endif /* TOTAL_ORDER_H_ */
 

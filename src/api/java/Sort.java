@@ -119,17 +119,30 @@ public class Sort extends AST
         switch (sk)
         {
         case Z3_ARRAY_SORT:
-            return new ArraySort(ctx, obj);
+            return new ArraySort<>(ctx, obj);
         case Z3_BOOL_SORT:
             return new BoolSort(ctx, obj);
         case Z3_BV_SORT:
             return new BitVecSort(ctx, obj);
         case Z3_DATATYPE_SORT:
-            return new DatatypeSort(ctx, obj);
+            int n = Native.getDatatypeSortNumConstructors(ctx.nCtx(), obj);
+            boolean isEnum = true;
+            for (int i = 0; i < n && isEnum; i++) {
+                long ctor = Native.getDatatypeSortConstructor(ctx.nCtx(), obj, i);
+                if (Native.getDomainSize(ctx.nCtx(), ctor) != 0) {
+                    isEnum = false;
+                }
+            }
+            if (isEnum) {
+                return new EnumSort<>(ctx, obj);
+            }
+            return new DatatypeSort<>(ctx, obj);
         case Z3_INT_SORT:
             return new IntSort(ctx, obj);
         case Z3_REAL_SORT:
             return new RealSort(ctx, obj);
+        case Z3_COMPLEX_SORT:
+            return new ComplexSort(ctx, obj);
         case Z3_UNINTERPRETED_SORT:
             return new UninterpretedSort(ctx, obj);
         case Z3_FINITE_DOMAIN_SORT:
@@ -141,9 +154,11 @@ public class Sort extends AST
         case Z3_ROUNDING_MODE_SORT:
             return new FPRMSort(ctx, obj);
         case Z3_SEQ_SORT:
-            return new SeqSort(ctx, obj);
+            return new SeqSort<>(ctx, obj);
         case Z3_RE_SORT:
-            return new ReSort(ctx, obj);
+            return new ReSort<>(ctx, obj);
+        case Z3_CHAR_SORT:
+            return new CharSort(ctx, obj);
         default:
             throw new Z3Exception("Unknown sort kind");
         }

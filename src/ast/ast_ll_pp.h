@@ -16,11 +16,10 @@ Author:
 Revision History:
 
 --*/
-#ifndef AST_LL_PP_H_
-#define AST_LL_PP_H_
+#pragma once
 
 #include "ast/ast.h"
-#include<iostream>
+#include<ostream>
 
 void ast_ll_pp(std::ostream & out, ast_manager & m, ast * n, bool only_exprs=true, bool compact=true);
 void ast_ll_pp(std::ostream & out, ast_manager & m, ast * n, ast_mark & visited, bool only_exprs=true, bool compact=true);
@@ -53,5 +52,4 @@ inline std::ostream & operator<<(std::ostream & out, mk_bounded_pp const & p) {
 }
 
 
-#endif /* AST_LL_PP_H_ */
 

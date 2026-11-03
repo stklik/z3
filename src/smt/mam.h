@@ -16,14 +16,16 @@ Author:
 Revision History:
 
 --*/
-#ifndef MAM_H_
-#define MAM_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "smt/smt_types.h"
 #include <tuple>
 
 namespace smt {
+
+    class context;
+
     /**
        \brief Matching Abstract Machine (MAM)
     */
@@ -35,8 +37,7 @@ namespace smt {
             m_context(ctx) {
         }
         
-        virtual ~mam() {
-        }
+        virtual ~mam() = default;
         
         virtual void add_pattern(quantifier * q, app * mp) = 0;
 
@@ -68,6 +69,5 @@ namespace smt {
     };
 
     mam * mk_mam(context & ctx);
-};
+}
 
-#endif /* MAM_H_ */

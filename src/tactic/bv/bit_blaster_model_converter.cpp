@@ -18,9 +18,10 @@ Notes:
 --*/
 #include "model/model.h"
 #include "model/model_pp.h"
-#include "tactic/model_converter.h"
+#include "ast/converters/model_converter.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/ast_smt2_pp.h"
+#include "ast/ast_pp.h"
 #include "ast/ast_util.h"
 
 /**
@@ -40,9 +41,7 @@ struct bit_blaster_model_converter : public model_converter {
         obj_map<func_decl, expr*> const & const2bits, 
         ptr_vector<func_decl> const& newbits):
         m_vars(m), m_bits(m), m_newbits(m) {
-        for (auto const& kv : const2bits) {
-            func_decl * v = kv.m_key;
-            expr * bits   = kv.m_value;
+        for (auto const& [v, bits] : const2bits) {
             SASSERT(!TO_BOOL || is_app_of(bits, m.get_family_id("bv"), OP_MKBV));
             SASSERT(TO_BOOL  || is_app_of(bits, m.get_family_id("bv"), OP_CONCAT));
             m_vars.push_back(v);
@@ -51,31 +50,26 @@ struct bit_blaster_model_converter : public model_converter {
         for (func_decl* f : newbits) 
             m_newbits.push_back(f);
     }
-    
-    ~bit_blaster_model_converter() override {
-    }
-    
+
     void collect_bits(obj_hashtable<func_decl> & bits) {
         unsigned sz = m_bits.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             expr * bs = m_bits.get(i);
             SASSERT(!TO_BOOL || is_app_of(bs, m().get_family_id("bv"), OP_MKBV));
             SASSERT(TO_BOOL  || is_app_of(bs, m().get_family_id("bv"), OP_CONCAT));
             unsigned num_args = to_app(bs)->get_num_args();
-            for (unsigned j = 0; j < num_args; j++) {
+            for (unsigned j = 0; j < num_args; ++j) {
                 expr * bit = to_app(bs)->get_arg(j);
                 SASSERT(!TO_BOOL || m().is_bool(bit)); 
-                SASSERT(TO_BOOL ||  is_sort_of(m().get_sort(bit), m().get_family_id("bv"), BV_SORT));
+                SASSERT(TO_BOOL ||  is_sort_of(bit->get_sort(), m().get_family_id("bv"), BV_SORT));
                 SASSERT(is_uninterp_const(bit));
                 bits.insert(to_app(bit)->get_decl());
             }
         }
-        TRACE("blaster_mc",
+        TRACE(model_converter,
               tout << "bits that should not be included in the model:\n";
-              obj_hashtable<func_decl>::iterator it  = bits.begin();
-              obj_hashtable<func_decl>::iterator end = bits.end();
-              for (; it != end; ++it) {
-                  tout << (*it)->get_name() << " ";
+              for (func_decl* f : bits) {
+                  tout << f->get_name() << " ";
               }
               tout << "\n";);
 
@@ -83,18 +77,18 @@ struct bit_blaster_model_converter : public model_converter {
     
     void copy_non_bits(obj_hashtable<func_decl> & bits, model * old_model, model * new_model) {
         unsigned num = old_model->get_num_constants();
-        for (unsigned i = 0; i < num; i++) {
+        for (unsigned i = 0; i < num; ++i) {
             func_decl * f = old_model->get_constant(i);
             if (bits.contains(f))
                 continue;
-            TRACE("blaster_mc", tout << "non-bit: " << f->get_name() << "\n";);
+            TRACE(model_converter, tout << "non-bit: " << f->get_name() << "\n";);
             expr * fi     = old_model->get_const_interp(f);
             new_model->register_decl(f, fi);
         }
-        TRACE("blaster_mc", tout << "after copy non bits:\n"; model_pp(tout, *new_model););
+        TRACE(model_converter, tout << "after copy non bits:\n"; model_pp(tout, *new_model););
         new_model->copy_func_interps(*old_model);
         new_model->copy_usort_interps(*old_model);
-        TRACE("blaster_mc", tout << "after copying functions and sorts:\n"; model_pp(tout, *new_model););
+        TRACE(model_converter, tout << "after copying functions and sorts:\n"; model_pp(tout, *new_model););
     }
     
     void mk_bvs(model * old_model, model * new_model) {
@@ -103,7 +97,7 @@ struct bit_blaster_model_converter : public model_converter {
         rational two(2);
         SASSERT(m_vars.size() == m_bits.size());
         unsigned sz = m_vars.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             expr* new_val = old_model->get_const_interp(m_vars.get(i));
             if (new_val) {
                 new_model->register_decl(m_vars.get(i), new_val);
@@ -123,13 +117,15 @@ struct bit_blaster_model_converter : public model_converter {
                     SASSERT(is_uninterp_const(bit));
                     func_decl * bit_decl = to_app(bit)->get_decl();
                     expr * bit_val = old_model->get_const_interp(bit_decl);
-                    if (bit_val != nullptr && m().is_true(bit_val))
+                    if (bit_val && !m().is_true(bit_val) && !m().is_false(bit_val)) 
+                        goto bail;
+                    if (bit_val && m().is_true(bit_val))
                         val++;
                 }
             }
             else {
                 SASSERT(is_app_of(bs, m().get_family_id("bv"), OP_CONCAT));
-                for (unsigned j = 0; j < bv_sz; j++) {
+                for (unsigned j = 0; j < bv_sz; ++j) {
                     val *= two;
                     expr * bit = to_app(bs)->get_arg(j);
                     SASSERT(util.is_bv(bit));
@@ -138,11 +134,28 @@ struct bit_blaster_model_converter : public model_converter {
                     func_decl * bit_decl = to_app(bit)->get_decl();
                     expr * bit_val = old_model->get_const_interp(bit_decl);
                     // remark: if old_model does not assign bit_val, then assume it is false.
-                    if (bit_val != nullptr && !util.is_zero(bit_val))
+                    if (bit_val && !util.is_one(bit_val) && !util.is_zero(bit_val))
+                        goto bail;
+                    if (bit_val && util.is_one(bit_val))
                         val++;
                 }
             }
-            new_val = util.mk_numeral(val, bv_sz);
+            new_val = util.mk_numeral(val, bv_sz);            
+            new_model->register_decl(m_vars.get(i), new_val);
+            continue;
+        bail:
+            expr_ref_vector vals(m());
+            for (expr* bit : *to_app(bs)) {
+                func_decl * bit_decl = to_app(bit)->get_decl();
+                expr * bit_val = old_model->get_const_interp(bit_decl);
+                if (!bit_val) 
+                    bit_val = m().mk_false();                
+                vals.push_back(bit_val);
+            }
+            if (TO_BOOL) 
+                new_val = util.mk_bv(vals.size(), vals.data());
+            else 
+                new_val = util.mk_concat(vals);
             new_model->register_decl(m_vars.get(i), new_val);
         }
     }
@@ -161,11 +174,11 @@ struct bit_blaster_model_converter : public model_converter {
 
         if (TO_BOOL) {
             SASSERT(is_app_of(bs, m().get_family_id("bv"), OP_MKBV));
-            result = util.mk_bv(bv_sz, args.c_ptr());
+            result = util.mk_bv(bv_sz, args.data());
         }
         else {
             SASSERT(is_app_of(bs, m().get_family_id("bv"), OP_CONCAT));
-            result = util.mk_concat(bv_sz, args.c_ptr());
+            result = util.mk_concat(bv_sz, args.data());
         }
         return result;
     }
@@ -178,35 +191,45 @@ struct bit_blaster_model_converter : public model_converter {
         mk_bvs(md.get(), new_model);
         md = new_model;
     }
-
-    /**
-       \brief simplisic expansion operator for formulas.
-       It just adds back bit-vector definitions to the formula whether they are used or not.
-
-     */
-    void operator()(expr_ref& fml) override {
-        unsigned sz = m_vars.size();
-        if (sz == 0) return;
-        expr_ref_vector fmls(m());
-        fmls.push_back(fml);
-        for (unsigned i = 0; i < sz; i++) {
-            fmls.push_back(m().mk_eq(m().mk_const(m_vars.get(i)), m_bits.get(i)));
-        }        
-        m_vars.reset();
-        m_bits.reset();
-        fml = mk_and(fmls);
-    }
     
     void display(std::ostream & out) override {
         for (func_decl * f : m_newbits) 
             display_del(out, f);
         unsigned sz = m_vars.size();
-        for (unsigned i = 0; i < sz; i++) 
+        for (unsigned i = 0; i < sz; ++i) 
             display_add(out, m(), m_vars.get(i), m_bits.get(i));
     }
 
     void get_units(obj_map<expr, bool>& units) override {
         // no-op
+    }
+
+    void convert_initialize_value(vector<std::pair<expr_ref, expr_ref>>& var2value) override {
+        if (m_vars.empty() || var2value.empty())
+            return;
+        rational r;
+        bv_util util(m());
+        for (unsigned j = 0; j < var2value.size(); ++j) {
+            auto& [var, value] = var2value[j];
+            if (!is_uninterp_const(var))
+                continue;
+            if (!util.is_numeral(value, r))
+                continue;
+            unsigned sz = m_vars.size();
+            for (unsigned i = 0; i < sz; ++i) {
+                if (m_vars.get(i) != to_app(var)->get_decl())
+                    continue;
+                unsigned k = 0;
+                expr_ref bit_k(m());
+                for (auto arg : *to_app(m_bits.get(i))) {
+                    bit_k = m().mk_bool_val(r.get_bit(k));
+                    var2value.push_back({ expr_ref(arg, m()), bit_k });
+                    ++k;
+                }
+                var2value[i] = var2value.back();
+                var2value.pop_back();                
+            }
+        }
     }
 
 protected:

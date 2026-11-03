@@ -21,34 +21,64 @@ Notes:
 br_status datatype_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * const * args, expr_ref & result) {
     SASSERT(f->get_family_id() == get_fid());
     switch(f->get_decl_kind()) {
-    case OP_DT_CONSTRUCTOR: return BR_FAILED;
+    case OP_DT_CONSTRUCTOR:
+        return BR_FAILED;
     case OP_DT_RECOGNISER:
         SASSERT(num_args == 1);
         result = m_util.mk_is(m_util.get_recognizer_constructor(f), args[0]);
         return BR_REWRITE1;
-    case OP_DT_IS:
+    case OP_DT_IS: {
         //
         // simplify is_cons(cons(x,y)) -> true
         // simplify is_cons(nil) -> false
         //
         SASSERT(num_args == 1);
-        if (!is_app(args[0]) || !m_util.is_constructor(to_app(args[0])))
+        if (m_util.get_datatype_num_constructors(args[0]->get_sort()) == 1) {
+            result = m().mk_true();
+            return BR_DONE;
+        }
+        if (!is_app(args[0]))
             return BR_FAILED;
-        if (to_app(args[0])->get_decl() == m_util.get_recognizer_constructor(f))
+        app* a = to_app(args[0]);
+        if (m_util.is_update_field(a)) {
+            result = m().mk_app(f, a->get_arg(0));
+            return BR_REWRITE1;
+        }
+        if (!m_util.is_constructor(a))
+            return BR_FAILED;
+        if (a->get_decl() == m_util.get_recognizer_constructor(f))
             result = m().mk_true();
         else
             result = m().mk_false();
         return BR_DONE;
+    }
     case OP_DT_ACCESSOR: {
         // 
         // simplify head(cons(x,y)) -> x
         // 
         SASSERT(num_args == 1);
-        if (!is_app(args[0]) || !m_util.is_constructor(to_app(args[0])))
+        if (!is_app(args[0]))
             return BR_FAILED;
+        app* a = to_app(args[0]);
+
+        func_decl* c_decl = a->get_decl(); 
+        auto num_constructors = m_util.get_datatype_num_constructors(args[0]->get_sort());
+
+        if (m_util.is_update_field(a) && num_constructors == 1) {
+            auto dt = a->get_arg(0);
+            auto val = a->get_arg(1);
+            func_decl* acc = m_util.get_update_accessor(c_decl);
+            if (f == acc) {
+                result = val;
+                return BR_DONE;
+            }
+            result = m().mk_app(f, dt);
+            return BR_REWRITE1;
+        }
         
-        app * a = to_app(args[0]);
-        func_decl * c_decl = a->get_decl();
+        if (!m_util.is_constructor(to_app(args[0])))
+            return BR_FAILED;        
+
         if (c_decl != m_util.get_accessor_constructor(f))
             return BR_FAILED;
         ptr_vector<func_decl> const & acc = *m_util.get_constructor_accessors(c_decl);
@@ -70,26 +100,30 @@ br_status datatype_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr 
             return BR_FAILED;
         app * a = to_app(args[0]);
         func_decl * c_decl = a->get_decl();
-        if (c_decl != m_util.get_accessor_constructor(f)) {
+        func_decl * acc = m_util.get_update_accessor(f);
+        if (c_decl != m_util.get_accessor_constructor(acc)) {
             result = a;
             return BR_DONE;
         }
-        ptr_vector<func_decl> const & acc = *m_util.get_constructor_accessors(c_decl);
-        SASSERT(acc.size() == a->get_num_args());
-        unsigned num = acc.size();
+        ptr_vector<func_decl> const & accs = *m_util.get_constructor_accessors(c_decl);
+        SASSERT(accs.size() == a->get_num_args());
+        unsigned num = accs.size();
         ptr_buffer<expr> new_args;
         for (unsigned i = 0; i < num; ++i) {
             
-            if (f == acc[i]) {
+            if (acc == accs[i]) {
                 new_args.push_back(args[1]);
             }
             else {
                 new_args.push_back(a->get_arg(i));
             }
         }
-        result = m().mk_app(c_decl, num, new_args.c_ptr());
+        result = m().mk_app(c_decl, num, new_args.data());
         return BR_DONE;        
     }
+    case OP_DT_SUBTERM:
+        // No rewrite yet for subterms
+        return BR_FAILED;
     default:
         UNREACHABLE();
     }
@@ -124,7 +158,7 @@ br_status datatype_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & resul
     //   (= (+ c5 a5) b5)                    <<< NOT SIMPLIFIED WITH RESPECT TO ARITHMETIC
     //   (= (cons a6 nil) (cons b6 nil)))    <<< NOT SIMPLIFIED WITH RESPECT TO DATATYPE theory
     //
-    // Note that asserted_formulas::reduce() applied the simplier many times.
+    // Note that asserted_formulas::reduce() applied the simplifier many times.
     // After the first simplification step we had:
     //  (= a1 b1)
     //  (= (cons a2 (cons a3 (cons (+ a4 1) (cons (+ a5 c5) (cons a6 nil))))))
@@ -136,6 +170,6 @@ br_status datatype_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & resul
     for (unsigned i = 0; i < num; ++i) {            
         eqs.push_back(m().mk_eq(to_app(lhs)->get_arg(i), to_app(rhs)->get_arg(i)));
     }
-    result = m().mk_and(eqs.size(), eqs.c_ptr());
+    result = m().mk_and(std::span<expr* const>(eqs.data(), eqs.size()));
     return BR_REWRITE2;
 }

@@ -15,7 +15,6 @@ Author:
 Revision History:
 
 --*/
-#include<iostream>
 #include "api/z3.h"
 #include "api/api_log_macros.h"
 #include "api/api_context.h"
@@ -47,8 +46,8 @@ extern "C" {
     void Z3_API Z3_ast_vector_dec_ref(Z3_context c, Z3_ast_vector v) {
         Z3_TRY;
         LOG_Z3_ast_vector_dec_ref(c, v);
-        RESET_ERROR_CODE();
-        to_ast_vector(v)->dec_ref();
+        if (v) 
+            to_ast_vector(v)->dec_ref();
         Z3_CATCH;
     }
     
@@ -113,7 +112,7 @@ extern "C" {
         Z3_ast_vector_ref * new_v = alloc(Z3_ast_vector_ref, *mk_c(t), mk_c(t)->m());
         mk_c(t)->save_object(new_v);
         unsigned sz = to_ast_vector_ref(v).size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             ast * new_ast = translator(to_ast_vector_ref(v).get(i));
             new_v->m_ast_vector.push_back(new_ast);
         }
@@ -128,12 +127,12 @@ extern "C" {
         std::ostringstream buffer;
         buffer << "(ast-vector";
         unsigned sz = to_ast_vector_ref(v).size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             buffer << "\n  " << mk_ismt2_pp(to_ast_vector_ref(v).get(i), mk_c(c)->m(), 2);
         }
-        buffer << ")";
+        buffer << ')';
         return mk_c(c)->mk_external_string(buffer.str());
         Z3_CATCH_RETURN(nullptr);
     }
 
-};
+}

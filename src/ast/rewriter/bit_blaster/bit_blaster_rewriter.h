@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef BIT_BLASTER_REWRITER_H_
-#define BIT_BLASTER_REWRITER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -35,14 +34,13 @@ public:
     void cleanup();
     void start_rewrite();
     void end_rewrite(obj_map<func_decl, expr*>& const2bits, ptr_vector<func_decl> & newbits);
+    void get_translation(obj_map<func_decl, expr*>& const2bits, ptr_vector<func_decl> & newbits);
     void operator()(expr * e, expr_ref & result, proof_ref & result_proof);
     void push();
     void pop(unsigned num_scopes);
     unsigned get_num_scopes() const;
+    void translate(bit_blaster_rewriter const& src, ast_translation& tr) const;
 private:
     obj_map<func_decl, expr*> const& const2bits() const;     
 
 };
-
-#endif
-

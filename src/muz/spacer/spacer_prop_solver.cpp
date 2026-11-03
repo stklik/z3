@@ -24,7 +24,7 @@ Revision History:
 
 #include "ast/rewriter/expr_replacer.h"
 
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 
 #include "model/model.h"
 #include "model/model_pp.h"
@@ -79,7 +79,8 @@ void prop_solver::add_level()
     unsigned idx = level_cnt();
     std::stringstream name;
     name << m_name << "#level_" << idx;
-    func_decl * lev_pred = m.mk_fresh_func_decl(name.str().c_str(), 0, nullptr, m.mk_bool_sort());
+    auto str = name.str();
+    func_decl * lev_pred = m.mk_fresh_func_decl(str.c_str(), 0, nullptr, m.mk_bool_sort());
     m_level_preds.push_back(lev_pred);
 
     app_ref pos_la(m.mk_const(lev_pred), m);
@@ -94,6 +95,7 @@ void prop_solver::add_level()
 
 void prop_solver::ensure_level(unsigned lvl)
 {
+    if (is_infty_level(lvl)) return;
     while (lvl >= level_cnt()) {
         add_level();
     }
@@ -107,7 +109,7 @@ unsigned prop_solver::level_cnt() const
 void prop_solver::assert_level_atoms(unsigned level)
 {
     unsigned lev_cnt = level_cnt();
-    for (unsigned i = 0; i < lev_cnt; i++) {
+    for (unsigned i = 0; i < lev_cnt; ++i) {
         bool active = m_delta_level ? i == level : i >= level;
         app * lev_atom =
             active ? m_neg_level_atoms.get(i) : m_pos_level_atoms.get(i);
@@ -121,7 +123,7 @@ void prop_solver::assert_expr(expr * form)
     m_contexts[0]->assert_expr(form);
     m_contexts[1]->assert_expr(form);
     IF_VERBOSE(21, verbose_stream() << "$ asserted " << mk_pp(form, m) << "\n";);
-    TRACE("spacer", tout << "add_formula: " << mk_pp(form, m) << "\n";);
+    TRACE(spacer, tout << "add_formula: " << mk_pp(form, m) << "\n";);
 }
 
 void prop_solver::assert_expr(expr * form, unsigned level)
@@ -141,7 +143,7 @@ lbool prop_solver::mss(expr_ref_vector &hard, expr_ref_vector &soft) {
     iuc_solver::scoped_mk_proxy _p_(*m_ctx, hard);
     unsigned hard_sz = hard.size();
 
-    lbool res = m_ctx->check_sat(hard.size(), hard.c_ptr());
+    lbool res = m_ctx->check_sat(hard.size(), hard.data());
     // bail out if hard constraints are not sat, or if there are no
     // soft constraints
     if (res != l_true || soft.empty()) {return res;}
@@ -200,7 +202,7 @@ lbool prop_solver::mss(expr_ref_vector &hard, expr_ref_vector &soft) {
 
         // -- grow the set of backbone literals
         for (;j < hard.size(); ++j) {
-            res = m_ctx->check_sat(j+1, hard.c_ptr());
+            res = m_ctx->check_sat(j+1, hard.data());
             if (res == l_false) {
                 // -- flip non-true literal to be false
                 hard[j] = mk_not(m, hard.get(j));
@@ -330,7 +332,7 @@ lbool prop_solver::internal_check_assumptions(expr_ref_vector &hard_atoms,
     }
 
     if (result == l_false && m_core && m.proofs_enabled() && !m_subset_based_core) {
-        TRACE("spacer", tout << "Using IUC core\n";);
+        TRACE(spacer, tout << "Using IUC core\n";);
         m_core->reset();
         m_ctx->get_iuc(*m_core);
     } else if (result == l_false && m_core) {
@@ -361,10 +363,10 @@ lbool prop_solver::check_assumptions(const expr_ref_vector & _hard,
     // current clients expect that flattening of HARD  is
     // done implicitly during check_assumptions
     expr_ref_vector hard(m);
-    hard.append(_hard.size(), _hard.c_ptr());
+    hard.append(_hard.size(), _hard.data());
     flatten_and(hard);
 
-    shuffle(hard.size(), hard.c_ptr(), m_random);
+    shuffle(hard.size(), hard.data(), m_random);
 
     m_ctx = m_contexts [solver_id == 0 ? 0 : 0 /* 1 */].get();
 
@@ -384,13 +386,13 @@ lbool prop_solver::check_assumptions(const expr_ref_vector & _hard,
     lbool res = internal_check_assumptions(hard, soft, clauses);
     if (!m_use_push_bg) { m_ctx->pop(1); }
 
-    TRACE("psolve_verbose",
+    TRACE(psolve_verbose,
           tout << "sat: " << mk_pp(mk_and(hard), m) << "\n"
           << mk_pp(mk_and(soft), m) << "\n";
           for (unsigned i = 0; i < num_bg; ++i)
           tout << "bg" << i << ": " << mk_pp(bg[i], m) << "\n";
           tout << "res: " << res << "\n";);
-    CTRACE("psolve", m_core,
+    CTRACE(psolve, m_core,
            tout << "core is: " << mk_pp(mk_and(*m_core), m) << "\n";);
 
     SASSERT(soft_sz >= soft.size());

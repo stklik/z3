@@ -44,6 +44,11 @@ Subsumption transformation (remove rule):
        P(x) := P(x) or (exists y . Q(y) & phi(x,y))
 
 
+For plan_inlining:
+ TODO: order of rule inlining would affect model converter?
+ so shouldn't model converter process inlined rules in a specific (topopologial) order?
+
+
 --*/
 
 
@@ -73,7 +78,7 @@ namespace datalog {
         if (m_ready) {
             m_deltas[0] = 0;
             m_deltas[1] = var_cnt;
-            TRACE("dl",
+            TRACE(dl,
                   output_predicate(m_context, src.get_head(), tout << "unify rules ");
                   output_predicate(m_context, tgt.get_head(), tout << "\n");
                   tout << "\n";);
@@ -83,7 +88,7 @@ namespace datalog {
 
     void rule_unifier::apply(app * a, bool is_tgt, app_ref& res) {
         expr_ref res_e(m);
-        TRACE("dl", output_predicate(m_context, a, tout); tout << "\n";);
+        TRACE(dl, output_predicate(m_context, a, tout); tout << "\n";);
         m_subst.apply(2, m_deltas, expr_offset(a, is_tgt ? 0 : 1), res_e);
         SASSERT(is_app(res_e.get()));
         res = to_app(res_e.get());
@@ -91,9 +96,9 @@ namespace datalog {
 
     void rule_unifier::apply(
         rule const& r, bool is_tgt, unsigned skipped_index,
-        app_ref_vector& res, svector<bool>& res_neg) {
+        app_ref_vector& res, bool_vector& res_neg) {
         unsigned rule_len = r.get_tail_size();
-        for (unsigned i = 0; i < rule_len; i++) {
+        for (unsigned i = 0; i < rule_len; ++i) {
             if (i != skipped_index) { //i can never be UINT_MAX, so we'll never skip if we're not supposed to
                 app_ref new_tail_el(m);
                 apply(r.get_tail(i), is_tgt, new_tail_el);
@@ -107,7 +112,7 @@ namespace datalog {
         SASSERT(m_ready);
         app_ref new_head(m);
         app_ref_vector tail(m);
-        svector<bool> tail_neg;
+        bool_vector tail_neg;
         rule_ref simpl_rule(m_rm);
         apply(tgt.get_head(), true, new_head);
         apply(tgt, true,  tail_index, tail, tail_neg);
@@ -116,10 +121,10 @@ namespace datalog {
         SASSERT(tail.size()==tail_neg.size());
         std::ostringstream comb_name;
         comb_name << tgt.name().str() << ";" << src.name().str();
-        symbol combined_rule_name = symbol(comb_name.str().c_str());
-        res = m_rm.mk(new_head, tail.size(), tail.c_ptr(), tail_neg.c_ptr(), combined_rule_name, m_normalize);
+        symbol combined_rule_name(comb_name.str());
+        res = m_rm.mk(new_head, tail.size(), tail.data(), tail_neg.data(), combined_rule_name, m_normalize);
         res->set_accounting_parent_object(m_context, const_cast<rule*>(&tgt));
-        TRACE("dl",
+        TRACE(dl,
               tgt.display(m_context,  tout << "tgt (" << tail_index << "): \n");
               src.display(m_context,  tout << "src:\n");
               res->display(m_context, tout << "res\n");
@@ -172,7 +177,8 @@ namespace datalog {
 
         tgt.norm_vars(m_context.get_rule_manager());
 
-        SASSERT(!has_quantifier(src));
+        if (has_quantifier(src))
+            throw has_new_quantifier();
 
         if (!m_unifier.unify_rules(tgt, tail_index, src)) {
             return false;
@@ -187,7 +193,7 @@ namespace datalog {
             return true;
         }
         else {
-            TRACE("dl", res->display(m_context, tout << "interpreted tail is unsat\n"););
+            TRACE(dl, res->display(m_context, tout << "interpreted tail is unsat\n"););
             //the interpreted part is unsatisfiable
             return false;
         }
@@ -218,7 +224,7 @@ namespace datalog {
             }
 
             unsigned ut_len = r->get_uninterpreted_tail_size();
-            for (unsigned i=0; i<ut_len; i++) {
+            for (unsigned i=0; i<ut_len; ++i) {
                 func_decl * pred = r->get_decl(i);
                 m_tail_pred_ctr.inc(pred);
 
@@ -344,7 +350,7 @@ namespace datalog {
 
 
         unsigned rule_cnt = orig.get_num_rules();
-        for (unsigned ri=0; ri<rule_cnt; ri++) {
+        for (unsigned ri=0; ri<rule_cnt; ++ri) {
             rule * r = orig.get_rule(ri);
 
             func_decl * head_pred = r->get_decl();
@@ -376,20 +382,17 @@ namespace datalog {
         return something_forbidden;
     }
 
-    void mk_rule_inliner::plan_inlining(rule_set const & orig)
-    {
+    void mk_rule_inliner::plan_inlining(rule_set const & orig) {
         count_pred_occurrences(orig);
 
         scoped_ptr<rule_set> candidate_inlined_set = create_allowed_rule_set(orig);
-        while (forbid_preds_from_cycles(*candidate_inlined_set)) {
+        while (forbid_preds_from_cycles(*candidate_inlined_set)) 
             candidate_inlined_set = create_allowed_rule_set(orig);
-        }
 
-        if (forbid_multiple_multipliers(orig, *candidate_inlined_set)) {
+        if (forbid_multiple_multipliers(orig, *candidate_inlined_set)) 
             candidate_inlined_set = create_allowed_rule_set(orig);
-        }
 
-        TRACE("dl", tout<<"rules to be inlined:\n" << (*candidate_inlined_set); );
+        TRACE(dl, tout<<"rules to be inlined:\n" << (*candidate_inlined_set); );
 
         // now we start filling in the set of the inlined rules in a topological order,
         // so that we inline rules into other rules
@@ -401,16 +404,13 @@ namespace datalog {
         for (rule_stratifier::item_set * stratum : comps) {
             SASSERT(stratum->size() == 1);
             func_decl * pred = *stratum->begin();
-            for (rule * r : candidate_inlined_set->get_predicate_rules(pred)) {
+            for (rule * r : candidate_inlined_set->get_predicate_rules(pred)) 
                 transform_rule(orig, r, m_inlined_rules);
-            }
         }
+        TRACE(dl, tout << "inlined rules after mutual inlining:\n" << m_inlined_rules;  );
+            for (rule * r : m_inlined_rules) 
+                datalog::del_rule(m_mc, *r, l_undef);
 
-        TRACE("dl", tout << "inlined rules after mutual inlining:\n" << m_inlined_rules;  );
-
-        for (rule * r : m_inlined_rules) {
-            datalog::del_rule(m_mc, *r, false);
-        }
     }
 
     bool mk_rule_inliner::transform_rule(rule_set const& orig, rule * r0, rule_set& tgt) {
@@ -425,27 +425,30 @@ namespace datalog {
             unsigned i = 0;
             for  (; i < pt_len && !inlining_allowed(orig, r->get_decl(i)); ++i) {};
 
-            SASSERT(!has_quantifier(*r.get()));
+            CTRACE(dl, has_quantifier(*r.get()), r->display(m_context, tout););
+            if (has_quantifier(*r.get())) {
+                tgt.add_rule(r);
+                continue;
+            }
 
             if (i == pt_len) {
                 //there's nothing we can inline in this rule
                 tgt.add_rule(r);
                 continue;
             }
+
             modified = true;
 
             func_decl * pred = r->get_decl(i);
             const rule_vector& pred_rules = m_inlined_rules.get_predicate_rules(pred);
             for (rule * inl_rule : pred_rules) {
                 rule_ref inl_result(m_rm);
-                if (try_to_inline_rule(*r.get(), *inl_rule, i, inl_result)) {
+                if (try_to_inline_rule(*r.get(), *inl_rule, i, inl_result)) 
                     todo.push_back(inl_result);
-                }
             }
         }
-        if (modified) {
-            datalog::del_rule(m_mc, *r0, true);
-        }
+        if (modified) 
+            datalog::del_rule(m_mc, *r0, l_undef);
 
         return modified;
     }
@@ -468,7 +471,7 @@ namespace datalog {
         if (something_done && m_mc) {
             for (rule* r : orig) {
                 if (inlining_allowed(orig, r->get_decl())) {
-                    datalog::del_rule(m_mc, *r, true);
+                    datalog::del_rule(m_mc, *r, l_undef);
                 }
             }
         }
@@ -553,7 +556,7 @@ namespace datalog {
                 // nothing unifies with the tail atom, therefore the rule is unsatisfiable
                 // (we can say this because relation pred doesn't have any ground facts either)
                 res = nullptr;
-                datalog::del_rule(m_mc, *r, false);
+                datalog::del_rule(m_mc, *r, l_false);
                 return true;
             }
             if (!is_oriented_rewriter(inlining_candidate, strat)) {
@@ -563,7 +566,7 @@ namespace datalog {
                 goto process_next_tail;
             }
             if (!try_to_inline_rule(*r, *inlining_candidate, ti, res)) {
-                datalog::del_rule(m_mc, *r, false);
+                datalog::del_rule(m_mc, *r, l_false);
                 res = nullptr;
             }
             return true;
@@ -577,20 +580,19 @@ namespace datalog {
         scoped_ptr<rule_set> res = alloc(rule_set, m_context);
         bool done_something = false;
 
-        rule_set::iterator rend = rules->end();
-        for (rule_set::iterator rit = rules->begin(); rit!=rend; ++rit) {
-            rule_ref r(*rit, m_rm);
+        for (rule* r : *rules) {
+            rule_ref rl(r, m_rm);
 
             rule_ref replacement(m_rm);
-            while (r && do_eager_inlining(r, *rules, replacement)) {
-                r = replacement;
+            while (rl && do_eager_inlining(rl, *rules, replacement)) {
+                rl = replacement;
                 done_something = true;
             }
 
-            if (!r) {
+            if (!rl) {
                 continue;
             }
-            res->add_rule(r);
+            res->add_rule(rl);
         }
         if (done_something) {
             rules = res.detach();
@@ -615,7 +617,7 @@ namespace datalog {
      */
     bool mk_rule_inliner::visitor::operator()(expr* e) {
         m_unifiers.append(m_positions.find(e));
-        TRACE("dl",
+        TRACE(dl,
               tout << "unifier: " << (m_unifiers.empty()?0:m_unifiers.back());
               tout << " num unifiers: " << m_unifiers.size();
               tout << " num positions: " << m_positions.find(e).size() << "\n";
@@ -634,9 +636,9 @@ namespace datalog {
     }
 
     unsigned_vector const& mk_rule_inliner::visitor::add_position(expr* e, unsigned j) {
-        obj_map<expr, unsigned_vector>::obj_map_entry * et = m_positions.insert_if_not_there2(e, unsigned_vector());
-        et->get_data().m_value.push_back(j);
-        return et->get_data().m_value;
+        auto& value = m_positions.insert_if_not_there(e, unsigned_vector());
+        value.push_back(j);
+        return value;
     }
 
     unsigned_vector const& mk_rule_inliner::visitor::del_position(expr* e, unsigned j) {
@@ -647,8 +649,8 @@ namespace datalog {
     }
 
     void mk_rule_inliner::add_rule(rule_set const& source, rule* r, unsigned i) {
-        svector<bool>& can_remove = m_head_visitor.can_remove();
-        svector<bool>& can_expand = m_head_visitor.can_expand();
+        bool_vector& can_remove = m_head_visitor.can_remove();
+        bool_vector& can_expand = m_head_visitor.can_expand();
         app* head = r->get_head();
         func_decl* headd = head->get_decl();
         m_head_visitor.add_position(head, i);
@@ -658,7 +660,7 @@ namespace datalog {
         if (source.is_output_predicate(headd) ||
             m_preds_with_facts.contains(headd)) {
             can_remove.set(i, false);
-            TRACE("dl", output_predicate(m_context, head, tout << "cannot remove: " << i << " "); tout << "\n";);
+            TRACE(dl, output_predicate(m_context, head, tout << "cannot remove: " << i << " "); tout << "\n";);
         }
 
         unsigned tl_sz = r->get_uninterpreted_tail_size();
@@ -697,7 +699,7 @@ namespace datalog {
         m_head_index.reset();
         m_tail_index.reset();
 
-        TRACE("dl", rules->display(tout););
+        TRACE(dl, rules->display(tout););
 
         rule_ref_vector acc(m_rm);
         for (unsigned i = 0; i < sz; ++i) {
@@ -705,8 +707,8 @@ namespace datalog {
         }
 
         // set up unification index.
-        svector<bool>& can_remove = m_head_visitor.can_remove();
-        svector<bool>& can_expand = m_head_visitor.can_expand();
+        bool_vector& can_remove = m_head_visitor.can_remove();
+        bool_vector& can_expand = m_head_visitor.can_expand();
 
         for (unsigned i = 0; i < sz; ++i) {
             add_rule(*rules, acc[i].get(), i);
@@ -727,7 +729,7 @@ namespace datalog {
         m_subst.reserve_vars(max_var+1);
         m_subst.reserve_offsets(std::max(m_tail_index.get_approx_num_regs(), 2+m_head_index.get_approx_num_regs()));
 
-        svector<bool> valid;
+        bool_vector valid;
         valid.reset();
         valid.resize(sz, true);
 
@@ -739,14 +741,14 @@ namespace datalog {
 
                 rule_ref r(acc[i].get(), m_rm);
 
-                TRACE("dl", r->display(m_context, tout << "processing: " << i << "\n"););
+                TRACE(dl, r->display(m_context, tout << "processing: " << i << "\n"););
 
                 if (!valid.get(i)) {
-                    TRACE("dl", tout << "invalid: " << i << "\n";);
+                    TRACE(dl, tout << "invalid: " << i << "\n";);
                     break;
                 }
                 if (!can_expand.get(i)) {
-                    TRACE("dl", tout << "cannot expand: " << i << "\n";);
+                    TRACE(dl, tout << "cannot expand: " << i << "\n";);
                     break;
                 }
 
@@ -754,36 +756,36 @@ namespace datalog {
                 m_head_index.unify(r->get_tail(0), m_head_visitor);
                 unsigned num_head_unifiers = m_head_visitor.get_unifiers().size();
                 if (num_head_unifiers != 1) {
-                    TRACE("dl", tout << "no unique unifier " << num_head_unifiers << "\n";);
+                    TRACE(dl, tout << "no unique unifier " << num_head_unifiers << "\n";);
                     break;
                 }
                 unsigned j = m_head_visitor.get_unifiers()[0];
                 if (!can_remove.get(j) || !valid.get(j) || i == j) {
-                    TRACE("dl", tout << PRT(can_remove.get(j)) << " " << PRT(valid.get(j)) << " " << PRT(i != j) << "\n";);
+                    TRACE(dl, tout << PRT(can_remove.get(j)) << " " << PRT(valid.get(j)) << " " << PRT(i != j) << "\n";);
                     break;
                 }
 
-                rule* r2 = acc[j].get();
+                rule* r2 = acc.get(j);
 
                 // check that the head of r2 only unifies with this single body position.
-                TRACE("dl", output_predicate(m_context, r2->get_head(), tout << "unify head: "); tout << "\n";);
+                TRACE(dl, output_predicate(m_context, r2->get_head(), tout << "unify head: "); tout << "\n";);
                 m_tail_visitor.reset();
                 m_tail_index.unify(r2->get_head(), m_tail_visitor);
                 unsigned_vector const& tail_unifiers = m_tail_visitor.get_unifiers();
                 unsigned num_tail_unifiers = tail_unifiers.size();
                 SASSERT(!tail_unifiers.empty());
                 if (!allow_branching && num_tail_unifiers != 1) {
-                    TRACE("dl", tout << "too many tails " << num_tail_unifiers << "\n";);
+                    TRACE(dl, tout << "too many tails " << num_tail_unifiers << "\n";);
                     break;
                 }
 
                 rule_ref rl_res(m_rm);
                 if (!try_to_inline_rule(*r.get(), *r2, 0, rl_res)) {
-                    TRACE("dl", r->display(m_context, tout << "inlining failed\n"); r2->display(m_context, tout);  );
+                    TRACE(dl, r->display(m_context, tout << "inlining failed\n"); r2->display(m_context, tout);  );
                     break;
                 }
                 done_something = true;
-                TRACE("dl", r->display(m_context, tout); r2->display(m_context, tout); rl_res->display(m_context, tout); );
+                TRACE(dl, r->display(m_context, tout); r2->display(m_context, tout); rl_res->display(m_context, tout); );
 
                 del_rule(r, i);
                 add_rule(*rules, rl_res.get(), i);
@@ -794,9 +796,9 @@ namespace datalog {
                 can_expand.set(i, can_expand.get(j));
 
                 if (num_tail_unifiers == 1) {
-                    TRACE("dl", tout << "setting invalid: " << j << "\n";);
+                    TRACE(dl, tout << "setting invalid: " << j << "\n";);
                     valid.set(j, false);
-                    datalog::del_rule(m_mc, *r2, true);
+                    datalog::del_rule(m_mc, *r2, l_undef);
                     del_rule(r2, j);
                 }
 
@@ -813,7 +815,7 @@ namespace datalog {
                 }
             }
             res->inherit_predicates(*rules);
-            TRACE("dl", res->display(tout););
+            TRACE(dl, res->display(tout););
             rules = res.detach();
         }
         return done_something;
@@ -840,15 +842,20 @@ namespace datalog {
         scoped_ptr<rule_set> res = alloc(rule_set, m_context);
 
         if (m_context.get_params().xform_inline_eager()) {
-            TRACE("dl", source.display(tout << "before eager inlining\n"););
+            TRACE(dl, source.display(tout << "before eager inlining\n"););
             plan_inlining(source);
-            something_done = transform_rules(source, *res);
+            try {
+                something_done = transform_rules(source, *res);
+            }
+            catch (has_new_quantifier) {
+                return nullptr;
+            }
             VERIFY(res->close()); //this transformation doesn't break the negation stratification
             // try eager inlining
             if (do_eager_inlining(res)) {
                 something_done = true;
             }
-            TRACE("dl", res->display(tout << "after eager inlining\n"););
+            TRACE(dl, res->display(tout << "after eager inlining\n"););
         }
         if (something_done) {
             res->inherit_predicates(source);
@@ -871,4 +878,4 @@ namespace datalog {
         return res.detach();
     }
 
-};
+}

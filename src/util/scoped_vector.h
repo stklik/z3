@@ -16,15 +16,14 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_VECTOR_H_
-#define SCOPED_VECTOR_H_
+#pragma once
 
 #include "util/vector.h"
 
 template<typename T>
 class scoped_vector {
-    unsigned         m_size;
-    unsigned         m_elems_start;
+    unsigned         m_size = 0;
+    unsigned         m_elems_start = 0;
     unsigned_vector  m_sizes;
     vector<T>        m_elems;
     unsigned_vector  m_elems_lim;
@@ -32,8 +31,6 @@ class scoped_vector {
     unsigned_vector  m_src, m_dst;
     unsigned_vector  m_src_lim;
 public:
-    scoped_vector(): m_size(0), m_elems_start(0) {}
-
     // m_index : External-Index -> Internal-Index
     // m_index.size() = max(m_sizes)
     // m_src[i] -> m_dst[i] // trail into m_index updates
@@ -91,13 +88,25 @@ public:
         SASSERT(invariant());
     }
 
+    void set(unsigned idx, T && t) {
+        SASSERT(idx < m_size);
+        unsigned n = m_index[idx];
+        if (n >= m_elems_start) {
+            m_elems[n] = std::move(t);
+        }
+        else {
+            set_index(idx, m_elems.size());
+            m_elems.push_back(std::move(t));
+        }
+        SASSERT(invariant());
+    }
+
     class iterator {
         scoped_vector const& m_vec;
         unsigned m_index;
     public:
         iterator(scoped_vector const& v, unsigned idx): m_vec(v), m_index(idx) {}
-        
-        bool operator==(iterator const& other) const { return &other.m_vec == &m_vec && other.m_index == m_index; }
+
         bool operator!=(iterator const& other) const { return &other.m_vec != &m_vec || other.m_index != m_index; }
         T const& operator*() { return m_vec[m_index]; }
 
@@ -118,7 +127,14 @@ public:
 
     void push_back(T const& t) {
         set_index(m_size, m_elems.size());
-        m_elems.push_back(t);    
+        m_elems.push_back(t);
+        ++m_size;
+        SASSERT(invariant());
+    }
+
+    void push_back(T && t) {
+        set_index(m_size, m_elems.size());
+        m_elems.push_back(std::move(t));
         ++m_size;
         SASSERT(invariant());
     }
@@ -135,7 +151,8 @@ public:
 
     void erase_and_swap(unsigned i) {
         if (i + 1 < size()) {
-            set(i, m_elems[m_index[size()-1]]);
+            auto n = m_elems[m_index[size() - 1]];
+            set(i, std::move(n));
         }
         pop_back();
     }
@@ -158,10 +175,46 @@ private:
     }
 
     bool invariant() const {
-        return 
-            m_size <= m_elems.size() &&
-            m_elems_start <= m_elems.size();
+
+
+        if (!(m_size <= m_elems.size() && m_elems_start <= m_elems.size()))
+            return false;
+            
+        // Check that source and destination trails have the same length.
+        if (m_src.size() != m_dst.size())
+            return false;
+        // The size of m_src, m_dst, and m_src_lim should be consistent with the scope stack.
+        if (m_src_lim.size() != m_sizes.size() || m_src.size() != m_dst.size())
+            return false;
+
+        // // m_elems_lim stores the past sizes of m_elems for each scope. Each element in m_elems_lim should be
+        // // within bounds and in non-decreasing order.
+        // for (unsigned i = 1; i < m_elems_lim.size(); ++i) {
+        //     if (m_elems_lim[i - 1] > m_elems_lim[i]) return false;
+        // }
+
+
+        // // m_sizes tracks the size of the vector at each scope level.
+        // // Each element in m_sizes should be non-decreasing and within the size of m_elems.
+        // for (unsigned i = 1; i < m_sizes.size(); ++i) {
+        //     if (m_sizes[i - 1] > m_sizes[i])
+        //         return false;
+        // }
+
+        // // The m_src and m_dst vectors should have the same size and should contain valid indices.
+        // if (m_src.size() != m_dst.size()) return false;
+        // for (unsigned i = 0; i < m_src.size(); ++i) {
+        //     if (m_src[i] >= m_index.size() || m_dst[i] >= m_elems.size()) return false;
+        // }
+        
+
+        // // The size of m_src_lim should be less than or equal to the size of m_sizes and store valid indices.
+        // if (m_src_lim.size() > m_sizes.size()) return false;
+        // for (unsigned elem : m_src_lim) {
+        //     if (elem > m_src.size()) return false;
+        // }
+
+        return true;
+        
     }
 };
-
-#endif

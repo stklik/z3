@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef SPACER_IUC_SOLVER_H_
-#define SPACER_IUC_SOLVER_H_
+#pragma once
 
 #include"solver/solver.h"
 #include"ast/expr_substitution.h"
@@ -43,7 +42,6 @@ private:
     };
 
     friend struct def_manager;
-    ast_manager&        m;
     solver&             m_solver;
     app_ref_vector      m_proxies;
     unsigned            m_num_proxies;
@@ -70,11 +68,11 @@ private:
     app* fresh_proxy();
     void elim_proxies(expr_ref_vector &v);
 public:
-    iuc_solver(solver &solver, unsigned iuc, unsigned iuc_arith,
+    iuc_solver(solver &s, unsigned iuc, unsigned iuc_arith,
                bool print_farkas_stats, bool old_hyp_reducer,
                bool split_literals = false) :
-        m(solver.get_manager()),
-        m_solver(solver),
+        solver(s.get_manager()),
+        m_solver(s),
         m_proxies(m),
         m_num_proxies(0),
         m_base_defs(*this),
@@ -89,8 +87,6 @@ public:
         m_old_hyp_reducer(old_hyp_reducer)
     {}
 
-    ~iuc_solver() override {}
-
     /* iuc solver specific */
     virtual void get_iuc(expr_ref_vector &core);
     void set_split_literals(bool v) { m_split_literals = v; }
@@ -104,7 +100,7 @@ public:
     void get_full_unsat_core(ptr_vector<expr> &core) {
         expr_ref_vector _core(m);
         m_solver.get_unsat_core(_core);
-        core.append(_core.size(), _core.c_ptr());
+        core.append(_core.size(), _core.data());
     }
 
     /* solver interface */
@@ -121,13 +117,22 @@ public:
     void set_produce_models(bool f) override  { m_solver.set_produce_models(f); }
     void assert_expr_core(expr *t) override  { m_solver.assert_expr(t); }
     void assert_expr_core2(expr *t, expr *a) override   { NOT_IMPLEMENTED_YET(); }
+    void set_phase(expr* e) override { m_solver.set_phase(e); }
+    phase* get_phase() override { return m_solver.get_phase();  }
+    void set_phase(phase* p) override { m_solver.set_phase(p); }
+    void move_to_front(expr* e) override { m_solver.move_to_front(e); }
     expr_ref_vector cube(expr_ref_vector&, unsigned) override { return expr_ref_vector(m); }
+    expr* congruence_root(expr* e) override { return e; }
+    expr* congruence_next(expr* e) override { return e; }
+    expr_ref congruence_explain(expr *a, expr *b) override { return expr_ref(m.mk_eq(a, b), m); }
+    void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth) override { m_solver.get_levels(vars, depth); }
+    expr_ref_vector get_trail(unsigned max_level) override { return m_solver.get_trail(max_level); }
 
     void push() override;
     void pop(unsigned n) override;
     unsigned get_scope_level() const override { return m_solver.get_scope_level(); }
 
-    lbool check_sat(unsigned num_assumptions, expr * const *assumptions) override;
+    lbool check_sat_core(unsigned num_assumptions, expr * const *assumptions) override;
     lbool check_sat_cc(const expr_ref_vector &cube, vector<expr_ref_vector> const & clauses) override;
     void set_progress_callback(progress_callback *callback) override {
         m_solver.set_progress_callback(callback);
@@ -142,12 +147,12 @@ public:
 
     /* check_sat_result interface */
 
-    void collect_statistics(statistics &st) const override ;
+    void collect_statistics_core(statistics &st) const override ;
     virtual void reset_statistics();
 
     void get_unsat_core(expr_ref_vector &r) override;
     void get_model_core(model_ref &m) override {m_solver.get_model(m);}
-    proof *get_proof() override {return m_solver.get_proof();}
+    proof *get_proof_core() override {return m_solver.get_proof_core();}
     std::string reason_unknown() const override { return m_solver.reason_unknown(); }
     void set_reason_unknown(char const* msg) override { m_solver.set_reason_unknown(msg); }
     void get_labels(svector<symbol> &r) override { m_solver.get_labels(r); }
@@ -178,4 +183,3 @@ public:
     };
 };
 }
-#endif

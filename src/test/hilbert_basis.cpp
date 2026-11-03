@@ -15,6 +15,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include "util/rlimit.h"
 #include <signal.h>
 #include <time.h>
+#include <iostream>
 #include <sstream>
 
 static bool g_use_ordered_support = false;
@@ -118,7 +119,7 @@ expr_ref hilbert_basis_validate::mk_validate(hilbert_basis& hb) {
         bool is_initial;
         hb.get_basis_solution(i, v, is_initial);
 
-        for (unsigned j = 0; xs.size() < v.size(); ++j) {
+        for (; xs.size() < v.size(); ) {
             xs.push_back(m.mk_fresh_const("x", a.mk_int()));
         }
 
@@ -140,7 +141,7 @@ expr_ref hilbert_basis_validate::mk_validate(hilbert_basis& hb) {
             name << "u" << i;
             increments.push_back(tmp);
             vars.push_back(var);
-            names.push_back(symbol(name.str().c_str()));
+            names.push_back(symbol(name.str()));
             sorts.push_back(a.mk_int());
         }
     }
@@ -160,15 +161,15 @@ expr_ref hilbert_basis_validate::mk_validate(hilbert_basis& hb) {
             for (unsigned k = 0; k < increments.size(); ++k) {
                 sum.push_back(increments[k][j].get());
             }
-            eqs.push_back(m.mk_eq(xs[j].get(), a.mk_add(sum.size(), sum.c_ptr())));
+            eqs.push_back(m.mk_eq(xs[j].get(), a.mk_add(sum.size(), sum.data())));
         }
-        fml = m.mk_and(eqs.size(), eqs.c_ptr());
+        fml = m.mk_and(eqs);
         if (!names.empty()) {
-            fml = m.mk_exists(names.size(), sorts.c_ptr(), names.c_ptr(), fml);
+            fml = m.mk_exists(names.size(), sorts.data(), names.data(), fml);
         }
         fmls.push_back(fml);
     }
-    fml1 = m.mk_or(fmls.size(), fmls.c_ptr());
+    fml1 = m.mk_or(fmls);
     fmls.reset();
 
     sz = hb.get_num_ineqs();
@@ -184,7 +185,7 @@ expr_ref hilbert_basis_validate::mk_validate(hilbert_basis& hb) {
             }
         }
         expr_ref lhs(m), rhs(m);
-        lhs = a.mk_add(sum.size(), sum.c_ptr());
+        lhs = a.mk_add(sum.size(), sum.data());
         rhs = a.mk_numeral(bound, true);
         if (is_eq) {
             fmls.push_back(a.mk_eq(lhs, rhs));
@@ -193,7 +194,7 @@ expr_ref hilbert_basis_validate::mk_validate(hilbert_basis& hb) {
             fmls.push_back(a.mk_ge(lhs, rhs));
         }
     }
-    fml2 = m.mk_and(fmls.size(), fmls.c_ptr());
+    fml2 = m.mk_and(fmls);
     fml = m.mk_eq(fml1, fml2);
 
     bounds.reset();
@@ -203,7 +204,7 @@ expr_ref hilbert_basis_validate::mk_validate(hilbert_basis& hb) {
         }
     }
     if (!bounds.empty()) {
-        fml = m.mk_implies(m.mk_and(bounds.size(), bounds.c_ptr()), fml);
+        fml = m.mk_implies(m.mk_and(bounds), fml);
     }
     return fml;
 

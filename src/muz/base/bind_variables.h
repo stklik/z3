@@ -18,8 +18,7 @@ Notes:
 
 --*/
 
-#ifndef BIND_VARIABLES_H_
-#define BIND_VARIABLES_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -41,11 +40,9 @@ class bind_variables {
     expr_ref abstract(expr* fml, cache_t& cache, unsigned scope);
 public:
     bind_variables(ast_manager & m);
-    ~bind_variables();
     
     expr_ref operator()(expr* fml, bool is_forall);
 
     void add_var(app* v);
 };
 
-#endif /* BIND_VARIABLES_H_ */

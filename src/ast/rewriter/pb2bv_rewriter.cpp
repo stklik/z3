@@ -17,18 +17,21 @@ Notes:
 
 --*/
 
-#include "ast/rewriter/rewriter.h"
-#include "ast/rewriter/rewriter_def.h"
 #include "util/statistics.h"
-#include "ast/rewriter/pb2bv_rewriter.h"
-#include "util/sorting_network.h"
-#include "ast/ast_util.h"
-#include "ast/ast_pp.h"
 #include "util/lbool.h"
 #include "util/uint_set.h"
 #include "util/gparams.h"
+#include "util/debug.h"
 
-const unsigned g_primes[7] = { 2, 3, 5, 7, 11, 13, 17};
+#include "ast/rewriter/rewriter.h"
+#include "ast/rewriter/rewriter_def.h"
+#include "ast/rewriter/pb2bv_rewriter.h"
+#include "ast/ast_util.h"
+#include "ast/ast_pp.h"
+#include "util/sorting_network.h"
+
+
+static const unsigned g_primes[7] = { 2, 3, 5, 7, 11, 13, 17};
 
 
 struct pb2bv_rewriter::imp {
@@ -90,7 +93,7 @@ struct pb2bv_rewriter::imp {
         void sort_args() {
             vector<ca> cas;
             for (unsigned i = 0; i < m_args.size(); ++i) {
-                cas.push_back(std::make_pair(m_coeffs[i], expr_ref(m_args[i].get(), m)));
+                cas.push_back(std::make_pair(m_coeffs[i], expr_ref(m_args.get(i), m)));
             }
             std::sort(cas.begin(), cas.end(), compare_coeffs());
             m_coeffs.reset();
@@ -101,6 +104,40 @@ struct pb2bv_rewriter::imp {
             }
         }
 
+        template <lbool is_le>
+        void gcd_reduce(vector<rational>& coeffs, rational & k) {
+            rational g(0);
+            for (rational const& c : coeffs) {
+                if (!c.is_int())
+                    return;
+                g = gcd(g, c);
+                if (g.is_one())
+                    return;
+            }
+            if (g.is_zero())
+                return;
+            switch (is_le) {
+            case l_undef:
+                if (!k.is_int())
+                    return;
+                g = gcd(k, g);
+                if (g.is_one() || g.is_zero())
+                    return;
+                k /= g;
+                break;
+            case l_true:              
+                k /= g;
+                k = floor(k);
+                break;
+            case l_false:
+                k /= g;
+                k = ceil(k);
+                break;
+            }      
+            for (rational& c : coeffs)
+                c /= g;
+        }
+        
         // 
         // create a circuit of size sz*log(k) 
         // by forming a binary tree adding pairs of values that are assumed <= k, 
@@ -114,11 +151,13 @@ struct pb2bv_rewriter::imp {
         // is_le = l_false -  >= 
         //
         template<lbool is_le>
-        expr_ref mk_le_ge(rational const & k) {
+        expr_ref mk_le_ge(rational const & _k) {
+            rational k(_k);
             //sort_args();
+            gcd_reduce<is_le>(m_coeffs, k);
             unsigned sz = m_args.size();
-            expr * const* args = m_args.c_ptr();
-            TRACE("pb", 
+            expr * const* args = m_args.data();
+            TRACE(pb, 
                   for (unsigned i = 0; i < sz; ++i) {
                       tout << m_coeffs[i] << "*" << mk_pp(args[i], m) << " ";
                       if (i + 1 < sz && !m_coeffs[i+1].is_neg()) tout << "+ ";
@@ -161,12 +200,17 @@ struct pb2bv_rewriter::imp {
             }
 
             if (m_pb_solver == "segmented") {
-                expr_ref result(m);
+                throw default_exception("segmented encoding is disabled, use a different value for pb.solver");
                 switch (is_le) {
                 case l_true:  return mk_seg_le(k);
                 case l_false: return mk_seg_ge(k);
                 case l_undef: break;
                 }
+            }
+
+            if (m_pb_solver == "binary_merge") {
+                expr_ref result = binary_merge(is_le, k);
+                if (result) return result;
             }
 
             // fall back to divide and conquer encoding.
@@ -215,10 +259,9 @@ struct pb2bv_rewriter::imp {
                     fmls.push_back(m.mk_eq(bound, es.back()));
                 }
                 return ::mk_and(fmls);
-            default:
-                UNREACHABLE();
-                return expr_ref(m.mk_true(), m);
             }
+            UNREACHABLE();
+            return expr_ref(m);
         }
 
         /**
@@ -233,13 +276,13 @@ struct pb2bv_rewriter::imp {
             rational bound;
             flip(sz, args, args1, _k, bound);
             if (bound.get_unsigned() < k) {
-                return mk_ge_tot(sz, args1.c_ptr(), bound, result);
+                return mk_ge_tot(sz, args1.data(), bound, result);
             }
             if (k > 20) {
                 return false;
             }
             result = m.mk_not(bounded_addition(sz, args, k + 1));
-            TRACE("pb", tout << result << "\n";);
+            TRACE(pb, tout << result << "\n";);
             return true;
         }
 
@@ -251,13 +294,13 @@ struct pb2bv_rewriter::imp {
             rational bound;
             flip(sz, args, args1, _k, bound);
             if (bound.get_unsigned() < k) {
-                return mk_le_tot(sz, args1.c_ptr(), bound, result);
+                return mk_le_tot(sz, args1.data(), bound, result);
             }
             if (k > 20) {
                 return false;
             }
             result = bounded_addition(sz, args, k);
-            TRACE("pb", tout << result << "\n";);
+            TRACE(pb, tout << result << "\n";);
             return true;
         }
 
@@ -280,20 +323,20 @@ struct pb2bv_rewriter::imp {
                 unsigned c = m_coeffs[i].get_unsigned();
                 v.push_back(c >= k ? k : c);
                 e.push_back(args[i]);   
-                es.push_back(e);
-                coeffs.push_back(v);
+                es.push_back(std::move(e));
+                coeffs.push_back(std::move(v));
             }
             while (es.size() > 1) {
                 for (unsigned i = 0; i + 1 < es.size(); i += 2) {
                     expr_ref_vector o(m);
                     unsigned_vector oc;
                     tot_adder(es[i], coeffs[i], es[i + 1], coeffs[i + 1], k, o, oc);
-                    es[i / 2].set(o);
-                    coeffs[i / 2] = oc;
+                    es[i / 2] = std::move(o);
+                    coeffs[i / 2] = std::move(oc);
                 }
                 if ((es.size() % 2) == 1) {
-                    es[es.size() / 2].set(es.back());
-                    coeffs[es.size() / 2] = coeffs.back();
+                    es[es.size() / 2] = std::move(es.back());
+                    coeffs[es.size() / 2] = std::move(coeffs.back());
                 }
                 es.shrink((1 + es.size())/2);
                 coeffs.shrink((1 + coeffs.size())/2);
@@ -366,7 +409,7 @@ struct pb2bv_rewriter::imp {
         rational         m_min_cost;
         vector<rational> m_base;
 
-        void create_basis(vector<rational> const& seq, rational carry_in, rational cost) {
+        void create_basis(vector<rational> const& seq, rational const& carry_in, rational const& cost) {
             if (cost >= m_min_cost) {
                 return;
             }
@@ -405,7 +448,7 @@ struct pb2bv_rewriter::imp {
             rational cost(0);
             create_basis(m_coeffs, rational::zero(), cost);
             m_base = m_min_base;
-            TRACE("pb",
+            TRACE(pb,
                   tout << "Base: ";
                   for (unsigned i = 0; i < m_base.size(); ++i) {
                       tout << m_base[i] << " ";
@@ -421,7 +464,7 @@ struct pb2bv_rewriter::imp {
            \brief Check if 'out mod n >= lim'. 
          */
         expr_ref mod_ge(ptr_vector<expr> const& out, unsigned n, unsigned lim) {
-            TRACE("pb", for (unsigned i = 0; i < out.size(); ++i) tout << mk_pp(out[i], m) << " "; tout << "\n";
+            TRACE(pb, for (unsigned i = 0; i < out.size(); ++i) tout << mk_pp(out[i], m) << " "; tout << "\n";
                   tout << "n:" << n << " lim: " << lim << "\n";);
             if (lim == n) {
                 return expr_ref(m.mk_false(), m);
@@ -458,7 +501,7 @@ struct pb2bv_rewriter::imp {
             result = m.mk_true();
             expr_ref_vector carry(m), new_carry(m);
             m_base.push_back(bound + rational::one());
-            for (rational b_i : m_base) {
+            for (const rational& b_i : m_base) {
                 unsigned B   = b_i.get_unsigned();
                 unsigned d_i = (bound % b_i).get_unsigned();
                 bound = div(bound, b_i);                
@@ -470,18 +513,18 @@ struct pb2bv_rewriter::imp {
                     }
                     coeffs[j] = div(coeffs[j], b_i);
                 }
-                TRACE("pb", tout << "Carry: " << carry << "\n";
+                TRACE(pb, tout << "Carry: " << carry << "\n";
                       for (auto c : coeffs) tout << c << " ";
                       tout << "\n";
                       );
                 ptr_vector<expr> out;
-                m_sort.sorting(carry.size(), carry.c_ptr(), out);
+                m_sort.sorting(carry.size(), carry.data(), out);
                 
                 expr_ref gt = mod_ge(out, B, d_i + 1);
                 expr_ref ge = mod_ge(out, B, d_i);
                 result = mk_and(ge, result);
                 result = mk_or(gt, result);                
-                TRACE("pb", tout << "b: " << b_i << " d: " << d_i << " gt: " << gt << " ge: " << ge << " " << result << "\n";);
+                TRACE(pb, tout << "b: " << b_i << " d: " << d_i << " gt: " << gt << " ge: " << ge << " " << result << "\n";);
 
                 new_carry.reset();
                 for (unsigned j = B - 1; j < out.size(); j += B) {
@@ -490,8 +533,39 @@ struct pb2bv_rewriter::imp {
                 carry.reset();
                 carry.append(new_carry);
             }
-            TRACE("pb", tout << "bound: " << bound << " Carry: " << carry << " result: " << result << "\n";);
+            TRACE(pb, tout << "bound: " << bound << " Carry: " << carry << " result: " << result << "\n";);
             return true;
+        }
+
+        /**
+           \brief binary merge encoding.
+        */
+        expr_ref binary_merge(lbool is_le, rational const& k) {
+            expr_ref result(m);
+            unsigned_vector coeffs;
+            for (rational const& c : m_coeffs) {
+                if (c.is_unsigned()) {
+                    coeffs.push_back(c.get_unsigned());
+                }
+                else {
+                    return result;
+                }
+            }
+            if (!k.is_unsigned()) {
+                return result;
+            }
+            switch (is_le) {
+            case l_true: 
+                result = m_sort.le(k.get_unsigned(), coeffs.size(), coeffs.data(), m_args.data());
+                break;
+            case l_false:
+                result = m_sort.ge(k.get_unsigned(), coeffs.size(), coeffs.data(), m_args.data());
+                break;
+            case l_undef:
+                result = m_sort.eq(k.get_unsigned(), coeffs.size(), coeffs.data(), m_args.data());
+                break;
+            }
+            return result;
         }
 
         /**
@@ -513,7 +587,7 @@ struct pb2bv_rewriter::imp {
         expr_ref mk_seg_le(rational const& k) {
             sort_args();
             unsigned sz = m_args.size();            
-            expr* const* args = m_args.c_ptr();
+            expr* const* args = m_args.data();
 
             // Create sorted entries.
             vector<ptr_vector<expr>> outs;
@@ -530,19 +604,24 @@ struct pb2bv_rewriter::imp {
         }
 
         expr_ref mk_seg_le_rec(vector<ptr_vector<expr>> const& outs, vector<rational> const& coeffs, unsigned i, rational const& k) {
+			if (k.is_neg()) {
+				return expr_ref(m.mk_false(), m);
+			}
+			if (i == outs.size()) {
+				return expr_ref(m.mk_true(), m);
+			}
             rational const& c = coeffs[i];
             ptr_vector<expr> const& out = outs[i];     
-            if (k.is_neg()) {
-                return expr_ref(m.mk_false(), m);
-            }
-            if (i == outs.size()) {
-                return expr_ref(m.mk_true(), m);
-            }
+
             if (i + 1 == outs.size() && k >= rational(out.size()-1)*c) {
                 return expr_ref(m.mk_true(), m);
             }
             expr_ref_vector fmls(m);
-            fmls.push_back(m.mk_implies(m.mk_not(out[0]), mk_seg_le_rec(outs, coeffs, i + 1, k)));
+            {
+                auto _seq621_0 = m.mk_not(out[0]);
+                auto _seq621_1 = mk_seg_le_rec(outs, coeffs, i + 1, k);
+                fmls.push_back(m.mk_implies(_seq621_0, _seq621_1));
+            }
             rational k1;
             for (unsigned j = 0; j + 1 < out.size(); ++j) {
                 k1 = k - rational(j+1)*c;
@@ -550,7 +629,11 @@ struct pb2bv_rewriter::imp {
                     fmls.push_back(m.mk_not(out[j]));
                     break;
                 }
-                fmls.push_back(m.mk_implies(m.mk_and(out[j], m.mk_not(out[j+1])), mk_seg_le_rec(outs, coeffs, i + 1, k1)));
+                {
+                    auto _seq629_0 = m.mk_and(out[j], m.mk_not(out[j + 1]));
+                    auto _seq629_1 = mk_seg_le_rec(outs, coeffs, i + 1, k1);
+                    fmls.push_back(m.mk_implies(_seq629_0, _seq629_1));
+                }
             }
             return ::mk_and(fmls);
         }
@@ -585,7 +668,7 @@ struct pb2bv_rewriter::imp {
                 args1.push_back(mk_not(args[i]));
                 bound += m_coeffs[i];
             }
-            return mk_ge(sz, args1.c_ptr(), bound, result);
+            return mk_ge(sz, args1.data(), bound, result);
         }
 
         bool mk_eq(unsigned sz, expr * const* args, rational const& k, expr_ref& result) {
@@ -609,7 +692,7 @@ struct pb2bv_rewriter::imp {
                 m_coeffs.push_back(pb.get_coeff(f, i));
                 m_args.push_back(args[i]);
             }
-            CTRACE("pb", k.is_neg(), tout << expr_ref(m.mk_app(f, sz, args), m) << "\n";);
+            CTRACE(pb, k.is_neg(), tout << expr_ref(m.mk_app(f, sz, args), m) << "\n";);
             SASSERT(!k.is_neg());
             switch (kind) {
             case OP_PB_GE:
@@ -749,16 +832,17 @@ struct pb2bv_rewriter::imp {
             if (a->get_family_id() == au.get_family_id()) {
                 switch (a->get_decl_kind()) {
                 case OP_ADD:
-                    for (unsigned i = 0; i < sz; ++i) {
-                        if (!is_pb(a->get_arg(i), mul)) return false;
-                    }
+                    for (unsigned i = 0; i < sz; ++i) 
+                        if (!is_pb(a->get_arg(i), mul)) 
+                            return false;
                     return true;
                 case OP_SUB: {
-                    if (!is_pb(a->get_arg(0), mul)) return false;
+                    if (!is_pb(a->get_arg(0), mul)) 
+                        return false;
                     r = -mul;
-                    for (unsigned i = 1; i < sz; ++i) {
-                        if (!is_pb(a->get_arg(1), r)) return false;
-                    }
+                    for (unsigned i = 1; i < sz; ++i) 
+                        if (!is_pb(a->get_arg(i), r)) 
+                            return false;
                     return true;
                 }
                 case OP_UMINUS:
@@ -766,7 +850,7 @@ struct pb2bv_rewriter::imp {
                 case OP_NUM:
                     VERIFY(au.is_numeral(a, r));
                     m_k -= mul * r;
-                    return true;
+                    return m_k.is_int();
                 case OP_MUL:
                     if (sz != 2) {
                         return false;
@@ -784,7 +868,9 @@ struct pb2bv_rewriter::imp {
                     return false;
                 }
             }
-            if (m.is_ite(a, c, th, el) && au.is_numeral(th, r1) && au.is_numeral(el, r2)) {
+            if (m.is_ite(a, c, th, el) && 
+                au.is_numeral(th, r1) && 
+                au.is_numeral(el, r2)) {
                 r1 *= mul;
                 r2 *= mul;
                 if (r1 < r2) {
@@ -797,7 +883,7 @@ struct pb2bv_rewriter::imp {
                     m_coeffs.push_back(r1-r2);
                     m_k -= r2;
                 }
-                return true;
+                return m_k.is_int() && (r1-r2).is_int();
             }
             return false;
         }
@@ -844,7 +930,7 @@ struct pb2bv_rewriter::imp {
             else {
                 result = mk_bv(f, sz, args);
             }
-            TRACE("pb", tout << "full: " << full << " " << expr_ref(m.mk_app(f, sz, args), m) << " " << result << "\n";
+            TRACE(pb, tout << "full: " << full << " " << expr_ref(m.mk_app(f, sz, args), m) << " " << result << "\n";
                   );
             return true;
         }
@@ -866,7 +952,7 @@ struct pb2bv_rewriter::imp {
         pliteral mk_false() { return m.mk_false(); }
         pliteral mk_true() { return m.mk_true(); }
         pliteral mk_max(unsigned n, pliteral const* lits) { return trail(m.mk_or(n, lits)); }
-        pliteral mk_min(unsigned n, pliteral const* lits) { return trail(m.mk_and(n, lits)); }
+        pliteral mk_min(unsigned n, pliteral const* lits) { return trail(m.mk_and(std::span<expr* const>(lits, n))); }
         pliteral mk_not(pliteral a) { if (m.is_not(a,a)) return a; return trail(m.mk_not(a)); }
 
         std::ostream& pp(std::ostream& out, pliteral lit) {  return out << mk_ismt2_pp(lit, m);  }
@@ -891,6 +977,8 @@ struct pb2bv_rewriter::imp {
 
         void set_cardinality_encoding(sorting_network_encoding enc) { m_sort.cfg().m_encoding = enc; }
 
+        void set_min_arity(unsigned ma) { m_min_arity = ma; }
+
     };
 
     struct card2bv_rewriter_cfg : public default_rewriter_cfg {
@@ -899,12 +987,16 @@ struct pb2bv_rewriter::imp {
         bool flat_assoc(func_decl * f) const { return false; }
         br_status reduce_app(func_decl * f, unsigned num, expr * const * args, expr_ref & result, proof_ref & result_pr) {
             result_pr = nullptr;
+            if (m_r.m.proofs_enabled()) {
+                return BR_FAILED;
+            }
             return m_r.mk_app_core(f, num, args, result);
         }
         card2bv_rewriter_cfg(imp& i, ast_manager & m):m_r(i, m) {}
         void keep_cardinality_constraints(bool f) { m_r.keep_cardinality_constraints(f); }
         void set_pb_solver(symbol const& s) { m_r.set_pb_solver(s); }
         void set_cardinality_encoding(sorting_network_encoding enc) { m_r.set_cardinality_encoding(enc); }
+        void set_min_arity(unsigned ma) { m_r.set_min_arity(ma); }
 
     };
     
@@ -917,11 +1009,15 @@ struct pb2bv_rewriter::imp {
         void keep_cardinality_constraints(bool f) { m_cfg.keep_cardinality_constraints(f); }
         void set_pb_solver(symbol const& s) { m_cfg.set_pb_solver(s); }
         void set_cardinality_encoding(sorting_network_encoding e) { m_cfg.set_cardinality_encoding(e); }
+        void set_min_arity(unsigned ma) { m_cfg.set_min_arity(ma); }
         void rewrite(bool full, expr* e, expr_ref& r, proof_ref& p) {
             expr_ref ee(e, m());
+            if (m().proofs_enabled()) {
+                r = e;
+                return;
+            }
             if (m_cfg.m_r.mk_app(full, e, r)) {
                 ee = r;
-                // mp proof?
             }
             (*this)(ee, r, p);
         }
@@ -947,6 +1043,15 @@ struct pb2bv_rewriter::imp {
         return gparams::get_module("sat").get_sym("pb.solver", symbol("solver"));
     }
 
+    unsigned min_arity() const {
+        params_ref const& p = m_params;
+        unsigned r = p.get_uint("sat.pb.min_arity", UINT_MAX);
+        if (r != UINT_MAX) return r;
+        r = p.get_uint("pb.min_arity", UINT_MAX);
+        if (r != UINT_MAX) return r;
+        return gparams::get_module("sat").get_uint("pb.min_arity", 9);
+    }
+
     sorting_network_encoding cardinality_encoding() const {
         symbol enc = m_params.get_sym("cardinality.encoding", symbol());
         if (enc == symbol()) {
@@ -957,7 +1062,7 @@ struct pb2bv_rewriter::imp {
         if (enc == symbol("ordered")) return sorting_network_encoding::ordered_at_most;
         if (enc == symbol("unate")) return sorting_network_encoding::unate_at_most;
         if (enc == symbol("circuit")) return sorting_network_encoding::circuit_at_most;
-        return grouped_at_most;
+        return sorting_network_encoding::grouped_at_most;
     }
     
 
@@ -976,11 +1081,13 @@ struct pb2bv_rewriter::imp {
         m_rw.keep_cardinality_constraints(keep_cardinality());
         m_rw.set_pb_solver(pb_solver());
         m_rw.set_cardinality_encoding(cardinality_encoding());
+        m_rw.set_min_arity(min_arity());
     }
 
     void collect_param_descrs(param_descrs& r) const {
-        r.insert("keep_cardinality_constraints", CPK_BOOL, "(default: false) retain cardinality constraints (don't bit-blast them) and use built-in cardinality solver");
-        r.insert("pb.solver", CPK_SYMBOL, "(default: solver) retain pb constraints (don't bit-blast them) and use built-in pb solver");
+        r.insert("keep_cardinality_constraints", CPK_BOOL, "retain cardinality constraints (don't bit-blast them) and use built-in cardinality solver", "false");
+        r.insert("pb.solver", CPK_SYMBOL, "encoding used for Pseudo-Boolean constraints: totalizer, sorting, binary_merge, bv, solver. PB constraints are retained if set to 'solver'", "solver");
+        r.insert("cardinality.encoding", CPK_SYMBOL, "encoding used for cardinality constraints: grouped, bimander, ordered, unate, circuit", "none");
     }
 
     unsigned get_num_steps() const { return m_rw.get_num_steps(); }

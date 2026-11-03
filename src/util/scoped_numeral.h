@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_NUMERAL_H_
-#define SCOPED_NUMERAL_H_
+#pragma once
 
 template<typename Manager>
 class _scoped_numeral {
@@ -29,7 +28,8 @@ private:
     numeral   m_num;
 public:
     _scoped_numeral(Manager & m):m_manager(m) {}
-    _scoped_numeral(_scoped_numeral const & n):m_manager(n.m_manager) { m().set(m_num, n.m_num); }
+    _scoped_numeral(_scoped_numeral const& n) :m_manager(n.m_manager) { m().set(m_num, n.m_num); }
+    _scoped_numeral(_scoped_numeral && n) noexcept: m_manager(n.m_manager) { m().swap(m_num, n.m_num); }
     ~_scoped_numeral() { m_manager.del(m_num); }
 
     Manager & m() const { return m_manager; }
@@ -60,12 +60,12 @@ public:
         m().reset(m_num);
     }
 
-    void swap(_scoped_numeral & n) {
-        m_num.swap(n.m_num);
+    void swap(_scoped_numeral & n) noexcept {
+        m().swap(m_num, n.m_num);
     }
 
-    void swap(numeral & n) {
-        m_num.swap(n);
+    void swap(numeral & n) noexcept {
+        m().swap(m_num, n);
     }
 
     _scoped_numeral & operator+=(numeral const & a) {
@@ -97,9 +97,18 @@ public:
         return a.m().eq(a, b);
     }
 
+    friend bool operator==(_scoped_numeral const & a, _scoped_numeral const & b) {
+        return a.m().eq(a.m_num, b.m_num);
+    }
+
     friend bool operator!=(_scoped_numeral const & a, numeral const & b) {
         return !a.m().eq(a, b);
     }
+
+    friend bool operator!=(_scoped_numeral const & a, _scoped_numeral const & b) {
+        return !(a == b);
+    }
+    
 
     friend bool operator<(_scoped_numeral const & a, numeral const & b) {
         return a.m().lt(a, b);
@@ -189,5 +198,3 @@ public:
     }
                                  
 };
-
-#endif

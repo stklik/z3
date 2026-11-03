@@ -20,7 +20,8 @@ package com.microsoft.z3;
 /**
  * Array sorts.
  **/
-public class ArraySort extends Sort
+@SuppressWarnings("unchecked")
+public class ArraySort<D extends Sort, R extends Sort> extends Sort
 {
     /**
      * The domain of the array sort.
@@ -28,10 +29,22 @@ public class ArraySort extends Sort
      * @throws Z3Exception on error
      * @return a sort
      **/
-    public Sort getDomain()
+    public D getDomain()
     {
-        return Sort.create(getContext(),
+        return (D) Sort.create(getContext(),
                 Native.getArraySortDomain(getContext().nCtx(), getNativeObject()));
+    }
+
+    /**
+     * The domain of a multi-dimensional array sort.
+     * @throws Z3Exception 
+     * @throws Z3Exception on error
+     * @return a sort
+     **/
+    public D getDomain(int idx)
+    {
+        return (D) Sort.create(getContext(),
+			       Native.getArraySortDomainN(getContext().nCtx(), getNativeObject(), idx));
     }
 
     /**
@@ -40,10 +53,20 @@ public class ArraySort extends Sort
      * @throws Z3Exception on error
      * @return a sort
      **/
-    public Sort getRange()
+    public R getRange()
     {
-        return Sort.create(getContext(),
+        return (R) Sort.create(getContext(),
                 Native.getArraySortRange(getContext().nCtx(), getNativeObject()));
+    }
+
+    /**
+     * The number of dimensions of the array sort.
+     * @throws Z3Exception on error
+     * @return an int
+     **/
+    public int getArity()
+    {
+        return Native.getArrayArity(getContext().nCtx(), getNativeObject());
     }
 
     ArraySort(Context ctx, long obj)
@@ -51,13 +74,13 @@ public class ArraySort extends Sort
         super(ctx, obj);
     }
 
-    ArraySort(Context ctx, Sort domain, Sort range)
+    ArraySort(Context ctx, D domain, R range)
     {
         super(ctx, Native.mkArraySort(ctx.nCtx(), domain.getNativeObject(),
                 range.getNativeObject()));
     }
 
-    ArraySort(Context ctx, Sort[] domains, Sort range)
+    ArraySort(Context ctx, Sort[] domains, R range)
     {
         super(ctx, Native.mkArraySortN(ctx.nCtx(), domains.length, AST.arrayToNative(domains),
                 range.getNativeObject()));

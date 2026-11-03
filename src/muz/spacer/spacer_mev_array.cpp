@@ -25,7 +25,6 @@ Revision History:
 #include"ast/rewriter/datatype_rewriter.h"
 #include"ast/rewriter/array_rewriter.h"
 #include"ast/rewriter/rewriter_def.h"
-#include"util/cooperate.h"
 #include"ast/ast_pp.h"
 #include"model/func_interp.h"
 
@@ -47,7 +46,7 @@ void model_evaluator_array_util::eval_exprs(model& mdl, expr_ref_vector& es) {
 bool model_evaluator_array_util::extract_array_func_interp(model& mdl, expr* a, vector<expr_ref_vector>& stores, expr_ref& else_case) {
     SASSERT(m_array.is_array(a));
 
-    TRACE("model_evaluator", tout << mk_pp(a, m) << "\n";);
+    TRACE(model_evaluator, tout << mk_pp(a, m) << "\n";);
     while (m_array.is_store(a)) {
         expr_ref_vector store(m);
         store.append(to_app(a)->get_num_args()-1, to_app(a)->get_args()+1);
@@ -73,7 +72,7 @@ bool model_evaluator_array_util::extract_array_func_interp(model& mdl, expr* a, 
             store.push_back(fe->get_result());
             for (unsigned j = 0; j < store.size(); ++j) {
                 if (!is_ground(store[j].get())) {
-                    TRACE("model_evaluator", tout << "could not extract array interpretation: " << mk_pp(a, m) << "\n" << mk_pp(store[j].get(), m) << "\n";);
+                    TRACE(model_evaluator, tout << "could not extract array interpretation: " << mk_pp(a, m) << "\n" << mk_pp(store[j].get(), m) << "\n";);
                     return false;
                 }
             }
@@ -82,11 +81,11 @@ bool model_evaluator_array_util::extract_array_func_interp(model& mdl, expr* a, 
         }
         else_case = g->get_else();
         if (!else_case) {
-            TRACE("model_evaluator", tout << "no else case " << mk_pp(a, m) << "\n";);
+            TRACE(model_evaluator, tout << "no else case " << mk_pp(a, m) << "\n";);
             return false;
         }
         if (!is_ground(else_case)) {
-            TRACE("model_evaluator", tout << "non-ground else case " << mk_pp(a, m) << "\n" << mk_pp(else_case, m) << "\n";);
+            TRACE(model_evaluator, tout << "non-ground else case " << mk_pp(a, m) << "\n" << mk_pp(else_case, m) << "\n";);
             return false;
         }
         if (m_array.is_as_array(else_case)) {
@@ -94,16 +93,16 @@ bool model_evaluator_array_util::extract_array_func_interp(model& mdl, expr* a, 
             eval(mdl, else_case, r);
             else_case = r;
         }
-        TRACE("model_evaluator", tout << "else case: " << mk_pp(else_case, m) << "\n";);
+        TRACE(model_evaluator, tout << "else case: " << mk_pp(else_case, m) << "\n";);
         return true;
     }
-    TRACE("model_evaluator", tout << "no translation: " << mk_pp(a, m) << "\n";);
+    TRACE(model_evaluator, tout << "no translation: " << mk_pp(a, m) << "\n";);
 
     return false;
 }
 
 void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, expr* arg2, expr_ref& res) {
-    TRACE("model_evaluator", tout << "array equality: " << mk_pp(e, m) << "\n";);
+    TRACE(model_evaluator, tout << "array equality: " << mk_pp(e, m) << "\n";);
     expr_ref v1(m), v2(m);
     eval (mdl, arg1, v1);
     eval (mdl, arg2, v2);
@@ -111,11 +110,11 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
         res = m.mk_true ();
         return;
     }
-    sort* s = m.get_sort(arg1);
+    sort* s = arg1->get_sort();
     sort* r = get_array_range(s);
     // give up evaluating finite domain/range arrays
     if (!r->is_infinite() && !r->is_very_big() && !s->is_infinite() && !s->is_very_big()) {
-        TRACE("model_evaluator", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+        TRACE(model_evaluator, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
         res.reset ();
         return;
     }
@@ -123,14 +122,14 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
     expr_ref else1(m), else2(m);
     if (!extract_array_func_interp(mdl, v1, store, else1) ||
             !extract_array_func_interp(mdl, v2, store, else2)) {
-        TRACE("model_evaluator", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+        TRACE(model_evaluator, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
         res.reset ();
         return;
     }
 
     if (else1 != else2) {
         if (m.is_value(else1) && m.is_value(else2)) {
-            TRACE("model_evaluator", tout
+            TRACE(model_evaluator, tout
                     << "defaults are different: " << mk_pp(e, m) << " "
                     << mk_pp(else1, m) << " " << mk_pp(else2, m) << "\n";);
             res = m.mk_false ();
@@ -139,7 +138,7 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
             eval_array_eq(mdl, e, else1, else2, res);
         }
         else {
-            TRACE("model_evaluator", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+            TRACE(model_evaluator, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
             res.reset ();
         }
         return;
@@ -152,17 +151,17 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
     for (unsigned i = 0; i < store.size(); ++i) {
         args1.resize(1);
         args2.resize(1);
-        args1.append(store[i].size()-1, store[i].c_ptr());
-        args2.append(store[i].size()-1, store[i].c_ptr());
-        s1 = m_array.mk_select(args1.size(), args1.c_ptr());
-        s2 = m_array.mk_select(args2.size(), args2.c_ptr());
+        args1.append(store[i].size()-1, store[i].data());
+        args2.append(store[i].size()-1, store[i].data());
+        s1 = m_array.mk_select(args1);
+        s2 = m_array.mk_select(args2);
         eval (mdl, s1, w1);
         eval (mdl, s2, w2);
         if (w1 == w2) {
             continue;
         }
         if (m.is_value(w1) && m.is_value(w2)) {
-            TRACE("model_evaluator", tout << "Equality evaluation: " << mk_pp(e, m) << "\n";
+            TRACE(model_evaluator, tout << "Equality evaluation: " << mk_pp(e, m) << "\n";
                     tout << mk_pp(s1, m) << " |-> " << mk_pp(w1, m) << "\n";
                     tout << mk_pp(s2, m) << " |-> " << mk_pp(w2, m) << "\n";);
             res = m.mk_false ();
@@ -174,7 +173,7 @@ void model_evaluator_array_util::eval_array_eq(model& mdl, app* e, expr* arg1, e
             }
         }
         else {
-            TRACE("model_evaluator", tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
+            TRACE(model_evaluator, tout << "equality is unknown: " << mk_pp(e, m) << "\n";);
             res.reset ();
         }
         return;
@@ -199,7 +198,7 @@ void model_evaluator_array_util::eval(model& mdl, expr* e, expr_ref& r, bool mod
         expr_ref_vector args(m);
         expr_ref else_case(m);
         if (extract_array_func_interp(mdl, r, stores, else_case)) {
-            r = m_array.mk_const_array(m.get_sort(e), else_case);
+            r = m_array.mk_const_array(e->get_sort(), else_case);
             while (!stores.empty() && stores.back().back() == else_case) {
                 stores.pop_back();
             }
@@ -208,7 +207,7 @@ void model_evaluator_array_util::eval(model& mdl, expr* e, expr_ref& r, bool mod
                 args.resize(1);
                 args[0] = r;
                 args.append(stores[i]);
-                r = m_array.mk_store(args.size(), args.c_ptr());
+                r = m_array.mk_store(args);
             }
             return;
         }

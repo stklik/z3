@@ -19,8 +19,7 @@ Revision History:
 
 
 --*/
-#ifndef AST_SMT2_PP_H_
-#define AST_SMT2_PP_H_
+#pragma once
 
 #include "ast/format.h"
 #include "util/params.h"
@@ -31,8 +30,11 @@ Revision History:
 #include "ast/dl_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
 #include "ast/datatype_decl_plugin.h"
+#include "ast/finite_set_decl_plugin.h"
 #include "ast/ast_smt_pp.h"
 #include "util/smt2_util.h"
+
+std::string ensure_quote(symbol const& s);
 
 class smt2_pp_environment {
 protected:
@@ -45,13 +47,14 @@ protected:
     format_ns::format * pp_as(format_ns::format * fname, sort * s);
     format_ns::format * pp_signature(format_ns::format * f_name, func_decl * f);
 public:
-    virtual ~smt2_pp_environment() {}
+    virtual ~smt2_pp_environment() = default;
     virtual ast_manager & get_manager() const = 0;
     virtual arith_util & get_autil() = 0;
     virtual bv_util & get_bvutil() = 0;
     virtual array_util & get_arutil() = 0;
     virtual fpa_util & get_futil() = 0;
     virtual seq_util & get_sutil() = 0;
+    virtual finite_set_util &get_fsutil() = 0;
     virtual datalog::dl_decl_util& get_dlutil() = 0;
     virtual datatype_util& get_dtutil() = 0;
     virtual bool uses(symbol const & s) const = 0; 
@@ -79,9 +82,12 @@ class smt2_pp_environment_dbg : public smt2_pp_environment {
     fpa_util      m_futil;
     seq_util      m_sutil;
     datatype_util m_dtutil;
+    finite_set_util m_fsutil;
     datalog::dl_decl_util m_dlutil;
 public:
-    smt2_pp_environment_dbg(ast_manager & m):m_manager(m), m_autil(m), m_bvutil(m), m_arutil(m), m_futil(m), m_sutil(m), m_dtutil(m), m_dlutil(m) {}
+    smt2_pp_environment_dbg(ast_manager &m)
+        : m_manager(m), m_autil(m), m_bvutil(m), m_arutil(m), m_futil(m), m_sutil(m), m_dtutil(m), m_fsutil(m),
+          m_dlutil(m) {}
     ast_manager & get_manager() const override { return m_manager; }
     arith_util & get_autil() override { return m_autil; }
     bv_util & get_bvutil() override { return m_bvutil; }
@@ -90,6 +96,7 @@ public:
     fpa_util & get_futil() override { return m_futil; }
     datalog::dl_decl_util& get_dlutil() override { return m_dlutil; }
     datatype_util& get_dtutil() override { return m_dtutil; }
+    finite_set_util &get_fsutil() override { return m_fsutil; }
     bool uses(symbol const & s) const override { return false; }
 };
 
@@ -103,8 +110,11 @@ std::ostream & ast_smt2_pp(std::ostream & out, expr * n, smt2_pp_environment & e
                            unsigned num_vars = 0, char const * var_prefix = nullptr);
 std::ostream & ast_smt2_pp(std::ostream & out, sort * s, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0);
 std::ostream & ast_smt2_pp(std::ostream & out, func_decl * f, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0, char const* cmd = "declare-fun");
-std::ostream & ast_smt2_pp(std::ostream & out, func_decl * f, expr* e, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0, char const* cmd = "define-fun");
+std::ostream & ast_smt2_pp(std::ostream & out, func_decl * f, expr* e, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0, char const* cmd = "define-fun", bool reverse = false);
+std::ostream & ast_smt2_pp_rev(std::ostream & out, func_decl * f, expr* e, smt2_pp_environment & env, params_ref const & p = params_ref(), unsigned indent = 0, char const* cmd = "define-fun");
 std::ostream & ast_smt2_pp(std::ostream & out, symbol const& s, bool is_skolem, smt2_pp_environment & env, params_ref const& p = params_ref());
+std::ostream & ast_smt2_pp_recdefs(std::ostream & out, vector<std::pair<func_decl*, expr*>> const& funs, smt2_pp_environment & env, params_ref const & p = params_ref());
+
 
 /**
    \brief Internal wrapper (for debugging purposes only)
@@ -121,6 +131,7 @@ struct mk_ismt2_pp {
     mk_ismt2_pp(ast * t, ast_manager & m, unsigned indent = 0, unsigned num_vars = 0, char const * var_prefix = nullptr);
 };
 
+
 std::ostream& operator<<(std::ostream& out, mk_ismt2_pp const & p);
 
 std::ostream& operator<<(std::ostream& out, expr_ref const& e);
@@ -131,7 +142,14 @@ std::ostream& operator<<(std::ostream& out, sort_ref const& e);
 
 std::ostream& operator<<(std::ostream& out, expr_ref_vector const& e);
 std::ostream& operator<<(std::ostream& out, app_ref_vector const& e);
+std::ostream& operator<<(std::ostream& out, var_ref_vector const& e);
 std::ostream& operator<<(std::ostream& out, func_decl_ref_vector const& e);
 std::ostream& operator<<(std::ostream& out, sort_ref_vector const& e);
 
-#endif
+struct mk_ismt2_func {
+    func_decl* m_fn;
+    ast_manager &m;
+    mk_ismt2_func(func_decl* f, ast_manager& m): m_fn(f), m(m) {}
+};
+
+std::ostream& operator<<(std::ostream& out, mk_ismt2_func const& f);

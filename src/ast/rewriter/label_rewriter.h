@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef LABEL_REWRITER_H_
-#define LABEL_REWRITER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter_types.h"
@@ -28,7 +27,6 @@ class label_rewriter : public default_rewriter_cfg {
     rewriter_tpl<label_rewriter> m_rwr;
 public:    
     label_rewriter(ast_manager & m);
-    ~label_rewriter();
 
     br_status reduce_app(func_decl * f, unsigned num, expr * const * args, expr_ref & result, 
                          proof_ref & result_pr);
@@ -38,4 +36,3 @@ public:
     
 };
 
-#endif

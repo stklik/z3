@@ -53,7 +53,7 @@ bool simplify_inj_axiom(ast_manager & m, quantifier * q, expr_ref & result) {
                 unsigned num      = f1->get_num_args();
                 unsigned idx      = UINT_MAX;
                 unsigned num_vars = 1;
-                for (unsigned i = 0; i < num; i++) {
+                for (unsigned i = 0; i < num; ++i) {
                     expr  * c1 = f1->get_arg(i);
                     expr  * c2 = f2->get_arg(i);
                     if (!is_var(c1) && !is_uninterp_const(c1))
@@ -66,6 +66,11 @@ bool simplify_inj_axiom(ast_manager & m, quantifier * q, expr_ref & result) {
                     }
                     else if (c1 == c2 && c1 != var1 && c1 != var2) {
                         if (is_var(c1)) {
+                            // the reconstructed axiom introduces a fresh variable per
+                            // position, so repeated passive variables cannot be handled.
+                            for (unsigned j = 0; j < i; ++j)
+                                if (f1->get_arg(j) == c1)
+                                    return false;
                             ++num_vars;
                         }
                     }
@@ -74,7 +79,8 @@ bool simplify_inj_axiom(ast_manager & m, quantifier * q, expr_ref & result) {
                     }
                 }
                 if (found_vars && !has_free_vars(q)) {
-                    TRACE("inj_axiom", 
+                    (void)num_vars;
+                    TRACE(inj_axiom, 
                           tout << "Cadidate for simplification:\n" << mk_ll_pp(q, m) << mk_pp(app1, m) << "\n" << mk_pp(app2, m) << "\n" <<
                           mk_pp(var1, m) << "\n" << mk_pp(var2, m) << "\nnum_vars: " << num_vars << "\n";);
                     // Building new (optimized) axiom
@@ -85,7 +91,7 @@ bool simplify_inj_axiom(ast_manager & m, quantifier * q, expr_ref & result) {
                     buffer<symbol>   names;
                     
                     expr * var            = nullptr;
-                    for (unsigned i = 0; i < num; i++) {
+                    for (unsigned i = 0; i < num; ++i) {
                         expr * c = f1->get_arg(i);
                         if (is_var(c)) {
                             names.push_back(symbol(i));
@@ -107,17 +113,17 @@ bool simplify_inj_axiom(ast_manager & m, quantifier * q, expr_ref & result) {
                         }
                     }
                     SASSERT(var != 0);
-                    app * f    = m.mk_app(decl, f_args.size(), f_args.c_ptr());
+                    app * f    = m.mk_app(decl, f_args.size(), f_args.data());
 
                     ptr_vector<sort>  domain;
                     inv_vars.push_back(f);
                     for (unsigned i = 0; i < inv_vars.size(); ++i) {
-                        domain.push_back(m.get_sort(inv_vars[i]));
+                        domain.push_back(inv_vars[i]->get_sort());
                     }
                     sort * d              = decl->get_domain(idx);
-                    func_decl * inv_decl  = m.mk_fresh_func_decl("inj", domain.size(), domain.c_ptr(), d);
+                    func_decl * inv_decl  = m.mk_fresh_func_decl("inj", domain.size(), domain.data(), d);
                     
-                    expr * proj = m.mk_app(inv_decl, inv_vars.size(), inv_vars.c_ptr());
+                    expr * proj = m.mk_app(inv_decl, inv_vars.size(), inv_vars.data());
                     expr * eq   = m.mk_eq(proj, var);
                     expr * p    = m.mk_pattern(f);
                     
@@ -125,9 +131,9 @@ bool simplify_inj_axiom(ast_manager & m, quantifier * q, expr_ref & result) {
                     // Remark: the sort of the var 0 must be in the last position.
                     std::reverse(decls.begin(), decls.end());
                     
-                    result = m.mk_forall(decls.size(), decls.c_ptr(), names.c_ptr(), eq,
+                    result = m.mk_forall(decls.size(), decls.data(), names.data(), eq,
                                          0, symbol(), symbol(), 1, &p);
-                    TRACE("inj_axiom", tout << "new axiom:\n" << mk_pp(result, m) << "\n";);
+                    TRACE(inj_axiom, tout << "new axiom:\n" << mk_pp(result, m) << "\n";);
                     SASSERT(is_well_sorted(m, result));
                     return true;
                 }

@@ -17,8 +17,7 @@ Revision History:
 
 --*/
 
-#ifndef _SPACER_MBC_H_
-#define _SPACER_MBC_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -35,11 +34,10 @@ public:
     typedef obj_map<func_decl, unsigned> partition_map;
 
     /**
-       \Brief Model Based Cartesian projection of lits
+       \brief Model Based Cartesian projection of lits
      */
     void operator()(const partition_map &pmap, expr_ref_vector &lits, model &mdl,
                     vector<expr_ref_vector> &res);
 };
 
 }
-#endif

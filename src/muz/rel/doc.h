@@ -20,13 +20,12 @@ Revision History:
 
 --*/
 
-#ifndef DOC_H_
-#define DOC_H_
+#pragma once
 
-#include "muz/rel/tbv.h"
+#include "util/tbv.h"
 #include "util/union_find.h"
 #include "util/buffer.h"
-
+#include "ast/ast.h"
 
 class doc;
 template<typename M, typename T> class union_bvec;
@@ -102,6 +101,8 @@ private:
     void project_rename(expr_ref& fml, bit_vector const& to_delete);
     void project_expand(expr_ref& fml, bit_vector const& to_delete);
     expr_ref to_formula(ast_manager& m, doc const& src);
+    expr_ref to_formula(ast_manager& m, tbv const& src);
+    expr_ref mk_var(ast_manager& m, unsigned i);
     void check_equiv(ast_manager& m, expr* fml1, expr* fml2);
 };
 
@@ -389,5 +390,4 @@ public:
     operator bool() const { return d != nullptr; }
 };
 
-#endif /* DOC_H_ */
 

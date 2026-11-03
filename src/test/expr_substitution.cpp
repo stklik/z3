@@ -5,7 +5,7 @@ Copyright (c) 2015 Microsoft Corporation
 --*/
 
 #include "ast/expr_substitution.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "ast/substitution/substitution.h"
 #include "ast/substitution/unifier.h"
 #include "ast/bv_decl_plugin.h"
@@ -13,12 +13,10 @@ Copyright (c) 2015 Microsoft Corporation
 #include "ast/arith_decl_plugin.h"
 #include "ast/reg_decl_plugins.h"
 #include "ast/rewriter/th_rewriter.h"
+#include <iostream>
 
 expr* mk_bv_xor(bv_util& bv, expr* a, expr* b) {
-    expr* args[2];
-    args[0] = a;
-    args[1] = b;
-    return bv.mk_bv_xor(2, args);
+    return bv.mk_bv_xor({a, b});
 }
 
 expr* mk_bv_and(bv_util& bv, expr* a, expr* b) {
@@ -40,7 +38,11 @@ void tst_expr_substitution() {
     expr_ref   new_a(m);
     proof_ref  pr(m);
     x = m.mk_const(symbol("x"), bv.mk_sort(8));
-    a = mk_bv_and(bv, mk_bv_xor(bv, x,bv.mk_numeral(8,8)), mk_bv_xor(bv,x,x));
+    {
+        expr_ref rhs(mk_bv_xor(bv, x, bv.mk_numeral(8, 8)), m);
+        expr_ref third(mk_bv_xor(bv, x, x), m);
+        a = mk_bv_and(bv, rhs, third);
+    }
     b = x;
     c = bv.mk_bv_sub(x, bv.mk_numeral(4, 8));
 

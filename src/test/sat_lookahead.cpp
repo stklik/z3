@@ -3,9 +3,10 @@
 #include "util/statistics.h"
 #include "sat/sat_lookahead.h"
 #include "sat/dimacs.h"
+#include <iostream>
 
 static void display_model(sat::model const & m) {
-    for (unsigned i = 1; i < m.size(); i++) {
+    for (unsigned i = 1; i < m.size(); ++i) {
         switch (m[i]) {
         case l_false: std::cout << "-" << i << " ";  break;
         case l_undef: break;
@@ -34,7 +35,8 @@ void tst_sat_lookahead(char ** argv, int argc, int& i) {
             std::cerr << "(error \"failed to open file '" << file_name << "'\")" << std::endl;
             exit(ERR_OPEN_FILE);
         }
-        parse_dimacs(in, solver);
+        if (!parse_dimacs(in, std::cerr, solver))
+            return;
     }
    
     sat::lookahead lh(solver);

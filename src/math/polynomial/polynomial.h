@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef POLYNOMIAL_H_
-#define POLYNOMIAL_H_
+#pragma once
 
 #include "util/mpz.h"
 #include "util/rational.h"
@@ -27,18 +26,22 @@ Notes:
 #include "util/scoped_numeral.h"
 #include "util/scoped_numeral_vector.h"
 #include "util/params.h"
+#include "util/gparams.h"
 #include "util/mpbqi.h"
 #include "util/rlimit.h"
 #include "util/lbool.h"
+#include "util/sign.h"
 
 class small_object_allocator;
 
 namespace algebraic_numbers {
     class anum;
     class manager;
-};
+}
 
 namespace polynomial {
+    constexpr unsigned default_factor_num_primes = 4;
+
     typedef unsigned var;
     const var null_var = UINT_MAX;
     typedef svector<var> var_vector;
@@ -71,6 +74,7 @@ namespace polynomial {
     template<typename ValManager, typename Value = typename ValManager::numeral>
     class var2value {
     public:
+        virtual ~var2value() = default;
         virtual ValManager & m() const = 0;
         virtual bool contains(var x) const = 0;
         virtual Value const & operator()(var x) const = 0;
@@ -92,14 +96,14 @@ namespace polynomial {
         factor_params();
         factor_params(unsigned max_p, unsigned p_trials, unsigned max_search_size);
         void updt_params(params_ref const & p);
-        /*
-          REG_MODULE_PARAMS('factor', polynomial::factor_params::get_param_descrs')
-        */
         static void get_param_descrs(param_descrs & r);
     };
 
+    Z3_REGISTER_MODULE_PARAMS(factor, "factor", factor_params::get_param_descrs, nullptr);
+
     struct display_var_proc {
         virtual std::ostream& operator()(std::ostream & out, var x) const { return out << "x" << x; }
+        virtual ~display_var_proc() = default;
     };
 
     class polynomial;
@@ -131,12 +135,12 @@ namespace polynomial {
             ~factors();
             
             /**
-               \brief Numer of distinct factors (not counting multiplicities).
+               \brief Number of distinct factors (not counting multiplicities).
             */
             unsigned distinct_factors() const { return m_factors.size(); }
             
             /**
-               \brief Numer of distinct factors (counting multiplicities).
+               \brief Number of distinct factors (counting multiplicities).
             */
             unsigned total_factors() const { return m_total_factors; }
 
@@ -228,6 +232,7 @@ namespace polynomial {
             del_eh * m_next;
         public:
             del_eh():m_next(nullptr) {}
+            virtual ~del_eh() = default;
             virtual void operator()(polynomial * p) = 0;
         };
 
@@ -278,6 +283,13 @@ namespace polynomial {
         */
         static unsigned id(polynomial const * p);
         
+
+        /**
+           \brief Normalize coefficients by dividing by their gcd
+        */
+        enum ineq_type { EQ, LT, GT };
+        void gcd_simplify(polynomial_ref& p, ineq_type t);
+
         /**
            \brief Return true if \c m is the unit monomial.
         */
@@ -644,7 +656,7 @@ namespace polynomial {
         /**
            \brief Return true if m2 divides m1, and store the result in r.
         */
-        bool div(monomial const * m1, monomial const * m2, monomial * & r);
+        bool div(monomial const * m1, monomial const * m2, monomial_ref & r);
 
         /**
            \brief Newton interpolation algorithm for multivariate polynomials.
@@ -912,6 +924,13 @@ namespace polynomial {
         */
         bool is_nonneg(polynomial const * p);
 
+
+        /**
+           \brief Return true if p is always greater or equal to q.
+           This is an incomplete check
+        */
+        bool ge(polynomial const* p, polynomial const* q);
+
         /**
            \brief Make sure the monomials in p are sorted using lexicographical order.
            Remark: the maximal monomial is at position 0.
@@ -922,6 +941,9 @@ namespace polynomial {
            \brief Collect variables that occur in p into xs
         */
         void vars(polynomial const * p, var_vector & xs);
+        void vars_incremental(polynomial const * p, var_vector & xs);
+        void begin_vars_incremental();
+        void end_vars_incremental(var_vector & xs);
 
         /**
            \brief Evaluate polynomial p using the assignment [x_1 -> v_1, ..., x_n -> v_n].
@@ -975,7 +997,7 @@ namespace polynomial {
         */
         polynomial * to_polynomial(unsigned sz, numeral const * p, var x);
         polynomial * to_polynomial(numeral_vector const & p, var x) {
-            return to_polynomial(p.size(), p.c_ptr(), x);
+            return to_polynomial(p.size(), p.data(), x);
         }
        
         /**
@@ -997,7 +1019,7 @@ namespace polynomial {
         void translate(polynomial const * p, unsigned xs_sz, var const * xs, numeral const * vs, polynomial_ref & r);
         void translate(polynomial const * p, var_vector const & xs, numeral_vector const & vs, polynomial_ref & r) {
             SASSERT(xs.size() == vs.size());
-            translate(p, xs.size(), xs.c_ptr(), vs.c_ptr(), r); 
+            translate(p, xs.size(), xs.data(), vs.data(), r); 
         }
 
         /**
@@ -1010,15 +1032,14 @@ namespace polynomial {
         */
         void exact_pseudo_division_mod_d(polynomial const * p, polynomial const * q, var x, var2degree const & x2d, polynomial_ref & Q, polynomial_ref & R);
 
-        void display(std::ostream & out, monomial const * m, display_var_proc const & proc = display_var_proc(), bool use_star = true) const;
+        std::ostream& display(std::ostream & out, monomial const * m, display_var_proc const & proc = display_var_proc(), bool use_star = true) const;
 
-        void display(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc(), bool use_star = false) const;
+        std::ostream& display(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc(), bool use_star = false) const;
 
-        void display_smt2(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc()) const;
+        std::ostream& display_smt2(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc()) const;
 
         friend std::ostream & operator<<(std::ostream & out, polynomial_ref const & p) {
-            p.m().display(out, p);
-            return out;
+            return p.m().display(out, p);
         }
     };
 
@@ -1046,7 +1067,7 @@ namespace polynomial {
         scoped_set_zp(manager & _m, uint64_t p):m(_m), m_modular(m.modular()), m_p(m.m()) {  m_p = m.p(); m.set_zp(p); }
         ~scoped_set_zp() {  if (m_modular) m.set_zp(m_p); else m.set_z(); }
     };
-};
+}
 
 typedef polynomial::polynomial_ref           polynomial_ref;
 typedef polynomial::polynomial_ref_vector    polynomial_ref_vector;
@@ -1407,5 +1428,3 @@ inline void factor(polynomial_ref const & p, polynomial::factors & r, polynomial
 }
 
 std::ostream & operator<<(std::ostream & out, polynomial_ref_vector const & seq);
-
-#endif

@@ -4,6 +4,8 @@ Copyright (c) 2015 Microsoft Corporation
 
 --*/
 
+#include <iostream>
+#include <sstream>
 #include<vector>
 #include"z3++.h"
 
@@ -304,7 +306,7 @@ void error_example() {
         // The next call fails because x is a Boolean.
         expr n = x + 1;
     }
-    catch (exception ex) {
+    catch (exception & ex) {
         std::cout << "failed: " << ex << "\n";
     }
 
@@ -312,7 +314,7 @@ void error_example() {
     try {
         expr arg = to_expr(c, Z3_get_app_arg(c, x, 0));
     }
-    catch (exception ex) {
+    catch (exception & ex) {
         std::cout << "failed: " << ex << "\n";
     }
 }
@@ -570,7 +572,7 @@ void tactic_example3() {
       - The choice combinator t | s first applies t to the given goal, if it fails then returns the result of s applied to the given goal.      
       - repeat(t) Keep applying the given tactic until no subgoal is modified by it.
       - repeat(t, n) Keep applying the given tactic until no subgoal is modified by it, or the number of iterations is greater than n.
-      - try_for(t, ms) Apply tactic t to the input goal, if it does not return in ms millisenconds, it fails.
+      - try_for(t, ms) Apply tactic t to the input goal, if it does not return in ms milliseconds, it fails.
       - with(t, params) Apply the given tactic using the given parameters.      
     */
     std::cout << "tactic example 3\n";
@@ -737,7 +739,7 @@ void tactic_example8() {
     try {
         t(g);
     }
-    catch (exception) {
+    catch (exception&) {
         std::cout << "tactic failed...\n";
     }
     std::cout << "trying again...\n";
@@ -802,11 +804,19 @@ void tactic_qe() {
     std::cout << s.get_model() << "\n";
 }
 
-void visit(expr const & e) {
+void visit(std::vector<bool>& visited, expr const & e) {
+    if (visited.size() <= e.id()) {
+        visited.resize(e.id()+1, false);
+    }
+    if (visited[e.id()]) {
+        return;
+    }
+    visited[e.id()] = true;
+
     if (e.is_app()) {
         unsigned num = e.num_args();
         for (unsigned i = 0; i < num; i++) {
-            visit(e.arg(i));
+            visit(visited, e.arg(i));
         }
         // do something
         // Example: print the visited expression
@@ -814,7 +824,7 @@ void visit(expr const & e) {
         std::cout << "application of " << f.name() << ": " << e << "\n";
     }
     else if (e.is_quantifier()) {
-        visit(e.body());
+        visit(visited, e.body());
         // do something
     }
     else { 
@@ -827,12 +837,26 @@ void tst_visit() {
     std::cout << "visit example\n";
     context c;
 
+    // only one of the occurrences of x*x is visited 
+    // because they are the same subterms
     expr x = c.int_const("x");
     expr y = c.int_const("y");
     expr z = c.int_const("z");
-    expr f = x*x - y*y >= 0;
-    
-    visit(f);
+    expr f = x*x + x*x - y*y >= 0;
+    std::vector<bool> visited;
+    visit(visited, f);
+}
+
+void tst_numeral() {
+    std::cout << "numeral example\n";
+    context c;
+    expr x = c.real_val("1/3");
+    double d = 0;
+    if (!x.is_numeral(d)) {
+        std::cout << x << " is not recognized as a numeral\n";
+        return;
+    }
+    std::cout << x << " is " << d << "\n";
 }
 
 void incremental_example1() {
@@ -906,8 +930,8 @@ void enum_sort_example() {
     sort s = ctx.enumeration_sort("enumT", 3, enum_names, enum_consts, enum_testers);
     // enum_consts[0] is a func_decl of arity 0.
     // we convert it to an expression using the operator()
-    expr a = enum_consts[0]();
-    expr b = enum_consts[1]();
+    expr a = enum_consts[0u]();
+    expr b = enum_consts[1u]();
     expr x = ctx.constant("x", s);
     expr test = (x==a) && (x==b);
     std::cout << "1: " << test << std::endl;
@@ -931,6 +955,147 @@ void tuple_example() {
     func_decl pair2 = ctx.tuple_sort("pair2", 2, names, sorts, projs);
     
     std::cout << pair2 << "\n";
+}
+
+void datatype_example() {
+    std::cout << "datatype example\n";
+    context ctx;
+    constructors cs(ctx);
+    symbol ilist = ctx.str_symbol("ilist");
+    symbol accs[2] = { ctx.str_symbol("hd"), ctx.str_symbol("tl") };
+    sort sorts[2] = { ctx.int_sort(), ctx.datatype_sort(ilist) };
+    cs.add(ctx.str_symbol("nil"), ctx.str_symbol("is-nil"), 0, nullptr, nullptr);
+    cs.add(ctx.str_symbol("cons"), ctx.str_symbol("is-cons"), 2, accs, sorts);
+    sort ls = ctx.datatype(ilist, cs);
+    std::cout << ls << "\n";
+    func_decl nil(ctx), is_nil(ctx);
+    func_decl_vector nil_acc(ctx);
+    cs.query(0, nil, is_nil, nil_acc);
+    func_decl cons(ctx), is_cons(ctx);
+    func_decl_vector cons_acc(ctx);
+    cs.query(1, cons, is_cons, cons_acc);
+    std::cout << nil << " " << is_nil << " " << nil_acc << "\n";
+    std::cout << cons << " " << is_cons << " " << cons_acc << "\n";
+
+    symbol tree = ctx.str_symbol("tree");
+    symbol tlist = ctx.str_symbol("tree_list");
+    symbol accs1[2] = { ctx.str_symbol("left"), ctx.str_symbol("right") };
+    symbol accs2[2] = { ctx.str_symbol("hd"), ctx.str_symbol("tail") };
+    sort sorts1[2] = { ctx.datatype_sort(tlist), ctx.datatype_sort(tlist) };
+    sort sorts2[2] = { ctx.int_sort(), ctx.datatype_sort(tree) };
+    constructors cs1(ctx), cs2(ctx);
+    cs1.add(ctx.str_symbol("tnil"), ctx.str_symbol("is-tnil"), 0, nullptr, nullptr);
+    cs1.add(ctx.str_symbol("tnode"), ctx.str_symbol("is-tnode"), 2, accs1, sorts1);
+    constructor_list cl1(cs1);
+    cs2.add(ctx.str_symbol("lnil"), ctx.str_symbol("is-lnil"), 0, nullptr, nullptr);
+    cs2.add(ctx.str_symbol("lcons"), ctx.str_symbol("is-lcons"), 2, accs2, sorts2);
+    constructor_list cl2(cs2);
+    symbol names[2] = { tree, tlist };
+    constructor_list* cl[2] = { &cl1, &cl2 };
+    sort_vector dsorts = ctx.datatypes(2, names, cl);
+    std::cout << dsorts << "\n";
+    cs1.query(0, nil, is_nil, nil_acc);
+    cs1.query(1, cons, is_cons, cons_acc);
+    std::cout << nil << " " << is_nil << " " << nil_acc << "\n";
+    std::cout << cons << " " << is_cons << " " << cons_acc << "\n";
+
+    cs2.query(0, nil, is_nil, nil_acc);
+    cs2.query(1, cons, is_cons, cons_acc);
+    std::cout << nil << " " << is_nil << " " << nil_acc << "\n";
+    std::cout << cons << " " << is_cons << " " << cons_acc << "\n";
+
+}
+
+void polymorphic_datatype_example() {
+    std::cout << "polymorphic datatype example\n";
+    context ctx;
+
+    // Create type variables alpha and beta for polymorphic datatype using C API
+    Z3_symbol alpha_sym = Z3_mk_string_symbol(ctx, "alpha");
+    Z3_symbol beta_sym = Z3_mk_string_symbol(ctx, "beta");
+    sort alpha(ctx, Z3_mk_type_variable(ctx, alpha_sym));
+    sort beta(ctx, Z3_mk_type_variable(ctx, beta_sym));
+    
+    std::cout << "Type variables: " << alpha << ", " << beta << "\n";
+
+    // Define parametric Pair datatype with constructor mk-pair(first: alpha, second: beta)
+    symbol pair_name = ctx.str_symbol("Pair");
+    symbol mk_pair_name = ctx.str_symbol("mk-pair");
+    symbol is_pair_name = ctx.str_symbol("is-pair");
+    symbol first_name = ctx.str_symbol("first");
+    symbol second_name = ctx.str_symbol("second");
+ 
+    symbol field_names[2] = {first_name, second_name};
+    sort _field_sorts[2] = {alpha, beta};
+    sort_vector field_sorts(ctx);
+    field_sorts.push_back(alpha);  // Use type variables
+    field_sorts.push_back(beta);   // Use type variables   
+    
+    constructors cs(ctx);
+    cs.add(mk_pair_name, is_pair_name, 2, field_names, _field_sorts);
+    sort pair = ctx.datatype(pair_name, field_sorts, cs);
+
+    std::cout << "Created parametric datatype: " << pair << "\n";
+    
+    // Instantiate Pair with concrete types: (Pair Int Real)
+    sort_vector params_int_real(ctx);
+    params_int_real.push_back(ctx.int_sort());
+    params_int_real.push_back(ctx.real_sort());
+    sort pair_int_real = ctx.datatype_sort(pair_name, params_int_real);
+    
+    std::cout << "Instantiated with Int and Real: " << pair_int_real << "\n";
+    
+    // Instantiate Pair with concrete types: (Pair Real Int)
+    sort_vector params_real_int(ctx);
+    params_real_int.push_back(ctx.real_sort());
+    params_real_int.push_back(ctx.int_sort());
+    sort pair_real_int = ctx.datatype_sort(pair_name, params_real_int);
+    
+    std::cout << "Instantiated with Real and Int: " << pair_real_int << "\n";
+    
+    // Get constructors and accessors for (Pair Int Real) using C API
+    func_decl mk_pair_ir(ctx, Z3_get_datatype_sort_constructor(ctx, pair_int_real, 0));
+    func_decl first_ir(ctx, Z3_get_datatype_sort_constructor_accessor(ctx, pair_int_real, 0, 0));
+    func_decl second_ir(ctx, Z3_get_datatype_sort_constructor_accessor(ctx, pair_int_real, 0, 1));
+    
+    std::cout << "Constructors and accessors for (Pair Int Real):\n";
+    std::cout << "  Constructor: " << mk_pair_ir << "\n";
+    std::cout << "  first accessor: " << first_ir << "\n";
+    std::cout << "  second accessor: " << second_ir << "\n";
+    
+    // Get constructors and accessors for (Pair Real Int) using C API
+    func_decl mk_pair_ri(ctx, Z3_get_datatype_sort_constructor(ctx, pair_real_int, 0));
+    func_decl first_ri(ctx, Z3_get_datatype_sort_constructor_accessor(ctx, pair_real_int, 0, 0));
+    func_decl second_ri(ctx, Z3_get_datatype_sort_constructor_accessor(ctx, pair_real_int, 0, 1));
+    
+    std::cout << "Constructors and accessors for (Pair Real Int):\n";
+    std::cout << "  Constructor: " << mk_pair_ri << "\n";
+    std::cout << "  first accessor: " << first_ri << "\n";
+    std::cout << "  second accessor: " << second_ri << "\n";
+    
+    // Create constants of these types
+    expr p1 = ctx.constant("p1", pair_int_real);
+    expr p2 = ctx.constant("p2", pair_real_int);
+    
+    std::cout << "Created constants: " << p1 << " : " << p1.get_sort() << "\n";
+    std::cout << "                   " << p2 << " : " << p2.get_sort() << "\n";
+    
+    // Create expressions using accessors
+    expr first_p1 = first_ir(p1);   // first(p1) has type Int
+    expr second_p2 = second_ri(p2); // second(p2) has type Int
+    
+    std::cout << "first(p1) = " << first_p1 << " : " << first_p1.get_sort() << "\n";
+    std::cout << "second(p2) = " << second_p2 << " : " << second_p2.get_sort() << "\n";
+    
+    // Create equality term: (= (first p1) (second p2))
+    expr eq = first_p1 == second_p2;
+    std::cout << "Equality term: " << eq << "\n";
+    
+    // Verify both sides have the same type (Int)
+    assert(first_p1.get_sort().id() == ctx.int_sort().id());
+    assert(second_p2.get_sort().id() == ctx.int_sort().id());
+    
+    std::cout << "Successfully created and verified polymorphic datatypes!\n";
 }
 
 void expr_vector_example() {
@@ -1020,6 +1185,29 @@ void opt_example() {
             break;
         }
     }
+}
+
+/**
+ * translate from one optimization context to another.
+ */
+void opt_translate_example() {
+    context c1, c2;
+    optimize o1(c1);
+    expr x = c1.int_const("x");
+    expr y = c1.int_const("y");
+    o1.add(10 >= x && x >= 0);
+    o1.add(10 >= y && y >= 0);
+    o1.add(x + y <= 11);
+    optimize::handle h1 = o1.maximize(x);
+    optimize::handle h2 = o1.maximize(y);
+    (void)h1;
+    (void)h2;
+    optimize o2(c2, o1);
+    expr z = c2.int_const("z");
+    expr x2 = c2.int_const("x");
+    o2.add(x2 + z == 2);
+    o2.minimize(z);
+    std::cout << o2 << "\n";
 }
 
 void extract_example() {
@@ -1155,6 +1343,14 @@ static void parse_example() {
     // expr b = c.parse_string("(benchmark tst :extrafuns ((x Int) (y Int)) :formula (> x y) :formula (> x 0))");
 }
 
+static void parse_string() {
+    std::cout << "parse string\n";
+    z3::context c;
+    z3::solver s(c);
+    s.from_string("(declare-const x Int)(assert (> x 10))");
+    std::cout << s.check() << "\n";
+}
+
 void mk_model_example() {
     context c;
 
@@ -1179,10 +1375,113 @@ void mk_model_example() {
     std::cout << m.eval(a + b < 2)<< std::endl;
 }
 
+void recfun_example() {
+    std::cout << "recfun example\n";
+    context c;    
+    expr x = c.int_const("x");
+    expr y = c.int_const("y");
+    expr b = c.bool_const("b");
+    sort I = c.int_sort();
+    sort B = c.bool_sort();    
+    func_decl f = recfun("f", I, B, I);
+    expr_vector args(c);
+    args.push_back(x); args.push_back(b);
+    c.recdef(f, args, ite(b, x, f(x + 1, !b)));
+    prove(f(x,c.bool_val(false)) > x);
+}
+
+static void string_values() {
+    context c;
+    std::cout << "string_values\n";
+    expr s = c.string_val("abc\n\n\0\0", 7);
+    std::cout << s << "\n";
+    std::string s1 = s.get_string();
+    std::cout << s1 << "\n";
+    std::u32string buffer = s.get_u32string();
+    for (unsigned ch : buffer)
+        std::cout << "char: " << ch << "\n";
+}
+
+expr MakeStringConstant(context* context, std::string value) {
+    return context->string_val(value.c_str());
+}
+
+expr MakeStringFunction(context* c, std::string s) {
+    sort sort = c->string_sort();
+    symbol name = c->str_symbol(s.c_str());
+    return c->constant(name, sort);
+}
+
+static void string_issue_2298() {
+    context c;
+    solver s(c);
+    s.push();
+    expr func1 = MakeStringFunction(&c, "func1");
+    expr func2 = MakeStringFunction(&c, "func2");
+    
+    expr abc = MakeStringConstant(&c, "abc");
+    expr cde = MakeStringConstant(&c, "cde");
+    
+    expr length = func1.length();
+    expr five = c.int_val(5);
+    
+    s.add(func2 == abc || func1 == cde);
+    s.add(func2 == abc || func2 == cde);
+    s.add(length <= five);
+    
+    s.check();
+    s.pop();
+}
+
+void iterate_args() {
+    std::cout << "iterate arguments\n";
+    context c;
+    expr x      = c.int_const("x");
+    expr y      = c.int_const("y");
+    sort I      = c.int_sort();
+    func_decl g = function("g", I, I, I);
+    expr e = g(x, y);
+    std::cout << "expression " << e << "\n";
+    for (expr arg : e)
+        std::cout << "arg " << arg << "\n";
+
+}
+
+void complex_example() {
+    context c;
+    expr z = c.complex_const("z");
+    expr value = c.complex_val("1/2", "2");
+    expr square = c.complex_val("-15/4", "2");
+    solver s(c);
+    s.add(z == value);
+    expr re = real_part(z);
+    expr im = imag_part(z);
+    expr half = c.real_val("1/2");
+    expr_vector failures(c);
+    failures.push_back(z * z != square);
+    failures.push_back(re != half);
+    failures.push_back(im != 2);
+    failures.push_back(z / z != 1);
+    failures.push_back(z + 1 - 1 != z);
+    failures.push_back(-z + z != 0);
+    s.add(mk_or(failures));
+    if (!z.is_complex() || !z.get_sort().is_complex() || s.check() != unsat)
+        throw exception("Complex arithmetic or projections failed");
+    s.reset();
+    s.add(z * z == -1);
+    if (s.check() != sat || !s.get_model().eval(z).is_complex())
+        throw exception("Complex model reconstruction failed");
+    expr symbolic_re = c.real_const("re");
+    expr symbolic_im = c.int_const("im");
+    expr pair = complex(symbolic_re, symbolic_im);
+    if (!(real_part(pair) == symbolic_re).simplify().is_true())
+        throw exception("Complex symbolic construction failed");
+}
 
 int main() {
 
     try {
+        complex_example();
         demorgan(); std::cout << "\n";
         find_model_example1(); std::cout << "\n";
         prove_example1(); std::cout << "\n";
@@ -1212,25 +1511,35 @@ int main() {
         tactic_example9(); std::cout << "\n";
         tactic_qe(); std::cout << "\n";
         tst_visit(); std::cout << "\n";
+        tst_numeral(); std::cout << "\n";
         incremental_example1(); std::cout << "\n";
         incremental_example2(); std::cout << "\n";
         incremental_example3(); std::cout << "\n";
         enum_sort_example(); std::cout << "\n";
         tuple_example(); std::cout << "\n";
+        datatype_example(); std::cout << "\n";
+        polymorphic_datatype_example(); std::cout << "\n";
         expr_vector_example(); std::cout << "\n";
         exists_expr_vector_example(); std::cout << "\n";
         substitute_example(); std::cout << "\n";
         opt_example(); std::cout << "\n";
+        opt_translate_example(); std::cout << "\n";
         extract_example(); std::cout << "\n";
         param_descrs_example(); std::cout << "\n";
         sudoku_example(); std::cout << "\n";
         consequence_example(); std::cout << "\n";
         parse_example(); std::cout << "\n";
+        parse_string(); std::cout << "\n";
         mk_model_example(); std::cout << "\n";
+        recfun_example(); std::cout << "\n";
+        string_values(); std::cout << "\n";
+        string_issue_2298(); std::cout << "\n";
+	iterate_args(); std::cout << "\n";
         std::cout << "done\n";
     }
     catch (exception & ex) {
         std::cout << "unexpected error: " << ex << "\n";
     }
+    Z3_finalize_memory();
     return 0;
 }

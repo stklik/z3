@@ -15,8 +15,7 @@ Author:
 Notes:
 
 --*/
-#ifndef PARAMETRIC_CMD_H_
-#define PARAMETRIC_CMD_H_
+#pragma once
 
 #include "util/params.h"
 #include "util/symbol.h"
@@ -35,6 +34,7 @@ public:
     virtual void init_pdescrs(cmd_context & ctx, param_descrs & d) = 0;
     param_descrs const & pdescrs(cmd_context & ctx) const;
     params_ref const & ps() const { return m_params; }
+    void reset_params() { m_params.reset(); }
     virtual char const * get_main_descr() const = 0;
     char const * get_descr(cmd_context & ctx) const override;
     unsigned get_arity() const override { return VAR_ARITY; }
@@ -75,6 +75,5 @@ public:
     void set_next_arg(cmd_context & ctx, sexpr * n) override { UNREACHABLE(); }
 };
 
-#endif
 
 

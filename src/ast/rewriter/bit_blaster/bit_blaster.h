@@ -16,14 +16,13 @@ Author:
 Revision History:
 
 --*/
-#ifndef BIT_BLASTER_H_
-#define BIT_BLASTER_H_
+#pragma once
 
-#include "ast/rewriter/bool_rewriter.h"
-#include "ast/rewriter/bit_blaster/bit_blaster_params.h"
-#include "ast/rewriter/bit_blaster/bit_blaster_tpl.h"
-#include "ast/bv_decl_plugin.h"
 #include "util/rational.h"
+#include "ast/bv_decl_plugin.h"
+#include "params/bit_blaster_params.h"
+#include "ast/rewriter/bool_rewriter.h"
+#include "ast/rewriter/bit_blaster/bit_blaster_tpl.h"
 
 class bit_blaster_cfg {
 public:
@@ -44,6 +43,7 @@ public:
     void mk_and(expr * a, expr * b, expr_ref & r) { m_rw.mk_and(a, b, r); }
     void mk_and(expr * a, expr * b, expr * c, expr_ref & r) { m_rw.mk_and(a, b, c, r); }
     void mk_and(unsigned sz, expr * const * args, expr_ref & r) { m_rw.mk_and(sz, args, r); }
+    void mk_ge2(expr* a, expr* b, expr* c, expr_ref& r) { m_rw.mk_ge2(a, b, c, r); }
     void mk_or(expr * a, expr * b, expr_ref & r) { m_rw.mk_or(a, b, r); }
     void mk_or(expr * a, expr * b, expr * c, expr_ref & r) { m_rw.mk_or(a, b, c, r); }
     void mk_or(unsigned sz, expr * const * args, expr_ref & r) { m_rw.mk_or(sz, args, r); }
@@ -59,7 +59,7 @@ class bit_blaster : public bit_blaster_tpl<bit_blaster_cfg> {
 public:
     bit_blaster(ast_manager & m, bit_blaster_params const & params);
     bit_blaster_params const & get_params() const { return this->m_params; }
+    void set_flat_and_or(bool f) { m_rw.set_flat_and_or(f); }
 };
 
-#endif /* BIT_BLASTER_H_ */
 

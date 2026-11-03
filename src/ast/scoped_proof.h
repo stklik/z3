@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_PROOF_H_
-#define SCOPED_PROOF_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -30,8 +29,8 @@ public:
         m.toggle_proof_mode(mode);
     }
     ~scoped_proof_mode() {
-            m.toggle_proof_mode(m_mode);            
-        }
+        m.toggle_proof_mode(m_mode);            
+    }
     
 };
 
@@ -52,4 +51,3 @@ public:
 
 
 
-#endif

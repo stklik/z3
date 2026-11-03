@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef CLP_CONTEXT_H_
-#define CLP_CONTEXT_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/lbool.h"
@@ -39,6 +38,5 @@ namespace datalog {
         void display_certificate(std::ostream& out) const override;
         expr_ref get_answer() override;
     };
-};
+}
 
-#endif

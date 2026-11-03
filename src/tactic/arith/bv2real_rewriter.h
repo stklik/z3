@@ -16,13 +16,13 @@ Author:
 Notes:
 
 --*/
-#ifndef BV2REAL_REWRITER_H_
-#define BV2REAL_REWRITER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/arith_decl_plugin.h"
+#include "util/manage_warnings.h"
 
 //
 // bv2real[d,r](n,m) has interpretation: 
@@ -49,7 +49,7 @@ class bv2real_util {
     struct bvr_hash {
         unsigned operator()(bvr_sig const& x) const {
             unsigned a[3] = { x.m_msz, x.m_nsz, x.m_d.hash() };            
-            return string_hash((char const*)a, 12, x.m_r.hash());
+            return string_hash(std::string_view((char const*)a, 12), x.m_r.hash());
         }
     };
 
@@ -66,6 +66,7 @@ class bv2real_util {
     rational m_default_divisor;
     rational m_max_divisor;
     unsigned m_max_num_bits;
+    uint64_t m_max_memory;
 
     class contains_bv2real_proc;
 
@@ -81,6 +82,8 @@ public:
     bool is_bv2real(expr* e, expr*& n, expr*& m, rational& d);    
 
     bool contains_bv2real(expr* e) const;
+
+    bool memory_exceeded() const;
 
     bool mk_bv2real(expr* s, expr* t, rational& d, rational& r, expr_ref& result);
     expr* mk_bv2real_c(expr* s, expr* t, rational const& d, rational const& r);
@@ -98,8 +101,10 @@ public:
     bool is_pos_lef(func_decl* f) const { return f == m_pos_le; }
     bool is_pos_lt(expr const* e) const { return is_app(e) && is_pos_ltf(to_app(e)->get_decl()); }
     bool is_pos_le(expr const* e) const { return is_app(e) && is_pos_lef(to_app(e)->get_decl()); }
+    START_DISABLE_EXTRA_SEMI_WARNING;
     MATCH_BINARY(is_pos_lt);
     MATCH_BINARY(is_pos_le);
+    END_DISABLE_WARNING;
     expr* mk_pos_lt(expr* s, expr* t) { return m().mk_app(m_pos_lt, s, t); }
     expr* mk_pos_le(expr* s, expr* t) { return m().mk_app(m_pos_le, s, t); }
 
@@ -111,7 +116,7 @@ public:
 
     void add_side_condition(expr* e) { m_side_conditions.push_back(e); }
     unsigned num_side_conditions() const { return m_side_conditions.size(); }
-    expr* const* side_conditions() const { return m_side_conditions.c_ptr(); }
+    expr* const* side_conditions() const { return m_side_conditions.data(); }
 
     bool      is_zero(expr* e);
 
@@ -230,4 +235,3 @@ public:
         m_cfg(u) {}
 };
 
-#endif

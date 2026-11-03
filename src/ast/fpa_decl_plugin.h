@@ -16,13 +16,13 @@ Author:
 Revision History:
 
 --*/
-#ifndef fpa_decl_plugin_H_
-#define fpa_decl_plugin_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/id_gen.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/bv_decl_plugin.h"
+#include "util/manage_warnings.h"
 #include "util/mpf.h"
 
 enum fpa_sort_kind {
@@ -59,6 +59,8 @@ enum fpa_op_kind {
     OP_FPA_ABS,
     OP_FPA_MIN,
     OP_FPA_MAX,
+    OP_FPA_MIN_I,
+    OP_FPA_MAX_I,
     OP_FPA_FMA, // x*y + z
     OP_FPA_SQRT,
     OP_FPA_ROUND_TO_INTEGRAL,
@@ -82,9 +84,14 @@ enum fpa_op_kind {
     OP_FPA_TO_UBV,
     OP_FPA_TO_SBV,
     OP_FPA_TO_REAL,
+    OP_FPA_TO_REAL_I,
+
+    OP_FPA_TO_SBV_I,
+    OP_FPA_TO_UBV_I,
 
     /* Extensions */
     OP_FPA_TO_IEEE_BV,
+    OP_FPA_TO_IEEE_BV_I,
 
     OP_FPA_BVWRAP,
     OP_FPA_BV2RM,
@@ -163,15 +170,12 @@ class fpa_decl_plugin : public decl_plugin {
     unsigned mk_id(mpf const & v);
     void recycled_id(unsigned id);
 
-    bool is_considered_uninterpreted(func_decl * f) override { return false; }
-
 public:
     fpa_decl_plugin();
 
     bool is_float_sort(sort * s) const { return is_sort_of(s, m_family_id, FLOATING_POINT_SORT); }
     bool is_rm_sort(sort * s) const { return is_sort_of(s, m_family_id, ROUNDING_MODE_SORT); }
 
-    ~fpa_decl_plugin() override;
     void finalize() override;
 
     decl_plugin * mk_fresh() override;
@@ -199,6 +203,8 @@ public:
 
     void del(parameter const & p) override;
     parameter translate(parameter const & p, decl_plugin & target) override;
+
+    bool is_considered_uninterpreted(func_decl * f) override;
 };
 
 class fpa_util {
@@ -210,7 +216,6 @@ class fpa_util {
 
 public:
     fpa_util(ast_manager & m);
-    ~fpa_util();
 
     ast_manager & m() const { return m_manager; }
     mpf_manager & fm() const { return m_plugin->fm(); }
@@ -224,9 +229,9 @@ public:
     sort * mk_rm_sort() { return m().mk_sort(m_fid, ROUNDING_MODE_SORT); }
     bool is_float(sort * s) const { return is_sort_of(s, m_fid, FLOATING_POINT_SORT); }
     bool is_rm(sort * s) const { return is_sort_of(s, m_fid, ROUNDING_MODE_SORT); }
-    bool is_float(expr * e) const { return is_float(m_manager.get_sort(e)); }
-    bool is_rm(expr * e) const { return is_rm(m_manager.get_sort(e)); }
-    bool is_fp(expr * e) const { return is_app_of(e, m_fid, OP_FPA_FP); }
+    bool is_float(expr * e) const { return is_float(e->get_sort()); }
+    bool is_rm(expr * e) const { return is_rm(e->get_sort()); }
+    bool is_fp(expr const * e) const { return is_app_of(e, m_fid, OP_FPA_FP); }
     unsigned get_ebits(sort * s) const;
     unsigned get_sbits(sort * s) const;
 
@@ -349,13 +354,21 @@ public:
     bool is_bv2rm(expr const * e) const { return is_app_of(e, get_family_id(), OP_FPA_BV2RM); }
     bool is_to_ubv(expr const * e) const { return is_app_of(e, get_family_id(), OP_FPA_TO_UBV); }
     bool is_to_sbv(expr const * e) const { return is_app_of(e, get_family_id(), OP_FPA_TO_SBV); }
+    bool is_to_real(expr const * e) const { return is_app_of(e, get_family_id(), OP_FPA_TO_REAL); }
 
     bool is_bvwrap(func_decl const * f) const { return f->get_family_id() == get_family_id() && f->get_decl_kind() == OP_FPA_BVWRAP; }
     bool is_bv2rm(func_decl const * f) const { return f->get_family_id() == get_family_id() && f->get_decl_kind() == OP_FPA_BV2RM; }
     bool is_to_ubv(func_decl const * f) const { return f->get_family_id() == get_family_id() && f->get_decl_kind() == OP_FPA_TO_UBV; }
     bool is_to_sbv(func_decl const * f) const { return f->get_family_id() == get_family_id() && f->get_decl_kind() == OP_FPA_TO_SBV; }
+    bool is_to_real(func_decl const * f) const { return f->get_family_id() == get_family_id() && f->get_decl_kind() == OP_FPA_TO_REAL; }
+    bool is_to_ieee_bv(func_decl const * f) const { return f->get_family_id() == get_family_id() && f->get_decl_kind() == OP_FPA_TO_IEEE_BV; }
 
     bool contains_floats(ast * a);
+
+    bool is_considered_uninterpreted(func_decl* f, unsigned n, expr* const* args);
+
+    START_DISABLE_EXTRA_SEMI_WARNING;
+    MATCH_TERNARY(is_fp);
+    END_DISABLE_WARNING;
 };
 
-#endif

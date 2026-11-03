@@ -19,6 +19,7 @@ Notes:
 --*/
 
 #include <typeinfo>
+#include <numeric>
 #include "smt/theory_pb.h"
 #include "smt/smt_context.h"
 #include "smt/smt_kernel.h"
@@ -145,10 +146,10 @@ namespace smt {
         }
         pb_util pb(m);
         if (is_eq) {
-            result = pb.mk_eq(coeffs.size(), coeffs.c_ptr(), args.c_ptr(), k());
+            result = pb.mk_eq(coeffs.size(), coeffs.data(), args.data(), k());
         }
         else {
-            result = pb.mk_ge(coeffs.size(), coeffs.c_ptr(), args.c_ptr(), k());
+            result = pb.mk_ge(coeffs.size(), coeffs.data(), args.data(), k());
         }
         return result;
     }
@@ -158,8 +159,6 @@ namespace smt {
         m_watch_sz = 0;
         m_watch_sum.reset();
         m_num_propagations = 0;
-        m_compilation_threshold = UINT_MAX;
-        m_compiled = l_false;
         m_args[0].reset();
         m_args[0].m_k.reset();
         m_args[1].reset();
@@ -245,7 +244,7 @@ namespace smt {
         for (unsigned i = 0; i < size(); ++i) {
             args.push_back(th.literal2expr(m_args[i]));
         }
-        return app_ref(th.pb.mk_at_least_k(args.size(), args.c_ptr(), k()), m);        
+        return app_ref(th.pb.mk_at_least_k(args.size(), args.data(), k()), m);        
     }
 
     lbool theory_pb::card::assign(theory_pb& th, literal alit) {
@@ -253,7 +252,7 @@ namespace smt {
         context& ctx = th.get_context();
         unsigned sz = size();
         unsigned bound = k();
-        TRACE("pb", tout << "assign: " << m_lit << " " << ~alit << " " << bound << "\n";);
+        TRACE(pb, th.display(tout << "assign: " << m_lit << " " << ~alit << " " << bound << "\n", *this, true););
 
         SASSERT(0 < bound && bound < sz);
         SASSERT(ctx.get_assignment(alit) == l_false);
@@ -275,7 +274,7 @@ namespace smt {
         for (unsigned i = bound + 1; i < sz; ++i) {
             literal lit2 = lit(i);
             if (ctx.get_assignment(lit2) != l_false) {
-                TRACE("pb", tout << "swap " << lit2 << "\n";);
+                TRACE(pb, tout << "swap " << lit2 << "\n";);
                 std::swap(m_args[index], m_args[i]);
                 th.watch_literal(lit2, this);
                 return l_undef;
@@ -284,12 +283,12 @@ namespace smt {
 
         // conflict
         if (bound != index && ctx.get_assignment(lit(bound)) == l_false) {
-            TRACE("pb", tout << "conflict " << lit(bound) << " " << alit << "\n";);
+            TRACE(pb, tout << "conflict " << lit(bound) << " " << alit << "\n";);
             set_conflict(th, alit);
             return l_false;
         }
 
-        TRACE("pb", tout << "no swap " << index << " " << alit << "\n";);
+        TRACE(pb, tout << "no swap " << index << " " << alit << "\n";);
         // there are no literals to swap with,
         // prepare for unit propagation by swapping the false literal into 
         // position bound. Then literals in positions 0..bound-1 have to be
@@ -430,29 +429,23 @@ namespace smt {
 
     void theory_pb::card::inc_propagations(theory_pb& th) {
         ++m_num_propagations;
-        if (m_compiled == l_false && m_num_propagations >= m_compilation_threshold) {
-            // m_compiled = l_undef;
-            // th.m_to_compile.push_back(&c);
-        }
     }
 
     // ------------------------
     // theory_pb
 
-    theory_pb::theory_pb(ast_manager& m, theory_pb_params& p):
-        theory(m.mk_family_id("pb")),
-        m_params(p),
-        pb(m),
-        m_max_compiled_coeff(rational(8)),
-        m_cardinality_lemma(false),
+    theory_pb::theory_pb(context& ctx):
+        theory(ctx, ctx.get_manager().mk_family_id("pb")),
+        m_params(ctx.get_fparams()),
+        m_mpz_trail(m_mpz_mgr),
+        pb(ctx.get_manager()),
         m_restart_lim(3),
         m_restart_inc(0),
-        m_antecedent_exprs(m),
-        m_cardinality_exprs(m)
+        m_antecedent_exprs(ctx.get_manager()),
+        m_cardinality_exprs(ctx.get_manager())
     {        
-        m_learn_complements  = p.m_pb_learn_complements;
-        m_conflict_frequency = p.m_pb_conflict_frequency;
-        m_enable_compilation = p.m_pb_enable_compilation;
+        m_learn_complements  = ctx.get_fparams().m_pb_learn_complements;
+        m_conflict_frequency = ctx.get_fparams().m_pb_conflict_frequency;
     }
 
     theory_pb::~theory_pb() {
@@ -460,12 +453,11 @@ namespace smt {
     }
 
     theory * theory_pb::mk_fresh(context * new_ctx) { 
-        return alloc(theory_pb, new_ctx->get_manager(), m_params); 
+        return alloc(theory_pb, *new_ctx);
     }
 
     bool theory_pb::internalize_atom(app * atom, bool gate_ctx) {
-        context& ctx = get_context();
-        TRACE("pb", tout << mk_pp(atom, get_manager()) << "\n";);
+
         if (ctx.b_internalized(atom)) {
             return true;
         }
@@ -490,8 +482,40 @@ namespace smt {
         unsigned num_args = atom->get_num_args();
         bool_var abv = ctx.mk_bool_var(atom);
         ctx.set_var_theory(abv, get_id());
+        literal lit(abv);
 
-        ineq* c = alloc(ineq, m_mpz_mgr, literal(abv), pb.is_eq(atom));
+        if (pb.is_eq(atom)) {
+            expr_ref_vector args(m), nargs(m);
+            vector<rational> coeffs;
+            rational sum(0);
+            for (unsigned i = 0; i < num_args; ++i) {
+                args.push_back(atom->get_arg(i));
+                nargs.push_back(::mk_not(m, atom->get_arg(i)));
+                rational c = pb.get_coeff(atom, i);
+                coeffs.push_back(c);
+                sum += c;
+            }
+            rational k = pb.get_k(atom);
+            // ax + by + cz <= k
+            // <=>
+            // -ax - by - cz >= -k
+            // <=>
+            // a(1-x) + b(1-y) + c(1-z) >= a + b + c - k
+            expr_ref le(pb.mk_ge(num_args, coeffs.data(), nargs.data(), sum - k), m);
+            expr_ref ge(pb.mk_ge(num_args, coeffs.data(), args.data(), k), m);
+            ctx.internalize(le, false);
+            ctx.internalize(ge, false);
+            literal le_lit = ctx.get_literal(le);
+            literal ge_lit = ctx.get_literal(ge);
+            ctx.mark_as_relevant(le_lit);
+            ctx.mark_as_relevant(ge_lit);
+            ctx.mk_th_axiom(get_id(), ~lit, le_lit);
+            ctx.mk_th_axiom(get_id(), ~lit, ge_lit);
+            ctx.mk_th_axiom(get_id(), ~le_lit, ~ge_lit, lit);
+            return true;
+        }
+
+        scoped_ptr<ineq> c = alloc(ineq, m_mpz_mgr, literal(abv), pb.is_eq(atom));
         c->m_args[0].m_k = pb.get_k(atom);
         numeral& k = c->m_args[0].m_k;
         arg_t& args = c->m_args[0];
@@ -512,38 +536,26 @@ namespace smt {
                 break;
             }
         }
+
         if (pb.is_at_most_k(atom) || pb.is_le(atom)) {
-            // turn W <= k into -W >= -k
-            for (unsigned i = 0; i < args.size(); ++i) {
-                args[i].second = -args[i].second;
-            }
             k = -k;
+            for (auto& a : args) {
+                a.first.neg();
+                k += a.second;
+            }
         }
-        else {
-            SASSERT(pb.is_at_least_k(atom) || pb.is_ge(atom) || pb.is_eq(atom));
-        }
-        TRACE("pb", display(tout, *c, true););        
-        //app_ref fml1(m), fml2(m);
-        //fml1 = c->to_expr(ctx, m);
         c->unique();
         lbool is_true = c->normalize();
         c->prune();
         c->post_prune();
-        //fml2 = c->to_expr(ctx, m);
-        //expr_ref validate_pb = pb_rewriter(m).mk_validate_rewrite(fml1, fml2);
-        //pb_rewriter(m).dump_pb_rewrite(validate_pb);
 
-        literal lit(abv);
-
-
-        TRACE("pb", display(tout, *c); tout << " := " << lit << "\n";);        
-        switch(is_true) {
+        TRACE(pb, display(tout, *c); tout << " := " << lit << " " << is_true << "\n";);        
+        switch (is_true) {
         case l_false: 
-            lit = ~lit;
-            // fall-through
+            lit.neg();
+            Z3_fallthrough;
         case l_true: 
             ctx.mk_th_axiom(get_id(), 1, &lit);
-            dealloc(c);
             return true;
         case l_undef: 
             break;
@@ -557,53 +569,29 @@ namespace smt {
                 SASSERT(c->coeff(i).is_one());
                 ctx.mk_th_axiom(get_id(), lit, ~c->lit(i));
             }
-            ctx.mk_th_axiom(get_id(), lits.size(), lits.c_ptr());
+            ctx.mk_th_axiom(get_id(), lits.size(), lits.data());
             return true;
         }
         
         // maximal coefficient:
         scoped_mpz& max_watch = c->m_max_watch;
         max_watch.reset();
-        for (unsigned i = 0; i < args.size(); ++i) {
-            mpz const& num = args[i].second.to_mpq().numerator();
+        for (auto const& a : args) {
+            mpz const& num = a.second.to_mpq().numerator();
             if (m_mpz_mgr.lt(max_watch, num)) {
                 max_watch = num;
             }
         }
 
-        // pre-compile threshold for cardinality
-        bool enable_compile = m_enable_compilation && c->is_ge() && !c->k().is_one();
-        for (unsigned i = 0; enable_compile && i < args.size(); ++i) {
-            enable_compile = (args[i].second <= m_max_compiled_coeff);
-        }
-        if (enable_compile) {
-            unsigned log = 1, n = 1;
-            while (n <= args.size()) {
-                ++log;
-                n *= 2;
-            }
-            unsigned th = args.size()*log*log; 
-            c->m_compilation_threshold = th;
-            IF_VERBOSE(2, verbose_stream() << "(smt.pb setting compilation threshold to " << th << ")\n";);
-            TRACE("pb", tout << "compilation threshold: " << th << "\n";);
-        }
-        else {
-            c->m_compilation_threshold = UINT_MAX;
-        }
-        init_watch_var(*c);
+        init_watch_ineq(*c);
         init_watch(abv);
-        m_var_infos[abv].m_ineq = c;
+        m_var_infos[abv].m_ineq = c.detach();
         m_ineqs_trail.push_back(abv);
-
-
-        TRACE("pb", display(tout, *c););
-
+        TRACE(pb, display(tout, *c););
         return true;
     }
 
     literal theory_pb::compile_arg(expr* arg) {
-        context& ctx = get_context();
-        ast_manager& m = get_manager();
 
         bool_var bv;
         bool has_bv = false;
@@ -637,7 +625,7 @@ namespace smt {
             app_ref tmp(m), fml(m);
             tmp = pb.mk_fresh_bool();
             fml = m.mk_iff(tmp, arg);
-            TRACE("pb", tout << "create proxy " << fml << "\n";);
+            TRACE(pb, tout << "create proxy " << fml << "\n";);
             ctx.internalize(fml, false);
             SASSERT(ctx.b_internalized(tmp));
             bv = ctx.get_bool_var(tmp);
@@ -699,7 +687,6 @@ namespace smt {
         }
     }
 
-
     void theory_pb::watch_literal(literal lit, ineq* c) {
         init_watch(lit.var());
         ptr_vector<ineq>* ineqs = m_var_infos[lit.var()].m_lit_watch[lit.sign()];
@@ -707,28 +694,17 @@ namespace smt {
             ineqs = alloc(ptr_vector<ineq>);
             m_var_infos[lit.var()].m_lit_watch[lit.sign()] = ineqs;
         }
+        DEBUG_CODE(
+            for (auto* c1 : *ineqs) {
+                //if (c1 == c) return;
+                SASSERT (c1 != c);
+            });
         ineqs->push_back(c);
-    }
-
-
-    void theory_pb::watch_var(bool_var v, ineq* c) {
-        init_watch(v);
-        ptr_vector<ineq>* ineqs = m_var_infos[v].m_var_watch;
-        if (ineqs == nullptr) {
-            ineqs = alloc(ptr_vector<ineq>);
-            m_var_infos[v].m_var_watch = ineqs;
-        }
-        ineqs->push_back(c);
-    }
-
-    void theory_pb::unwatch_var(bool_var v, ineq* c) {
-        ptr_vector<ineq>* ineqs = m_var_infos[v].m_var_watch;
-        if (ineqs) {
-            remove(*ineqs, c);
-        }
     }
 
     void theory_pb::unwatch_literal(literal lit, ineq* c) {
+        if (static_cast<unsigned>(lit.var()) >= m_var_infos.size())
+            return;
         ptr_vector<ineq>* ineqs = m_var_infos[lit.var()].m_lit_watch[lit.sign()];
         if (ineqs) {
             remove(*ineqs, c);        
@@ -736,13 +712,14 @@ namespace smt {
     }
 
     void theory_pb::remove(ptr_vector<ineq>& ineqs, ineq* c) {
-        for (unsigned j = 0; j < ineqs.size(); ++j) {
+        unsigned sz = ineqs.size();
+        for (unsigned j = 0; j < sz; ++j) {
             if (ineqs[j] == c) {                        
-                std::swap(ineqs[j], ineqs[ineqs.size()-1]);
+                std::swap(ineqs[j], ineqs[sz-1]);
                 ineqs.pop_back();
-                break;
+                return;
             }
-        }
+        }   
     }
 
     // ----------------------------
@@ -759,18 +736,18 @@ namespace smt {
 
         card& get_card() { return m_card; }
 
-        virtual void get_antecedents(conflict_resolution& cr) {
+        void get_antecedents(conflict_resolution& cr) override {
             cr.mark_literal(m_card.lit());
             for (unsigned i = m_card.k(); i < m_card.size(); ++i) {
                 cr.mark_literal(~m_card.lit(i));
             }
         }
 
-        virtual theory_id get_from_theory() const {
+        theory_id get_from_theory() const override {
             return m_fid;
         }
         
-        virtual proof* mk_proof(smt::conflict_resolution& cr) { 
+        proof* mk_proof(smt::conflict_resolution& cr) override {
             ptr_buffer<proof> prs;
             ast_manager& m = cr.get_context().get_manager(); 
             expr_ref fact(m);
@@ -789,11 +766,9 @@ namespace smt {
                 return nullptr;
             }
             else {
-                return m.mk_th_lemma(m_fid, fact, prs.size(), prs.c_ptr());
+                return m.mk_th_lemma(m_fid, fact, prs.size(), prs.data());
             }
         }
-
-
     };
 
 
@@ -808,7 +783,6 @@ namespace smt {
     }
 
     bool theory_pb::internalize_card(app * atom, bool gate_ctx) {
-        context& ctx = get_context();
         if (ctx.b_internalized(atom)) {
             return true;
         }
@@ -865,14 +839,13 @@ namespace smt {
     // \brief define cardinality constraint as conjunction.
     // 
     void theory_pb::card2conjunction(card const& c) {
-        context& ctx = get_context();
         literal lit = c.lit();
         literal_vector& lits = get_literals();
         for (unsigned i = 0; i < c.size(); ++i) {
             lits.push_back(~c.lit(i));
         }
         lits.push_back(lit);
-        ctx.mk_th_axiom(get_id(), lits.size(), lits.c_ptr());
+        ctx.mk_th_axiom(get_id(), lits.size(), lits.data());
         for (unsigned i = 0; i < c.size(); ++i) {
             literal lits2[2] = { ~lit, c.lit(i) };
             ctx.mk_th_axiom(get_id(), 2, lits2);
@@ -880,14 +853,13 @@ namespace smt {
     }
 
     void theory_pb::card2disjunction(card const& c) {
-        context& ctx = get_context();
         literal lit = c.lit();
         literal_vector& lits = get_literals();
         for (unsigned i = 0; i < c.size(); ++i) {
             lits.push_back(c.lit(i));
         }
         lits.push_back(~lit);
-        ctx.mk_th_axiom(get_id(), lits.size(), lits.c_ptr());
+        ctx.mk_th_axiom(get_id(), lits.size(), lits.data());
         for (unsigned i = 0; i < c.size(); ++i) {
             literal lits2[2] = { lit, ~c.lit(i) };
             ctx.mk_th_axiom(get_id(), 2, lits2);
@@ -897,7 +869,7 @@ namespace smt {
     void theory_pb::watch_literal(literal lit, card* c) {
         init_watch(lit.var());
         ptr_vector<card>* cards = m_var_infos[lit.var()].m_lit_cwatch[lit.sign()];
-        if (cards == 0) {
+        if (cards == nullptr) {
             cards = alloc(ptr_vector<card>);
             m_var_infos[lit.var()].m_lit_cwatch[lit.sign()] = cards;
         }
@@ -926,7 +898,6 @@ namespace smt {
     }
 
     std::ostream& theory_pb::display(std::ostream& out, card const& c, bool values) const {
-        context& ctx = get_context();
         out << c.lit();
         if (c.lit() != null_literal) {
             if (values) {
@@ -960,26 +931,25 @@ namespace smt {
                    
     void theory_pb::add_clause(card& c, literal_vector const& lits) {
         m_stats.m_num_conflicts++;
-        context& ctx = get_context();
-        justification* js = 0;
+        justification* js = nullptr;
         c.inc_propagations(*this);
         if (!resolve_conflict(c, lits)) {
-			if (proofs_enabled()) {
-				js = alloc(theory_lemma_justification, get_id(), ctx, lits.size(), lits.c_ptr());
-			}
-            ctx.mk_clause(lits.size(), lits.c_ptr(), js, CLS_AUX_LEMMA, 0);
+            if (proofs_enabled()) {
+                js = alloc(theory_lemma_justification, get_id(), ctx, lits.size(), lits.data());
+            }
+            ctx.mk_clause(lits.size(), lits.data(), js, CLS_TH_LEMMA, nullptr);
         }
         SASSERT(ctx.inconsistent());
     }
 
     void theory_pb::add_assign(card& c, literal l) {        
-        context& ctx = get_context();
         if (ctx.get_assignment(l) == l_true) {
             return;
         }
         c.inc_propagations(*this);
         m_stats.m_num_propagations++;
-        TRACE("pb", tout << "#prop: " << c.num_propagations() << " - " << c.lit() << " => " << l << "\n";);
+        TRACE(pb, tout << "#prop: " << c.num_propagations() << " - " << c.lit() << " => " << l << "\n";
+              display(tout, c, true) << "\n";);
         SASSERT(validate_unit_propagation(c));
         ctx.assign(l, ctx.mk_justification(card_justification(c, l, get_id())));
     }
@@ -994,12 +964,10 @@ namespace smt {
     // 
 
     void theory_pb::collect_statistics(::statistics& st) const {
+        st.update("pb resolves", m_stats.m_num_resolves);
         st.update("pb conflicts", m_stats.m_num_conflicts);
         st.update("pb propagations", m_stats.m_num_propagations);
         st.update("pb predicates", m_stats.m_num_predicates);        
-        st.update("pb compilations", m_stats.m_num_compiles);
-        st.update("pb compiled clauses", m_stats.m_num_compiled_clauses);
-        st.update("pb compiled vars", m_stats.m_num_compiled_vars);
     }
     
     void theory_pb::reset_eh() {
@@ -1012,26 +980,23 @@ namespace smt {
         m_card_trail.reset();
         m_card_lim.reset();
         m_stats.reset();
-        m_to_compile.reset();
-        m_cardinality_lemma = false;
     }
 
     void theory_pb::new_eq_eh(theory_var v1, theory_var v2) {
         UNREACHABLE();
     }
     
-    final_check_status theory_pb::final_check_eh() {
-        TRACE("pb", display(tout););
+    final_check_status theory_pb::final_check_eh(unsigned level) {
+        TRACE(pb, display(tout););
         DEBUG_CODE(validate_final_check(););
         return FC_DONE;
     }
 
     void theory_pb::assign_eh(bool_var v, bool is_true) {
-        ptr_vector<ineq>* ineqs = 0;
-        context& ctx = get_context();
+        ptr_vector<ineq>* ineqs = nullptr;
         literal nlit(v, is_true);
         init_watch(v);
-        TRACE("pb", tout << "assign: " << ~nlit << "\n";);
+        TRACE(pb, tout << "assign: " << ~nlit << "\n";);
         ineqs = m_var_infos[v].m_lit_watch[nlit.sign()];
         if (ineqs != nullptr) {
             for (unsigned i = 0; i < ineqs->size(); ++i) {
@@ -1042,25 +1007,14 @@ namespace smt {
                 }
             }
         }
-        ineqs = m_var_infos[v].m_var_watch;
-        if (ineqs != nullptr) {
-            for (unsigned i = 0; i < ineqs->size(); ++i) {
-                ineq* c = (*ineqs)[i]; 
-                assign_watch(v, is_true, *c);
-            }
-        }
         ineq* c = m_var_infos[v].m_ineq;
         if (c != nullptr) {
-            if (c->is_ge()) {
-                assign_ineq(*c, is_true);
-            }
-            else {
-                assign_eq(*c, is_true);
-            }
+            VERIFY(c->is_ge());
+            assign_ineq(*c, is_true);
         }
 
         ptr_vector<card>* cards = m_var_infos[v].m_lit_cwatch[nlit.sign()];
-        if (cards != 0  && !cards->empty() && !ctx.inconsistent())  {
+        if (cards != nullptr  && !cards->empty() && !ctx.inconsistent())  {
             ptr_vector<card>::iterator it = cards->begin(), it2 = it, end = cards->end();
             for (; it != end; ++it) {
                 if (ctx.get_assignment((*it)->lit()) != l_true) {
@@ -1088,14 +1042,13 @@ namespace smt {
         }
 
         card* crd = m_var_infos[v].m_card;
-        if (crd != 0 && !ctx.inconsistent()) {
+        if (crd != nullptr && !ctx.inconsistent()) {
             crd->init_watch(*this, is_true);
         }
 
     }
 
     literal_vector& theory_pb::get_all_literals(ineq& c, bool negate) {
-        context& ctx = get_context();
         literal_vector& lits = get_literals();
         for (unsigned i = 0; i < c.size(); ++i) {
             literal l = c.lit(i);
@@ -1116,7 +1069,6 @@ namespace smt {
     literal_vector& theory_pb::get_helpful_literals(ineq& c, bool negate) {
         scoped_mpz sum(m_mpz_mgr);
         mpz const& k = c.mpz_k();
-        context& ctx = get_context();
         literal_vector& lits = get_literals();
         for (unsigned i = 0; sum < k && i < c.size(); ++i) {
             literal l = c.lit(i);
@@ -1131,7 +1083,6 @@ namespace smt {
     }
 
     literal_vector& theory_pb::get_unhelpful_literals(ineq& c, bool negate) {
-        context& ctx = get_context();
         literal_vector& lits = get_literals();
         for (unsigned i = 0; i < c.size(); ++i) {
             literal l = c.lit(i);
@@ -1143,24 +1094,11 @@ namespace smt {
         return lits;
     }
 
-    class theory_pb::rewatch_vars : public trail<context> {
-        theory_pb& pb;
-        ineq&      c;
-    public:
-        rewatch_vars(theory_pb& p, ineq& c): pb(p), c(c) {}        
-        void undo(context& ctx) override {
-            for (unsigned i = 0; i < c.size(); ++i) {
-                pb.watch_var(c.lit(i).var(), &c);
-            }
-        }
-    };
-
-
-    class theory_pb::negate_ineq : public trail<context> {
+    class theory_pb::negate_ineq : public trail {
         ineq& c;
     public:
         negate_ineq(ineq& c): c(c) {}
-        void undo(context& ctx) override {
+        void undo() override {
             c.negate();
         }
     };
@@ -1169,14 +1107,14 @@ namespace smt {
        \brief propagate assignment to inequality.
        This is a basic, non-optimized implementation based
        on the assumption that inequalities are mostly units
-       and/or relatively few compared to number of argumets.
+       and/or relatively few compared to number of arguments.
      */
     void theory_pb::assign_ineq(ineq& c, bool is_true) {
-        context& ctx = get_context();
-        ctx.push_trail(value_trail<context, scoped_mpz>(c.m_max_sum));
-        ctx.push_trail(value_trail<context, scoped_mpz>(c.m_min_sum));
-        ctx.push_trail(value_trail<context, unsigned>(c.m_nfixed));
-        ctx.push_trail(rewatch_vars(*this, c));
+        m_mpz_trail.push_back(c.m_max_sum);
+        m_mpz_trail.push_back(c.m_min_sum);
+        ctx.push_trail(scoped_value_trail<scoped_mpz, scoped_mpz_vector>(c.m_max_sum, m_mpz_trail));
+        ctx.push_trail(scoped_value_trail<scoped_mpz, scoped_mpz_vector>(c.m_min_sum, m_mpz_trail));
+        ctx.push_trail(value_trail<unsigned>(c.m_nfixed));
 
         SASSERT(c.is_ge());
         unsigned sz = c.size();
@@ -1196,7 +1134,7 @@ namespace smt {
             }
         }
 
-        TRACE("pb", 
+        TRACE(pb, 
               tout << "assign: " << c.lit() << "\n";
               display(tout, c); );
 
@@ -1214,10 +1152,15 @@ namespace smt {
         // perform unit propagation
         if (maxsum >= c.mpz_k() && maxsum - mininc < c.mpz_k()) { 
             literal_vector& lits = get_unhelpful_literals(c, true);
+            // for (literal lit : lits) SASSERT(ctx.get_assignment(lit) == l_true);
             lits.push_back(c.lit());
+            // SASSERT(ctx.get_assignment(c.lit()) == l_true);
             for (unsigned i = 0; i < sz; ++i) {
-                DEBUG_CODE(validate_assign(c, lits, c.lit(i)););
-                add_assign(c, lits, c.lit(i));                               
+                literal lit = c.lit(i);
+                if (ctx.get_assignment(lit) == l_undef) {
+                    DEBUG_CODE(validate_assign(c, lits, lit););
+                    add_assign(c, lits, c.lit(i));               
+                }
             }
         }
     }
@@ -1227,104 +1170,7 @@ namespace smt {
     */
     void theory_pb::assign_eq(ineq& c, bool is_true) {
         SASSERT(c.is_eq());
-        
-    }
-
-    /**
-       Propagation rules:
-
-       nfixed = N & minsum = k -> T
-       nfixed = N & minsum != k -> F
-    
-       minsum > k or maxsum < k -> F
-       minsum = k & = -> fix 0 variables
-       nfixed+1 = N & = -> fix unassigned variable or conflict
-       nfixed+1 = N & != -> maybe forced unassigned to ensure disequal
-       minsum >= k -> T
-       maxsum <  k -> F
-    */
-
-    void theory_pb::assign_watch(bool_var v, bool is_true, ineq& c) {
-        
-        context& ctx = get_context();
-        unsigned i;
-        literal l = c.lit();
-        lbool asgn = ctx.get_assignment(l);
-
-        if (c.max_sum() < c.mpz_k() && asgn == l_false) {
-            return;
-        }
-        if (c.is_ge() && c.min_sum() >= c.mpz_k() && asgn == l_true) {
-            return;
-        }
-        for (i = 0; i < c.size(); ++i) {
-            if (c.lit(i).var() == v) {
-                break;
-            }
-        }
-        
-        TRACE("pb", display(tout << "assign watch " << literal(v,!is_true) << " ", c, true););
-
-        SASSERT(i < c.size());
-        if (c.lit(i).sign() == is_true) {
-            ctx.push_trail(value_trail<context, scoped_mpz>(c.m_max_sum));
-            c.m_max_sum -= c.ncoeff(i);
-        }
-        else {
-            ctx.push_trail(value_trail<context, scoped_mpz>(c.m_min_sum));
-            c.m_min_sum += c.ncoeff(i);            
-        }
-        DEBUG_CODE(
-            scoped_mpz sum(m_mpz_mgr);
-            scoped_mpz maxs(m_mpz_mgr);
-            for (unsigned i = 0; i < c.size(); ++i) {
-                if (ctx.get_assignment(c.lit(i)) == l_true)  sum  += c.ncoeff(i);
-                if (ctx.get_assignment(c.lit(i)) != l_false) maxs += c.ncoeff(i);
-            }
-            CTRACE("pb", (maxs > c.max_sum()), display(tout, c, true););
-            SASSERT(c.min_sum() <= sum);
-            SASSERT(sum <= maxs);
-            SASSERT(maxs <= c.max_sum());
-            );
-        SASSERT(c.min_sum() <= c.max_sum());
-        SASSERT(!m_mpz_mgr.is_neg(c.min_sum()));
-        ctx.push_trail(value_trail<context, unsigned>(c.m_nfixed));
-        ++c.m_nfixed;
-        SASSERT(c.nfixed() <= c.size());
-        if (c.is_ge() && c.min_sum() >= c.mpz_k() && asgn != l_true) {
-            TRACE("pb", display(tout << "Set " << l << "\n", c, true););
-            add_assign(c, get_helpful_literals(c, false), l);
-        }        
-        else if (c.max_sum() < c.mpz_k() && asgn != l_false) {
-            TRACE("pb", display(tout << "Set " << ~l << "\n", c, true););
-            add_assign(c, get_unhelpful_literals(c, true), ~l);
-        }
-        else if (c.is_eq() && c.nfixed() == c.size() && c.min_sum() == c.mpz_k() && asgn != l_true) {
-            TRACE("pb", display(tout << "Set " << l << "\n", c, true););
-            add_assign(c, get_all_literals(c, false), l);     
-        }
-        else if (c.is_eq() && c.nfixed() == c.size() && c.min_sum() != c.mpz_k() && asgn != l_false) {
-            TRACE("pb", display(tout << "Set " << ~l << "\n", c, true););
-            add_assign(c, get_all_literals(c, false), ~l);     
-        }
-#if 0
-        else if (c.is_eq() && c.min_sum() > c.mpz_k() && asgn != l_false) {
-            TRACE("pb", display(tout << "Set " << ~l << "\n", c, true););
-            add_assign(c, get_all_literals(c, false), ~l);
-        }
-        else if (c.is_eq() && asgn == l_true && c.min_sum() == c.mpz_k() && c.max_sum() > c.mpz_k()) {
-            literal_vector& lits = get_all_literals(c, false);
-            lits.push_back(c.lit());
-            for (unsigned i = 0; i < c.size(); ++i) {
-                if (ctx.get_assignment(c.lit(i)) == l_undef) {
-                    add_assign(c, lits, ~c.lit(i)); 
-                }
-            }
-        }
-#endif
-        else {
-            IF_VERBOSE(14, display(verbose_stream() << "no propagation ", c, true););
-        }
+        UNREACHABLE();
     }
 
 
@@ -1336,7 +1182,6 @@ namespace smt {
      */
     bool theory_pb::assign_watch_ge(bool_var v, bool is_true, ineq_watch& watch, unsigned watch_index) {
         bool removed = false;
-        context& ctx = get_context();
         ineq& c = *watch[watch_index];
         unsigned w = c.find_lit(v, 0, c.watch_size());
         SASSERT(ctx.get_assignment(c.lit()) == l_true);
@@ -1401,7 +1246,7 @@ namespace smt {
             //
         }
 
-        TRACE("pb", 
+        TRACE(pb, 
               tout << "assign: " << literal(v,!is_true) << "\n";
               display(tout, c); );
 
@@ -1436,7 +1281,7 @@ namespace smt {
                 ctx.literal2expr(lits[i], tmp);
                 es.push_back(tmp);
             }
-            tmp = m.mk_or(es.size(), es.c_ptr());
+            tmp = m.mk_or(es);
             bool_var v = ctx.b_internalized(tmp)?ctx.get_bool_var(tmp):ctx.mk_bool_var(tmp);
             return literal(v);
         }
@@ -1448,7 +1293,7 @@ namespace smt {
                 ctx.literal2expr(lits[i], tmp);
                 es.push_back(tmp);
             }
-            tmp = m.mk_and(es.size(), es.c_ptr());
+            tmp = m.mk_and(es);
             bool_var v = ctx.b_internalized(tmp)?ctx.get_bool_var(tmp):ctx.mk_bool_var(tmp);
             return literal(v);
         }
@@ -1457,7 +1302,7 @@ namespace smt {
 
         void mk_clause(unsigned n, literal const* ls) {
             literal_vector tmp(n, ls);
-            ctx.mk_clause(n, tmp.c_ptr(), th.justify(tmp), CLS_AUX, nullptr);
+            ctx.mk_clause(n, tmp.data(), th.justify(tmp), CLS_AUX, nullptr);
         }
 
         literal mk_false() { return false_literal; }
@@ -1470,7 +1315,7 @@ namespace smt {
     // for testing
     literal theory_pb::assert_ge(context& ctx, unsigned k, unsigned n, literal const* xs) {
         theory_pb_params p;
-        theory_pb th(ctx.get_manager(), p);
+        theory_pb th(ctx);
         psort_expr ps(ctx, th);
         psort_nw<psort_expr> sort(ps);
         return sort.ge(false, k, n, xs);
@@ -1479,82 +1324,52 @@ namespace smt {
 
     void theory_pb::inc_propagations(ineq& c) {
         ++c.m_num_propagations;
-        if (c.m_compiled == l_false && c.m_num_propagations >= c.m_compilation_threshold) {
-            c.m_compiled = l_undef;
-            m_to_compile.push_back(&c);
-        }
     }
 
     void theory_pb::restart_eh() {
-        for (unsigned i = 0; i < m_to_compile.size(); ++i) {
-            compile_ineq(*m_to_compile[i]);
-        }
-        m_to_compile.reset();
-
-        return;
-
-        if (m_restart_lim <= m_restart_inc) {
-            m_restart_inc = 0;
-            if (gc()) {
-                m_restart_lim = 3;
-            }
-            else {
-                m_restart_lim *= 4;
-                m_restart_lim /= 3;
-            }
-        }
-        ++m_restart_inc;
     }
 
     bool theory_pb::gc() {
-
-        context& ctx = get_context();
 
         unsigned z = 0, nz = 0;
         m_occs.reset();
         for (unsigned i = 0; i < m_card_trail.size(); ++i) {
             bool_var v = m_card_trail[i];
-            if (v == null_bool_var) continue;
+            if (v == null_bool_var) 
+                continue;
             card* c = m_var_infos[v].m_card;
-            if (c) {
-                c->reset_propagations();
-                literal lit = c->lit();
-                if (c->is_aux() && ctx.get_assign_level(lit) > ctx.get_search_level()) {
-                    double activity = ctx.get_activity(v);
-                    if (activity <= 0) {
-                        nz++;
-                    }
-                    else {
-                        z++;
-                        clear_watch(*c);
-                        m_var_infos[v].m_card = 0;
-                        dealloc(c);
-                        m_card_trail[i] = null_bool_var;
-                        ctx.remove_watch(v);
-                        // TBD: maybe v was used in a clause for propagation.
-                        m_occs.insert(v);
-                    }
+            if (!c) 
+                continue;
+            c->reset_propagations();
+            literal lit = c->lit();
+            if (c->is_aux() && ctx.get_assign_level(lit) > ctx.get_search_level()) {
+                double activity = ctx.get_activity(v);
+                if (activity <= 0) {
+                    nz++;
+                }
+                else {
+                    z++;
+                    clear_watch(*c);
+                    m_var_infos[v].m_card = nullptr;
+                    dealloc(c);
+                    m_card_trail[i] = null_bool_var;
+                    ctx.remove_watch(v);
+                    // TBD: maybe v was used in a clause for propagation.
+                    m_occs.insert(v);
                 }
             }
         }
-        clause_vector const& lemmas = ctx.get_lemmas();
-        for (unsigned i = 0; i < lemmas.size(); ++i) {
-            clause* cl = lemmas[i];
+
+#if 0        
+        for (clause* cl : ctx.get_lemmas()) {
             if (!cl->deleted()) {
-                unsigned sz = cl->get_num_literals();
-                for (unsigned j = 0; j < sz; ++j) {
-                    literal lit = cl->get_literal(j);
+                for (literal lit : *cl) {
                     if (m_occs.contains(lit.var())) {
-                        //std::cout << "deleting clause " << lit << " " << sz << "\n";
-                        //ctx.mark_as_deleted(cl);
                         break;
                     }
                 }
             }
         }
-
-        std::cout << "zs: " << z << " nzs: " << nz << " lemmas: " << ctx.get_lemmas().size() << " trail: " << m_card_trail.size() << "\n";
-        return z*10 >= nz;
 
         m_occs.reset();
         for (unsigned i = 0; i < lemmas.size(); ++i) {
@@ -1565,76 +1380,8 @@ namespace smt {
                 m_occs.insert(idx);
             }
         }
-    }
-
-
-    void theory_pb::compile_ineq(ineq& c) {
-        ++m_stats.m_num_compiles;
-        context& ctx = get_context();
-        // only cardinality constraints are compiled.
-        SASSERT(c.m_compilation_threshold < UINT_MAX);
-        DEBUG_CODE(for (unsigned i = 0; i < c.size(); ++i) SASSERT(c.coeff(i).is_int()); );
-        unsigned k = c.k().get_unsigned();
-        unsigned num_args = c.size();
-
-
-        literal thl = c.lit();
-        literal at_least_k;
-
-        literal_vector in;
-        for (unsigned i = 0; i < num_args; ++i) {
-            rational n = c.coeff(i);
-            literal lit = c.lit(i);
-            lbool val = ctx.get_assignment(lit); 
-            if (val != l_undef  && ctx.get_assign_level(lit) == ctx.get_base_level()) {
-                if (val == l_true) {
-                    unsigned m = n.get_unsigned();
-                    if (k < m) {
-                        return;
-                    }
-                    k -= m;
-                }
-                continue;
-            }
-            while (n.is_pos()) {
-                in.push_back(c.lit(i));
-                n -= rational::one();
-            }
-        }
-        
-        TRACE("pb", tout << in << " >= " << k << "\n";);
-
-
-        psort_expr ps(ctx, *this);
-        psort_nw<psort_expr> sortnw(ps);
-        sortnw.m_stats.reset();
-
-        if (ctx.get_assignment(thl) == l_true  && 
-            ctx.get_assign_level(thl) == ctx.get_base_level()) {
-            at_least_k = sortnw.ge(false, k, in.size(), in.c_ptr());            
-            TRACE("pb", tout << ~thl << " " << at_least_k << "\n";);
-            ctx.mk_clause(~thl, at_least_k, justify(~thl, at_least_k));
-        }
-        else {
-            literal at_least_k = sortnw.ge(true, k, in.size(), in.c_ptr());
-            TRACE("pb", tout << ~thl << " " << at_least_k << "\n";);
-            ctx.mk_clause(~thl, at_least_k, justify(~thl, at_least_k));
-            ctx.mk_clause(~at_least_k, thl, justify(thl, ~at_least_k));
-        }
-        m_stats.m_num_compiled_vars += sortnw.m_stats.m_num_compiled_vars;
-        m_stats.m_num_compiled_clauses += sortnw.m_stats.m_num_compiled_clauses;
-
-        IF_VERBOSE(2, verbose_stream() 
-                   << "(smt.pb compile sorting network bound: " 
-                   << k << " literals: " << in.size() 
-                   << " clauses: " << sortnw.m_stats.m_num_compiled_clauses 
-                   << " vars: " << sortnw.m_stats.m_num_compiled_vars << ")\n";);
-
-        // auxiliary clauses get removed when popping scopes.
-        // we have to recompile the circuit after back-tracking.
-        c.m_compiled = l_false;
-        ctx.push_trail(value_trail<context, lbool>(c.m_compiled));
-        c.m_compiled = l_true;
+#endif
+        return z*10 >= nz;
     }
 
 
@@ -1657,7 +1404,6 @@ namespace smt {
             clear_watch(*c);
             m_var_infos[v].m_ineq = nullptr;
             m_ineqs_trail.pop_back();
-            m_to_compile.erase(c);
             dealloc(c);
         }
         m_ineqs_lim.resize(new_lim);
@@ -1671,7 +1417,7 @@ namespace smt {
             if (v != null_bool_var) {
                 card* c = m_var_infos[v].m_card;
                 clear_watch(*c);
-                m_var_infos[v].m_card = 0;
+                m_var_infos[v].m_card = nullptr;
                 dealloc(c);
             }
         }
@@ -1682,7 +1428,6 @@ namespace smt {
     void theory_pb::clear_watch(ineq& c) {
         for (unsigned i = 0; i < c.size(); ++i) {
             literal w = c.lit(i);
-            unwatch_var(w.var(), &c);
             unwatch_literal(w, &c);            
         }
         c.m_watch_sum.reset();
@@ -1693,13 +1438,13 @@ namespace smt {
         c.m_min_sum.reset();
     }
 
-    class theory_pb::unwatch_ge : public trail<context> {
+    class theory_pb::unwatch_ge : public trail {
         theory_pb& pb;
         ineq&      c;
     public:
         unwatch_ge(theory_pb& p, ineq& c): pb(p), c(c) {}
         
-        void undo(context& ctx) override {
+        void undo() override {
             for (unsigned i = 0; i < c.watch_size(); ++i) {
                 pb.unwatch_literal(c.lit(i), &c);
             }
@@ -1711,7 +1456,6 @@ namespace smt {
 
 
     void theory_pb::init_watch_literal(ineq& c) {
-        context& ctx = get_context();
         scoped_mpz max_k(m_mpz_mgr);
         c.m_watch_sum.reset();
         c.m_watch_sz = 0;
@@ -1728,7 +1472,7 @@ namespace smt {
         ctx.push_trail(unwatch_ge(*this, c));
     }
 
-    void theory_pb::init_watch_var(ineq& c) {
+    void theory_pb::init_watch_ineq(ineq& c) {
         c.m_min_sum.reset();
         c.m_max_sum.reset();
         c.m_nfixed = 0;
@@ -1736,7 +1480,6 @@ namespace smt {
         c.m_max_watch.reset();
         c.m_watch_sz = 0;
         for (unsigned i = 0; i < c.size(); ++i) {
-            watch_var(c.lit(i).var(), &c);
             c.m_max_sum += c.ncoeff(i);
         }                   
     }
@@ -1744,9 +1487,9 @@ namespace smt {
     class theory_pb::pb_justification : public theory_propagation_justification {
         ineq& m_ineq;
     public:
-        pb_justification(ineq& c, family_id fid, region & r, 
+        pb_justification(ineq& c, family_id fid, context& ctx, 
                       unsigned num_lits, literal const * lits, literal consequent):
-                      theory_propagation_justification(fid, r, num_lits, lits, consequent),
+                      theory_propagation_justification(fid, ctx, num_lits, lits, consequent),
                       m_ineq(c)
                       {}
         ineq& get_ineq() { return m_ineq; }
@@ -1755,15 +1498,14 @@ namespace smt {
     void theory_pb::add_assign(ineq& c, literal_vector const& lits, literal l) {
         inc_propagations(c);
         m_stats.m_num_propagations++;
-        context& ctx = get_context();
-        TRACE("pb", tout << "#prop:" << c.m_num_propagations << " - " << lits;
+        TRACE(pb, tout << "#prop:" << c.m_num_propagations << " - " << lits;
               tout << " => " << l << "\n";
               display(tout, c, true););
 
         SASSERT(validate_antecedents(lits));
         ctx.assign(l, ctx.mk_justification(
                        pb_justification(
-                           c, get_id(), ctx.get_region(), lits.size(), lits.c_ptr(), l)));
+                           c, get_id(), ctx, lits.size(), lits.data(), l)));
     }
     
 
@@ -1771,14 +1513,13 @@ namespace smt {
     void theory_pb::add_clause(ineq& c, literal_vector const& lits) {
         inc_propagations(c);
         m_stats.m_num_conflicts++;
-        context& ctx = get_context();
-        TRACE("pb", tout << "#prop:" << c.m_num_propagations << " - " << lits << "\n"; 
+        TRACE(pb, tout << "#prop:" << c.m_num_propagations << " - " << lits << "\n"; 
               display(tout, c, true);); 
-        justification* js = 0;
+        justification* js = nullptr;
         if (proofs_enabled()) {                                         
-            js = alloc(theory_lemma_justification, get_id(), ctx, lits.size(), lits.c_ptr());
+            js = alloc(theory_lemma_justification, get_id(), ctx, lits.size(), lits.data());
         }
-        ctx.mk_clause(lits.size(), lits.c_ptr(), js, CLS_AUX_LEMMA, 0);
+        ctx.mk_clause(lits.size(), lits.data(), js, CLS_TH_LEMMA, nullptr);
     }
 
 
@@ -1800,7 +1541,6 @@ namespace smt {
     }
 
     void theory_pb::process_antecedent(literal l, int offset) {        
-        context& ctx = get_context();
         SASSERT(ctx.get_assignment(l) == l_false);
         bool_var v = l.var();
         unsigned lvl = ctx.get_assign_level(v);
@@ -1813,7 +1553,6 @@ namespace smt {
     }
 
     void theory_pb::process_card(card& c, int offset) {
-        context& ctx = get_context();
         SASSERT(c.k() <= c.size());
         SASSERT(ctx.get_assignment(c.lit()) == l_true);
         for (unsigned i = c.k(); i < c.size(); ++i) {
@@ -1829,7 +1568,6 @@ namespace smt {
 
     bool theory_pb::validate_lemma() {
         int value = -m_bound;
-        context& ctx = get_context();
         normalize_active_coeffs();
         for (unsigned i = 0; i < m_active_vars.size(); ++i) {
             bool_var v = m_active_vars[i];
@@ -1842,6 +1580,9 @@ namespace smt {
                 value += coeff;
             }
         }
+        if (value >= 0) {
+            display_resolved_lemma(verbose_stream() << "not validated\n");
+        }
         // std::cout << "bound: " << m_bound << " value " << value << " coeffs: " << m_active_vars.size() << " lemma is " << (value >= 0 ? "sat" : "unsat") << "\n";    
         return value < 0;
     }
@@ -1850,7 +1591,6 @@ namespace smt {
         static bool validating = true; // false;
         if (validating) return true;
         validating = true;
-        ast_manager& m = get_manager();
         smt_params fp;
         kernel k(m, fp);
         expr_ref notB(m.mk_not(B), m);
@@ -1858,17 +1598,18 @@ namespace smt {
         k.assert_expr(notB);
         lbool is_sat = k.check();
         validating = false;
-        std::cout << is_sat << "\n";
+        // std::cout << is_sat << "\n";
+#if 0
         if (is_sat == l_true) {
             std::cout << A << "\n";
             std::cout << B << "\n";
         }
-        SASSERT(is_sat != l_true);
+#endif
+        VERIFY(is_sat != l_true);
         return true;
     }
 
     app_ref theory_pb::justification2expr(b_justification& js, literal conseq) {
-        ast_manager& m = get_manager();
         app_ref result(m.mk_true(), m);
         expr_ref_vector args(m);
         vector<rational> coeffs;
@@ -1884,28 +1625,28 @@ namespace smt {
                 literal lit = cls.get_literal(i);
                 args.push_back(literal2expr(lit));
             }
-            result = m.mk_or(args.size(), args.c_ptr());
+            result = m.mk_or(args);
             break;
         }
-        case b_justification::BIN_CLAUSE:
-            result = m.mk_or(literal2expr(conseq), literal2expr(~js.get_literal()));
+        case b_justification::BIN_CLAUSE: {
+            app_ref consequent = literal2expr(conseq);
+            result = m.mk_or(consequent, literal2expr(~js.get_literal()));
             break;
+        }
         case b_justification::AXIOM:
             break;
         case b_justification::JUSTIFICATION: {
             justification* j = js.get_justification(); 
-            card_justification* pbj = 0;            
+            card_justification* pbj = nullptr;
             if (j->get_from_theory() == get_id()) {
                 pbj = dynamic_cast<card_justification*>(j);
             }
-            if (pbj != 0) {
+            if (pbj != nullptr) {
                 card& c2 = pbj->get_card();
                 result = card2expr(c2);
             }            
             break;
         }
-        default:
-            break;
         }
         return result;
     }
@@ -1927,15 +1668,19 @@ namespace smt {
         return arg_max;
     }
 
+    /**
+       \brief retrieve asserting literal. Prefer p, otherwise find a literal with maximal level.
+       Note that an asserting literal should be false with respect to the resolvent inequality.
+     */
     literal theory_pb::get_asserting_literal(literal p) {
-        if (get_abs_coeff(p.var()) != 0) {
+        unsigned lvl = 0;
+        TRACE(pb, tout << p << " " << ctx.get_assignment(p) << "\n";);
+
+        if (ctx.get_assignment(p) == l_false && get_abs_coeff(p.var()) != 0 && p == literal(p.var(), get_coeff(p.var()) < 0)) {
             return p;
         }
-        context& ctx = get_context();
-        unsigned lvl = 0;
         
-        for (unsigned i = 0; i < m_active_vars.size(); ++i) { 
-            bool_var v = m_active_vars[i];
+        for (bool_var v : m_active_vars) {
             literal lit(v, get_coeff(v) < 0);
             if (ctx.get_assignment(lit) == l_false && ctx.get_assign_level(lit) > lvl) {
                 p = lit;
@@ -1976,82 +1721,6 @@ namespace smt {
         }
         std::sort(m_active_coeffs.begin(), m_active_coeffs.end());
         return true;
-    }
-
-    void theory_pb::add_cardinality_lemma() {
-        context& ctx = get_context();
-        normalize_active_coeffs();
-        int s = 0;
-        int new_bound = 0;
-        if (!init_arg_max()) {
-            return;
-        }
-        // TBD: can be optimized
-        while (s < m_bound) {
-            int coeff;
-            int arg = arg_max(coeff);
-            if (arg == -1) break;
-            s += coeff;
-            ++new_bound;
-        }
-        int slack = m_active_coeffs.empty() ? m_bound : (std::min(m_bound, static_cast<int>(m_active_coeffs[0]) - 1));
-        reset_arg_max();
-
-        while (slack > 0) {
-            bool found = false;
-            int v = 0;
-            int coeff = 0;
-            for (unsigned i = 0; !found && i < m_active_vars.size(); ++i) {            
-                bool_var v = m_active_vars[i];
-                coeff = get_abs_coeff(v);
-                if (0 < coeff && coeff < slack) {
-                    found = true;
-                }
-            }
-            if (!found) {
-                break;
-            }
-            slack -= coeff;
-            m_coeffs[v] = 0; // deactivate coefficient.
-        }
-        for (unsigned i = 0; i < m_active_vars.size(); ++i) {
-            bool_var v = m_active_vars[i];
-            int coeff = get_coeff(v);
-            if (coeff < 0) {
-                m_coeffs[v] = -1;
-            }
-            else if (coeff > 0) {
-                m_coeffs[v] = 1;
-            }
-        }        
-
-        m_bound = new_bound;
-        if (!validate_lemma()) {
-            return;
-        }
-        SASSERT(m_bound > 0);
-        if (m_bound > static_cast<int>(m_active_vars.size())) {
-            return;
-        }           
-        if (m_bound == static_cast<int>(m_active_vars.size())) {
-            return;
-        }
-
-        m_antecedent_exprs.reset();
-        m_antecedent_signs.reset();
-        m_cardinality_exprs.reset();
-        m_cardinality_signs.reset();
-        for (unsigned i = 0; i < m_antecedents.size(); ++i) {
-            literal lit = m_antecedents[i];
-            m_antecedent_exprs.push_back(ctx.bool_var2expr(lit.var()));
-            m_antecedent_signs.push_back(lit.sign());
-        }
-        for (unsigned i = 0; i < m_active_vars.size(); ++i) {
-            bool_var v = m_active_vars[i];
-            m_cardinality_exprs.push_back(ctx.bool_var2expr(v));
-            m_cardinality_signs.push_back(get_coeff(v) < 0);
-        }
-        m_cardinality_lemma = true;
     }
 
     void theory_pb::normalize_active_coeffs() {
@@ -2120,82 +1789,36 @@ namespace smt {
                 g = static_cast<unsigned>(coeff);
             }
             else {
-                g = u_gcd(g, static_cast<unsigned>(coeff));
+                g = std::gcd(g, static_cast<unsigned>(coeff));
             }
         }
         if (g >= 2) {
             normalize_active_coeffs();
-            for (unsigned i = 0; i < m_active_vars.size(); ++i) {
-                m_coeffs[m_active_vars[i]] /= g;                
+            for (auto v : m_active_vars) {
+                m_coeffs[v] /= static_cast<int>(g);                
             }
             m_bound = (m_bound + g - 1) / g;
-            std::cout << "CUT " << g << "\n";
-            TRACE("pb", display_resolved_lemma(tout << "cut\n"););
+            TRACE(pb, display_resolved_lemma(tout << "cut\n"););
         }
     }
 
-    bool theory_pb::can_propagate() { return m_cardinality_lemma; }
+    bool theory_pb::can_propagate() { return false; }
     
-    void theory_pb::propagate() {
-        context& ctx = get_context();
-        ast_manager& m = get_manager();
-        if (!m_cardinality_lemma) {
-            return;
-        }
-        m_cardinality_lemma = false;
-        if (ctx.inconsistent()) {
-            return;
-        }
-        m_antecedents.reset();
-
-        for (unsigned i = 0; i < m_antecedent_exprs.size(); ++i) {
-            expr* a = m_antecedent_exprs[i].get();
-            if (!ctx.b_internalized(a)) {
-                std::cout << "not internalized " << mk_pp(a, m) << "\n";
-                return;
-            }
-            m_antecedents.push_back(~literal(ctx.get_bool_var(a), m_antecedent_signs[i]));
-        }
-        for (unsigned i = 0; i < m_cardinality_exprs.size(); ++i) {
-            expr* a = m_cardinality_exprs[i].get();
-            if (!ctx.b_internalized(a)) {
-                std::cout << "not internalized " << mk_pp(a, m) << "\n";
-                return;
-            }
-            if (m_cardinality_signs[i]) {
-                m_cardinality_exprs[i] = m.mk_not(a);
-            }
-        }        
-        app_ref atl(pb.mk_at_least_k(m_cardinality_exprs.size(), m_cardinality_exprs.c_ptr(), m_bound), m);
-        VERIFY(internalize_card(atl, false));
-        bool_var abv = ctx.get_bool_var(atl);
-        m_antecedents.push_back(literal(abv));
-        justification* js = 0;
-        if (proofs_enabled()) {
-            js = 0; // 
-        }
-        ctx.mk_clause(m_antecedents.size(), m_antecedents.c_ptr(), js, CLS_AUX_LEMMA, 0);
-    }
+    void theory_pb::propagate() { }
 
     bool theory_pb::resolve_conflict(card& c, literal_vector const& confl) {
        
-        TRACE("pb", display(tout, c, true); );
+        TRACE(pb, display(tout << "resolve conflict\n", c, true); );
 
         bool_var v;
-        context& ctx = get_context();
-        ast_manager& m = get_manager();
         m_conflict_lvl = 0;
-        m_cardinality_lemma = false;
-        for (unsigned i = 0; i < confl.size(); ++i) {
-            literal lit = confl[i];
+        for (literal lit : confl) {
             SASSERT(ctx.get_assignment(lit) == l_false);
             m_conflict_lvl = std::max(m_conflict_lvl, ctx.get_assign_level(lit));            
         }
         if (m_conflict_lvl < ctx.get_assign_level(c.lit()) || m_conflict_lvl == ctx.get_base_level()) {
             return false;
         }
-
-        // std::cout << c.lit() << "\n";
 
         reset_coeffs();
         m_num_marks = 0;
@@ -2217,8 +1840,19 @@ namespace smt {
         literal conseq = ~confl[2];
         int bound = 1;
 
+        auto clear_marks = [&]() {
+            while (m_num_marks > 0 && idx > 0) {
+                v = lits[idx].var();
+                if (ctx.is_marked(v)) {
+                    ctx.unset_mark(v);
+                }
+                --idx;
+            }
+        };
+
         while (m_num_marks > 0) {
 
+            TRACE(pb, tout << "conseq: " << conseq << "\n");
             v = conseq.var();
 
             int offset = get_abs_coeff(v);
@@ -2228,13 +1862,7 @@ namespace smt {
             }
             SASSERT(validate_lemma());
             if (offset > 1000) {
-                while (m_num_marks > 0 && idx > 0) {
-                    v = lits[idx].var();
-                    if (ctx.is_marked(v)) {
-                        ctx.unset_mark(v);
-                    }
-                    --idx;
-                }
+                clear_marks();
                 return false;
             }
 
@@ -2242,7 +1870,7 @@ namespace smt {
 
             js = ctx.get_justification(v);
 
-            TRACE("pb", 
+            TRACE(pb, 
                   display_resolved_lemma(tout << conseq << "\n");
                   ctx.display(tout, js););
 
@@ -2261,12 +1889,16 @@ namespace smt {
                 inc_coeff(conseq, offset);
                 clause& cls = *js.get_clause();
                 justification* cjs = cls.get_justification();
-                if (cjs && !is_proof_justification(*cjs)) {
-                    TRACE("pb", tout << "skipping justification for clause over: " << conseq << " " 
-                          << typeid(*cjs).name() << "\n";);
+                unsigned num_lits = cls.get_num_literals();
+                CTRACE(pb, cjs, tout << (typeid(smt::unit_resolution_justification) == typeid(*cjs)) << "\n");
+                if (cjs && typeid(smt::unit_resolution_justification) == typeid(*cjs)) {
+                    clear_marks();
+                    return false;
+                }
+                else if (cjs && !is_proof_justification(*cjs)) {                    
+                    TRACE(pb, tout << "not processing justification over: " << conseq << " " << typeid(*cjs).name() << "\n";);
                     break;
                 }
-                unsigned num_lits = cls.get_num_literals();
                 if (cls.get_literal(0) == conseq) {
                    process_antecedent(cls.get_literal(1), offset);
                 }
@@ -2277,7 +1909,7 @@ namespace smt {
                 for (unsigned i = 2; i < num_lits; ++i) {
                     process_antecedent(cls.get_literal(i), offset);
                 }
-                TRACE("pb", tout << literal_vector(cls.get_num_literals(), cls.begin()) << "\n";);
+                TRACE(pb, tout << literal_vector(cls.get_num_literals(), cls.begin()) << "\n";);
                 break;                
             }
             case b_justification::BIN_CLAUSE:
@@ -2285,6 +1917,7 @@ namespace smt {
                 process_antecedent(~js.get_literal(), offset);
                 break;
             case b_justification::AXIOM:
+                bound = 0;
                 break;
             case b_justification::JUSTIFICATION: {
                 justification* j = js.get_justification(); 
@@ -2294,8 +1927,12 @@ namespace smt {
                     pbj = dynamic_cast<card_justification*>(j);
                 }
                 if (pbj == nullptr) {
-                    TRACE("pb", tout << "skip justification for " << conseq << "\n";);
-                    inc_coeff(conseq, offset);
+                    TRACE(pb, tout << "skip justification for " << conseq << "\n";);
+                    bound = 0;
+                    // this is possible when conseq is an assumption.
+                    // The justification of conseq is itself, 
+                    // don't increment the cofficient here because it assumes
+                    // conseq is justified further. it isnt'. conseq becomes part of the lemma.
                 }
                 else {
                     card& c2 = pbj->get_card();
@@ -2303,11 +1940,8 @@ namespace smt {
                     bound = c2.k();
                 }
                 
-                // std::cout << " offset: " << offset << " bound: " << bound << "\n";
                 break;
             }
-            default:
-                UNREACHABLE();
             }            
             m_bound += offset * bound;
 
@@ -2327,7 +1961,8 @@ namespace smt {
             while (true) {
                 conseq = lits[idx];
                 v = conseq.var();
-                if (ctx.is_marked(v)) break;
+                if (ctx.is_marked(v))
+                    break;
                 SASSERT(idx > 0);
                 --idx;
             }
@@ -2339,7 +1974,7 @@ namespace smt {
         }
         SASSERT(validate_lemma());
 
-        TRACE("pb", display_resolved_lemma(tout << "done\n"););
+        TRACE(pb, display_resolved_lemma(tout << "done\n"););
         
 
         normalize_active_coeffs();
@@ -2349,83 +1984,60 @@ namespace smt {
         }
 
         int slack = -m_bound;
-        for (unsigned i = 0; i < m_active_vars.size(); ++i) { 
-            bool_var v = m_active_vars[i];
+        for (bool_var v : m_active_vars) {
             slack += get_abs_coeff(v);
         }
 
-#if 1
-        //std::cout << slack << " " << m_bound << "\n";
         unsigned i = 0;
         literal_vector const& alits = ctx.assigned_literals();
 
         literal alit = get_asserting_literal(~conseq);
         slack -= get_abs_coeff(alit.var());
 
-        for (i = alits.size(); 0 <= slack && i > 0; ) {
-            --i;
+        for (i = alits.size(); 0 <= slack && i-- > 0; ) {
             literal lit = alits[i];
             bool_var v = lit.var();
             // -3*x >= k 
             if (m_active_var_set.contains(v) && v != alit.var()) {
                 int coeff = get_coeff(v);
-                //std::cout << coeff << " " << lit << "\n";
                 if (coeff < 0 && !lit.sign()) {
                     slack += coeff;
                     m_antecedents.push_back(lit);
-                    //std::cout << "ante: " << lit << "\n";
                 }
                 else if (coeff > 0 && lit.sign()) {
                     slack -= coeff;
                     m_antecedents.push_back(lit);
-                    //std::cout << "ante: " << lit << "\n";
                 }
             }
         }
         SASSERT(slack < 0);
 
-#else 
+        ++m_stats.m_num_resolves;
 
-        literal alit = get_asserting_literal(~conseq);
-        slack -= get_abs_coeff(alit.var());
-
-        for (unsigned i = 0; 0 <= slack; ++i) { 
-            SASSERT(i < m_active_vars.size());
-            bool_var v = m_active_vars[i];
-            literal lit(v, get_coeff(v) < 0);
-            if (v != alit.var() && ctx.get_assignment(lit) == l_false) {
-                m_antecedents.push_back(~lit);
-                slack -= get_abs_coeff(v);
-            }
-            if (slack < 0) {
-                std::cout << i << " " << m_active_vars.size() << "\n";
-            }
-        }
-#endif
         SASSERT(validate_antecedents(m_antecedents));
-        ctx.assign(alit, ctx.mk_justification(theory_propagation_justification(get_id(), ctx.get_region(), m_antecedents.size(), m_antecedents.c_ptr(), alit, 0, 0)));
+        TRACE(pb, tout << "assign " << m_antecedents << " ==> " << alit << "\n";);
+        ctx.assign(alit, ctx.mk_justification(theory_propagation_justification(get_id(), ctx, m_antecedents.size(), m_antecedents.data(), alit, 0, nullptr)));
 
         DEBUG_CODE(
             m_antecedents.push_back(~alit);
             expr_ref_vector args(m);
-            for (unsigned i = 0; i < m_antecedents.size(); ++i) {
-                args.push_back(literal2expr(m_antecedents[i]));
+            for (literal lit : m_antecedents) {
+                args.push_back(literal2expr(lit));
             }
-            B = m.mk_not(m.mk_and(args.size(), args.c_ptr()));
+            B = m.mk_not(m.mk_and(args));
             validate_implies(A, B); );
-        // add_cardinality_lemma();
         return true;
     }
 
     bool theory_pb::is_proof_justification(justification const& j) const {
-        return typeid(smt::justification_proof_wrapper) == typeid(j);
+        return typeid(smt::justification_proof_wrapper) == typeid(j) || m.proofs_enabled();           
     }
 
     justification* theory_pb::justify(literal l1, literal l2) {
         literal lits[2] = { l1, l2 };
         justification* js = nullptr;
         if (proofs_enabled()) {                                         
-            js = get_context().mk_justification(theory_axiom_justification(get_id(), get_context().get_region(), 2, lits));
+            js = ctx.mk_justification(theory_axiom_justification(get_id(), ctx, 2, lits));
         }
         return js;
     }
@@ -2433,7 +2045,7 @@ namespace smt {
     justification* theory_pb::justify(literal_vector const& lits) {
         justification* js = nullptr;
         if (proofs_enabled()) {                                         
-            js = get_context().mk_justification(theory_axiom_justification(get_id(), get_context().get_region(), lits.size(), lits.c_ptr()));
+            js = ctx.mk_justification(theory_axiom_justification(get_id(), ctx, lits.size(), lits.data()));
         }
         return js;        
     }
@@ -2456,11 +2068,11 @@ namespace smt {
     void theory_pb::validate_assign(ineq const& c, literal_vector const& lits, literal l) const {
         uint_set nlits;
         for (literal lit : lits) {
-            SASSERT(get_context().get_assignment(lit) == l_true);
+            SASSERT(ctx.get_assignment(lit) == l_true);
             nlits.insert((~lit).index());
         }
-        SASSERT(get_context().get_assignment(l) == l_undef);
-        SASSERT(get_context().get_assignment(c.lit()) == l_true);
+        SASSERT(ctx.get_assignment(l) == l_undef);
+        SASSERT(ctx.get_assignment(c.lit()) == l_true);
         nlits.insert(l.index());
         numeral sum = numeral::zero();
         for (unsigned i = 0; i < c.size(); ++i) {
@@ -2469,7 +2081,7 @@ namespace smt {
                 sum += c.coeff(i);
             }
         }
-        CTRACE("pb", (sum >= c.k()),
+        CTRACE(pb, (sum >= c.k()),
                display(tout << "invalid assign" , c, true);
                for (literal lit : lits) tout << lit << " ";
                tout << " => " << l << "\n";);
@@ -2477,21 +2089,57 @@ namespace smt {
     }
 
     void theory_pb::validate_final_check() {
-        for (unsigned i = 0; i < m_var_infos.size(); ++i) {
-            ineq* c = m_var_infos[i].m_ineq;
-            if (c) {
-                validate_final_check(*c);
+        TRACE(pb, tout << "validate " << m_var_infos.size() << "\n";);
+        for (auto & vi : m_var_infos) {
+            if (vi.m_ineq) {
+                validate_final_check(*vi.m_ineq);
+            }
+            if (vi.m_card) {
+                validate_final_check(*vi.m_card);
             }
         }
     }
 
-    void theory_pb::validate_final_check(ineq& c) {
-        context& ctx = get_context();
-
+    void theory_pb::validate_final_check(card& c) {
         if (ctx.get_assignment(c.lit()) == l_undef) {
+            TRACE(pb, display(tout << "is undef ", c, true););
             return;
         }
         if (!ctx.is_relevant(c.lit())) {
+            TRACE(pb, display(tout << "not relevant ", c, true););
+            return;
+        }
+
+        unsigned sum = 0, maxsum = 0;
+        for (unsigned i = 0; i < c.size(); ++i) {
+            switch(ctx.get_assignment(c.lit(i))) {
+            case l_true:
+                ++sum;
+                Z3_fallthrough;
+            case l_undef:
+                ++maxsum;
+                break;
+            case l_false:
+                break;
+            }
+        }
+        TRACE(pb_verbose, display(tout << "validate: ", c, true);
+              tout << "sum: " << sum << " " << maxsum << " ";
+              tout << ctx.get_assignment(c.lit()) << "\n";);
+
+        VERIFY(sum <= maxsum);
+        VERIFY((sum >= c.k()) == (ctx.get_assignment(c.lit()) == l_true));
+        VERIFY((maxsum < c.k()) == (ctx.get_assignment(c.lit()) == l_false));        
+    }
+
+    void theory_pb::validate_final_check(ineq& c) {
+
+        if (ctx.get_assignment(c.lit()) == l_undef) {
+            TRACE(pb, tout << c.lit() << " is undef\n";);
+            return;
+        }
+        if (!ctx.is_relevant(c.lit())) {
+            TRACE(pb, tout << c.lit() << " is not relevant\n";);
             return;
         }
         numeral sum = numeral::zero(), maxsum = numeral::zero();
@@ -2499,6 +2147,7 @@ namespace smt {
             switch(ctx.get_assignment(c.lit(i))) {
             case l_true:
                 sum += c.coeff(i);
+                Z3_fallthrough;
             case l_undef:
                 maxsum += c.coeff(i);
                 break;
@@ -2506,9 +2155,10 @@ namespace smt {
                 break;
             }
         }
-        TRACE("pb", display(tout << "validate: ", c, true);
+        TRACE(pb, display(tout << "validate: ", c, true);
               tout << "sum: " << sum << " " << maxsum << " ";
               tout << ctx.get_assignment(c.lit()) << "\n";
+              ctx.display(tout);
               );
 
         SASSERT(sum <= maxsum);
@@ -2518,9 +2168,8 @@ namespace smt {
     }
 
     bool theory_pb::validate_antecedents(literal_vector const& lits) {
-        context& ctx = get_context();
-        for (unsigned i = 0; i < lits.size(); ++i) {
-            if (ctx.get_assignment(lits[i]) != l_true) {
+        for (literal lit : lits) {
+            if (ctx.get_assignment(lit) != l_true) {
                 return false;
             }
         }
@@ -2528,21 +2177,20 @@ namespace smt {
     }
 
     bool theory_pb::validate_unit_propagation(card const& c) {
-        context& ctx = get_context();
         for (unsigned i = c.k(); i < c.size(); ++i) {
-            VERIFY(ctx.get_assignment(c.lit(i)) == l_false);
+            if (ctx.get_assignment(c.lit(i)) != l_false) {
+                return false;
+            }
         }
         return true;
     }
 
     app_ref theory_pb::literal2expr(literal lit) {
-        ast_manager& m = get_manager();
-        app_ref arg(m.mk_const(symbol(lit.var()), m.mk_bool_sort()), m);                
+        app_ref arg(m.mk_const(symbol((unsigned)lit.var()), m.mk_bool_sort()), m);                
         return app_ref(lit.sign() ? m.mk_not(arg) : arg, m);
     }
 
     app_ref theory_pb::active2expr() {
-        ast_manager& m = get_manager();
         expr_ref_vector args(m);
         vector<rational> coeffs;
         normalize_active_coeffs();
@@ -2553,22 +2201,17 @@ namespace smt {
             coeffs.push_back(rational(get_abs_coeff(v)));
         }
         rational k(m_bound);
-        return app_ref(pb.mk_ge(args.size(), coeffs.c_ptr(), args.c_ptr(), k), m);
+        return app_ref(pb.mk_ge(args.size(), coeffs.data(), args.data(), k), m);
     }
 
     // display methods
 
     void theory_pb::display_resolved_lemma(std::ostream& out) const {
-        context& ctx = get_context();
-        bool_var v;
-        unsigned lvl;
         out << "num marks: " << m_num_marks << "\n";
         out << "conflict level: " << m_conflict_lvl << "\n";
-        for (unsigned i = 0; i < m_resolved.size(); ++i) {
-            v = m_resolved[i].var();
-            lvl = ctx.get_assign_level(v);
-            out << lvl << ": " << m_resolved[i] << " ";
-            ctx.display(out, ctx.get_justification(v));
+        for (literal r : m_resolved) {
+            out << ctx.get_assign_level(r) << ": " << r << " ";
+            ctx.display(out, ctx.get_justification(r.var()));
         }
 
         if (!m_antecedents.empty()) {
@@ -2576,8 +2219,7 @@ namespace smt {
         }
         uint_set seen;
         bool first = true;
-        for (unsigned i = 0; i < m_active_vars.size(); ++i) {
-            bool_var v = m_active_vars[i];
+        for (bool_var v: m_active_vars) {
             if (seen.contains(v)) {
                 continue;
             }
@@ -2589,30 +2231,24 @@ namespace smt {
             if (!first) {
                 out << " + ";
             }
-            if (coeff == 1) {
-                out << literal(v);
+            literal lit(v, coeff < 0);
+            if (coeff > 1) {
+                out << coeff << " * ";
             }
-            else if (coeff == -1) {
-                out << literal(v, true);
+            else if (coeff < -1) {
+                out << (-coeff) << " * ";
             }
-            else if (coeff > 0) {
-                out << coeff << " * " << literal(v);
-            }
-            else {
-                out << (-coeff) << " * " << literal(v, true);
-            }
+            out << lit << "(" << ctx.get_assignment(lit) << "@" << ctx.get_assign_level(lit) << ")";
             first = false;
         }
         out << " >= " << m_bound << "\n";
     }
 
     std::ostream& theory_pb::display(std::ostream& out, arg_t const& c, bool values) const {
-        return c.display(get_context(), out, values);
+        return c.display(ctx, out, values);
     }
 
     std::ostream& theory_pb::display(std::ostream& out, ineq const& c, bool values) const {
-        ast_manager& m = get_manager();
-        context& ctx = get_context();
         out << c.lit();
         if (c.lit() != null_literal) {
             if (values) {
@@ -2673,10 +2309,10 @@ namespace smt {
         }
 
         void get_dependencies(buffer<model_value_dependency> & result) override {
-            result.append(m_dependencies.size(), m_dependencies.c_ptr());
+            result.append(m_dependencies.size(), m_dependencies.data());
         }
 
-        app * mk_value(model_generator & mg, ptr_vector<expr> & values) override {
+        app * mk_value(model_generator & mg, expr_ref_vector const& values) override {
             ast_manager& m = mg.get_manager();
             SASSERT(values.size() == m_dependencies.size());
             SASSERT(values.size() == m_app->get_num_args());
@@ -2732,12 +2368,10 @@ namespace smt {
     }
 
     model_value_proc * theory_pb::mk_value(enode * n, model_generator & mg) {
-        context& ctx = get_context();
-        app* a = n->get_owner();
+        auto a = n->get_app();
         pb_model_value_proc* p = alloc(pb_model_value_proc, a);
-        for (unsigned i = 0; i < a->get_num_args(); ++i) {
-            p->add(ctx.get_enode(a->get_arg(i)));
-        }
+        for (auto arg : *a)
+            p->add(ctx.get_enode(arg));      
         return p;
     }
 
@@ -2756,16 +2390,6 @@ namespace smt {
         for (unsigned vi = 0; vi < m_var_infos.size(); ++vi) {
             display_watch(out, vi, false);
             display_watch(out, vi, true);
-        }
-        for (unsigned vi = 0; vi < m_var_infos.size(); ++vi) {
-            ineq_watch const* w = m_var_infos[vi].m_var_watch;
-            if (!w) continue;
-            out << "watch (v): " << literal(vi) << " |-> ";
-            ineq_watch const& wl = *w;
-            for (unsigned i = 0; i < wl.size(); ++i) {
-                out << wl[i]->lit() << " ";
-            }
-            out << "\n";
         }
         for (unsigned vi = 0; vi < m_var_infos.size(); ++vi) {
             ineq* c = m_var_infos[vi].m_ineq;

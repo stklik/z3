@@ -12,16 +12,17 @@ Abstract:
 Author:
 
     Leonardo de Moura (leonardo) 2006-09-11.
+    Chuyue Sun (liviasun) 2024-07-18.
 
 Revision History:
 
 --*/
-#ifndef HASHTABLE_H_
-#define HASHTABLE_H_
+#pragma once
+
 #include "util/debug.h"
-#include<ostream>
+#include <ostream>
 #include "util/util.h"
-#include<limits.h>
+#include <climits>
 #include "util/memory_manager.h"
 #include "util/hash.h"
 #include "util/vector.h"
@@ -43,12 +44,11 @@ typedef enum { HT_FREE,
 
 template<typename T>
 class default_hash_entry {
-    unsigned         m_hash; //!< cached hash code
-    hash_entry_state m_state;
+    unsigned         m_hash{ 0 }; //!< cached hash code
+    hash_entry_state m_state = HT_FREE;
     T                m_data;
 public:
     typedef T         data;
-    default_hash_entry():m_state(HT_FREE) {}
     unsigned get_hash() const  { return m_hash; }
     bool is_free() const { return m_state == HT_FREE; }
     bool is_deleted() const { return m_state == HT_DELETED; }
@@ -67,10 +67,9 @@ public:
 template<int Free, int Deleted>
 class int_hash_entry {
     unsigned         m_hash; //!< cached hash code
-    int              m_data;
+    int              m_data = Free;
 public:
     typedef int data;
-    int_hash_entry():m_data(Free) {}
     unsigned get_hash() const { return m_hash; }
     bool is_free() const { return m_data == Free; }
     bool is_deleted() const { return m_data == Deleted; }
@@ -89,10 +88,9 @@ public:
 template<typename T>
 class ptr_hash_entry {
     unsigned        m_hash; //!< cached hash code
-    T *             m_ptr;
+    T *             m_ptr = nullptr;
 public:
     typedef T * data;
-    ptr_hash_entry():m_ptr(nullptr) {}
     unsigned get_hash() const { return m_hash; }
     bool is_free() const { return m_ptr == nullptr; }
     bool is_deleted() const { return m_ptr == reinterpret_cast<T *>(1); }
@@ -112,10 +110,9 @@ public:
 */
 template<typename T>
 class ptr_addr_hash_entry : public ptr_hash_entry<T> {
-    T *             m_ptr;
+    T *             m_ptr = nullptr;
 public:
     typedef T * data;
-    ptr_addr_hash_entry():m_ptr(nullptr) {}
     unsigned get_hash() const { return get_ptr_hash(m_ptr); }
     bool is_free() const { return m_ptr == nullptr; }
     bool is_deleted() const { return m_ptr == reinterpret_cast<T *>(1); }
@@ -132,11 +129,11 @@ template<typename Entry, typename HashProc, typename EqProc>
 class core_hashtable : private HashProc, private EqProc {
 protected:
     Entry *  m_table;
-    unsigned m_capacity;
-    unsigned m_size;
-    unsigned m_num_deleted;
+    unsigned m_capacity = 0;
+    unsigned m_size = 0;
+    unsigned m_num_deleted = 0;
 #ifdef HASHTABLE_STATISTICS
-    unsigned long long m_st_collision;
+    unsigned long long m_st_collision = 0;
 #endif
 
     Entry* alloc_table(unsigned size) {
@@ -246,15 +243,10 @@ public:
                    HashProc const & h = HashProc(), 
                    EqProc const & e = EqProc()):
         HashProc(h),
-        EqProc(e) {
+        EqProc(e),
+        m_capacity(initial_capacity) {
         SASSERT(is_power_of_two(initial_capacity));
-        m_table       = alloc_table(initial_capacity);
-        m_capacity    = initial_capacity;
-        m_size        = 0;
-        m_num_deleted = 0;
-        HS_CODE({
-            m_st_collision = 0;
-        });
+        m_table = alloc_table(initial_capacity);
     }
 
     core_hashtable(const core_hashtable & source):
@@ -264,9 +256,18 @@ public:
         m_table       = alloc_table(m_capacity);
         copy_table(source.m_table, m_capacity, m_table, m_capacity);
         m_size        = source.m_size;
-        m_num_deleted = 0;
+    }
+
+    core_hashtable(core_hashtable && source) noexcept :
+        HashProc(source),
+        EqProc(source),
+        m_table(source.m_table),
+        m_capacity(source.m_capacity),
+        m_size(source.m_size),
+        m_num_deleted(source.m_num_deleted) {
+        source.m_table = nullptr;
         HS_CODE({
-            m_st_collision = 0;
+            m_st_collision = source.m_st_collision;
         });
     }
     
@@ -274,14 +275,8 @@ public:
         delete_table();
     }
 
-    void swap(core_hashtable & source) {
-        std::swap(m_table,       source.m_table);
-        std::swap(m_capacity,    source.m_capacity);
-        std::swap(m_size,        source.m_size);
-        std::swap(m_num_deleted, source.m_num_deleted);
-        HS_CODE({
-            std::swap(m_st_collision, source.m_st_collision);
-        });
+    void swap(core_hashtable & source) noexcept {
+        std::swap(*this, source);
     }
 
     void reset() {
@@ -396,8 +391,7 @@ public:
     }
 
     void insert(const data & e) {
-        data tmp(e);
-        insert(std::move(tmp));
+        insert(data(e));
     }
 
 #define INSERT_LOOP_CORE_BODY() {                                               \
@@ -453,8 +447,7 @@ public:
     }
 
     bool insert_if_not_there_core(const data & e, entry * & et) {
-        data temp(e);
-        return insert_if_not_there_core(std::move(temp), et);
+        return insert_if_not_there_core(data(e), et);
     }
 
     /**
@@ -463,7 +456,7 @@ public:
        that was already in the table.
      */
     data const & insert_if_not_there(data const & e) {
-        entry * et;
+        entry * et = nullptr;
         insert_if_not_there_core(e, et);
         return et->get_data();
     }
@@ -473,7 +466,7 @@ public:
        Return the entry that contains e.
     */
     entry * insert_if_not_there2(data const & e) {
-        entry * et;
+        entry * et = nullptr;
         insert_if_not_there_core(e, et);
         return et;
     }
@@ -628,8 +621,33 @@ public:
         return *this;
     }
 
+    core_hashtable& operator=(core_hashtable && other) {
+        if (this == &other) return *this;
+        delete_table();
+        m_table = other.m_table;
+        m_capacity = other.m_capacity;
+        m_size = other.m_size;
+        m_num_deleted = other.m_num_deleted;
+        HS_CODE(m_st_collision = other.m_st_collision);
+        other.m_table = nullptr;
+        return *this;
+    }
+
 #ifdef Z3DEBUG
     bool check_invariant() {
+        // The capacity must always be a power of two.
+        if (!is_power_of_two(m_capacity))
+            return false;
+
+        // The number of deleted plus the size must not exceed the capacity.
+        if (m_num_deleted + m_size > m_capacity)
+            return false;
+
+        // Checking that m_num_deleted is less than or equal to m_size.
+        if (m_num_deleted > m_size) {
+            return false;
+        }
+
         entry * curr = m_table;
         entry * end  = m_table + m_capacity;
         unsigned num_deleted = 0;
@@ -690,6 +708,10 @@ public:
               HashProc const & h = HashProc(), 
               EqProc const & e = EqProc()):
         core_hashtable<default_hash_entry<T>, HashProc, EqProc>(initial_capacity, h, e) {}
+    hashtable(const hashtable & source) = delete;
+    hashtable(hashtable && source) noexcept = default;
+    hashtable& operator=(const hashtable & other) = default;
+    hashtable& operator=(hashtable && other) noexcept = default;
 };
 
 template<typename T, typename HashProc, typename EqProc>
@@ -699,6 +721,10 @@ public:
                   HashProc const & h = HashProc(), 
                   EqProc const & e = EqProc()):
         core_hashtable<ptr_hash_entry<T>, HashProc, EqProc>(initial_capacity, h, e) {}
+    ptr_hashtable(const ptr_hashtable & source) = delete;
+    ptr_hashtable(ptr_hashtable && source) noexcept = default;
+    ptr_hashtable& operator=(const ptr_hashtable & other) = delete;
+    ptr_hashtable& operator=(ptr_hashtable && other) noexcept = default;
 };
 
 /**
@@ -710,6 +736,10 @@ public:
     typedef typename core_hashtable<ptr_addr_hash_entry<T>, ptr_hash<T>, ptr_eq<T> >::iterator iterator;
     ptr_addr_hashtable(unsigned initial_capacity = DEFAULT_HASHTABLE_INITIAL_CAPACITY):
         core_hashtable<ptr_addr_hash_entry<T>, ptr_hash<T>, ptr_eq<T> >(initial_capacity) {}
+    ptr_addr_hashtable(const ptr_addr_hashtable & source) = delete;
+    ptr_addr_hashtable(ptr_addr_hashtable && source) noexcept = default;
+    ptr_addr_hashtable& operator=(const ptr_addr_hashtable & other) = delete;
+    ptr_addr_hashtable& operator=(ptr_addr_hashtable && other) noexcept = default;
 
     iterator begin() const { 
         UNREACHABLE();
@@ -735,7 +765,8 @@ public:
                   HashProc const & h = HashProc(), 
                   EqProc const & e = EqProc()):
         core_hashtable<int_hash_entry<INT_MIN, INT_MIN + 1>, HashProc, EqProc>(initial_capacity, h, e) {}
+    int_hashtable(const int_hashtable & source) = delete;
+    int_hashtable(int_hashtable && source) noexcept = default;
+    int_hashtable& operator=(const int_hashtable & other) = delete;
+    int_hashtable& operator=(int_hashtable && other) noexcept = default;
 };
-
-
-#endif /* HASHTABLE_H_ */

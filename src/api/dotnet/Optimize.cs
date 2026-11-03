@@ -19,14 +19,14 @@ Notes:
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.Contracts;
+using System.Diagnostics;
+using System.Linq;
 
 namespace Microsoft.Z3
 {
     /// <summary>
-    /// Object for managing optimizization context
+    /// Object for managing optimization context
     /// </summary>
-    [ContractVerification(true)]
     public class Optimize : Z3Object
     {
         /// <summary>
@@ -36,7 +36,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<string>() != null);
                 return Native.Z3_optimize_get_help(Context.nCtx, NativeObject);
             }
         }
@@ -48,11 +47,52 @@ namespace Microsoft.Z3
         {
             set
             {
-                Contract.Requires(value != null);
+                Debug.Assert(value != null);
                 Context.CheckContextMatch(value);
                 Native.Z3_optimize_set_params(Context.nCtx, NativeObject, value.NativeObject);
             }
         }
+
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(string name, bool value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(string name, uint value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(string name, double value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(string name, string value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(string name, Symbol value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(Symbol name, bool value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(Symbol name, uint value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(Symbol name, double value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(Symbol name, string value) { Parameters = Context.MkParams().Add(name, value); }
+	/// <summary>
+	/// Sets parameter on the optimize solver
+	/// </summary>
+	public void Set(Symbol name, Symbol value) { Parameters = Context.MkParams().Add(name, value); }
 
         /// <summary>
         /// Retrieves parameter descriptions for Optimize solver.
@@ -99,8 +139,8 @@ namespace Microsoft.Z3
         /// </summary>   
         private void AddConstraints(IEnumerable<BoolExpr> constraints)
         {
-            Contract.Requires(constraints != null);
-            Contract.Requires(Contract.ForAll(constraints, c => c != null));
+            Debug.Assert(constraints != null);
+            Debug.Assert(constraints.All(c => c != null));
 
             Context.CheckContextMatch(constraints);
             foreach (BoolExpr a in constraints)
@@ -108,6 +148,28 @@ namespace Microsoft.Z3
                 Native.Z3_optimize_assert(Context.nCtx, NativeObject, a.NativeObject);
             }
         }
+
+        /// <summary>
+        /// Assert a constraint into the optimize solver, and track it (in the unsat) core 
+        /// using the Boolean constant p. 
+        /// </summary>
+        /// <remarks>
+        /// This API is an alternative to <see cref="Check(Expr[])"/> with assumptions for extracting unsat cores.
+        /// Both APIs can be used in the same solver. The unsat core will contain a combination
+        /// of the Boolean variables provided using <see cref="AssertAndTrack(BoolExpr,BoolExpr)"/> 
+        /// and the Boolean literals
+        /// provided using <see cref="Check(Expr[])"/> with assumptions.
+        /// </remarks>        
+        public void AssertAndTrack(BoolExpr constraint, BoolExpr p)
+        {
+            Debug.Assert(constraint != null);
+            Debug.Assert(p != null);
+            Context.CheckContextMatch(constraint);
+            Context.CheckContextMatch(p);
+                        
+            Native.Z3_optimize_assert_and_track(Context.nCtx, NativeObject, constraint.NativeObject, p.NativeObject);
+        }
+
         /// <summary>
         /// Handle to objectives returned by objective functions.
         /// </summary>
@@ -172,7 +234,7 @@ namespace Microsoft.Z3
         public Handle AssertSoft(BoolExpr constraint, uint weight, string group)
         {
             Context.CheckContextMatch(constraint);
-            Symbol s = Context.MkSymbol(group);
+            using Symbol s = Context.MkSymbol(group);
             return new Handle(this, Native.Z3_optimize_assert_soft(Context.nCtx, NativeObject, constraint.NativeObject, weight.ToString(), s.NativeObject));
         }
 
@@ -180,12 +242,12 @@ namespace Microsoft.Z3
         /// <summary>
         /// Check satisfiability of asserted constraints.
         /// Produce a model that (when the objectives are bounded and 
-        /// don't use strict inequalities) meets the objectives.
+        /// don't use strict inequalities) is optimal.
         /// </summary>
         ///
-        public Status Check()
+        public Status Check(params Expr[] assumptions)
         {
-            Z3_lbool r = (Z3_lbool)Native.Z3_optimize_check(Context.nCtx, NativeObject);
+            Z3_lbool r = (Z3_lbool)Native.Z3_optimize_check(Context.nCtx, NativeObject, (uint)assumptions.Length, AST.ArrayToNative(assumptions));
             switch (r)
             {
                 case Z3_lbool.Z3_L_TRUE:
@@ -237,6 +299,24 @@ namespace Microsoft.Z3
         }
 
         /// <summary>
+        /// The unsat core of the last <c>Check</c>.
+        /// </summary>
+        /// <remarks>
+        /// The unsat core is a subset of <c>assumptions</c>
+        /// The result is empty if <c>Check</c> was not invoked before,
+        /// if its results was not <c>UNSATISFIABLE</c>, or if core production is disabled.
+        /// </remarks>
+        public BoolExpr[] UnsatCore
+        {
+            get
+            {
+
+                using ASTVector core = new ASTVector(Context, Native.Z3_optimize_get_unsat_core(Context.nCtx, NativeObject));                
+                return core.ToBoolExprArray();
+            }
+        }
+
+        /// <summary>
         /// Declare an arithmetical maximization objective.
         /// Return a handle to the objective. The handle is used as
         /// to retrieve the values of objectives after calling Check.
@@ -279,7 +359,7 @@ namespace Microsoft.Z3
         /// </summary>            
         private Expr[] GetLowerAsVector(uint index)
         {
-            ASTVector v = new ASTVector(Context, Native.Z3_optimize_get_lower_as_vector(Context.nCtx, NativeObject, index));
+            using ASTVector v = new ASTVector(Context, Native.Z3_optimize_get_lower_as_vector(Context.nCtx, NativeObject, index));
             return v.ToExprArray();
         }
 
@@ -289,7 +369,7 @@ namespace Microsoft.Z3
         /// </summary>            
         private Expr[] GetUpperAsVector(uint index)
         {
-            ASTVector v = new ASTVector(Context, Native.Z3_optimize_get_upper_as_vector(Context.nCtx, NativeObject, index));
+            using ASTVector v = new ASTVector(Context, Native.Z3_optimize_get_upper_as_vector(Context.nCtx, NativeObject, index));
             return v.ToExprArray();
         }
 
@@ -300,7 +380,6 @@ namespace Microsoft.Z3
         {
             get 
             {
-                Contract.Ensures(Contract.Result<string>() != null);
                 return Native.Z3_optimize_get_reason_unknown(Context.nCtx, NativeObject);
             }
         }
@@ -338,9 +417,8 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<BoolExpr[]>() != null);
 
-                ASTVector assertions = new ASTVector(Context, Native.Z3_optimize_get_assertions(Context.nCtx, NativeObject));
+                using ASTVector assertions = new ASTVector(Context, Native.Z3_optimize_get_assertions(Context.nCtx, NativeObject));
                 return assertions.ToBoolExprArray();
             }
         }
@@ -352,13 +430,22 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<Expr[]>() != null);
 
-                ASTVector objectives = new ASTVector(Context, Native.Z3_optimize_get_objectives(Context.nCtx, NativeObject));
+                using ASTVector objectives = new ASTVector(Context, Native.Z3_optimize_get_objectives(Context.nCtx, NativeObject));
                 return objectives.ToExprArray();
             }
         }
 
+
+        /// <summary>
+        /// Set an initial value for a variable to guide the optimizer's search heuristics.
+        /// </summary>
+        public void SetInitialValue(Expr var, Expr value)
+        {
+            Debug.Assert(var != null);
+            Debug.Assert(value != null);
+            Native.Z3_optimize_set_initial_value(Context.nCtx, NativeObject, var.NativeObject, value.NativeObject);
+        }
 
         /// <summary>
         /// Optimize statistics.
@@ -367,7 +454,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<Statistics>() != null);
 
                 return new Statistics(Context, Native.Z3_optimize_get_statistics(Context.nCtx, NativeObject));
             }
@@ -378,39 +464,26 @@ namespace Microsoft.Z3
         internal Optimize(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
         }
         internal Optimize(Context ctx)
             : base(ctx, Native.Z3_mk_optimize(ctx.nCtx))
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
         }
-
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_optimize_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_optimize_dec_ref(ctx.nCtx, obj);
-            }
-        };
 
         internal override void IncRef(IntPtr o)
         {
-            Context.Optimize_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_optimize_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.Optimize_DRQ.Add(o);
-            base.DecRef(o);
+            lock (Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_optimize_dec_ref(Context.nCtx, o);
+            }
         }
         #endregion
     }

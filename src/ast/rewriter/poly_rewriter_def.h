@@ -16,9 +16,12 @@ Author:
 Notes:
 
 --*/
+#pragma once
+
+#include "util/container_util.h"
 #include "ast/rewriter/poly_rewriter.h"
-#include "ast/rewriter/poly_rewriter_params.hpp"
-#include "ast/rewriter/arith_rewriter_params.hpp"
+#include "params/poly_rewriter_params.hpp"
+#include "params/arith_rewriter_params.hpp"
 #include "ast/ast_lt.h"
 #include "ast/ast_ll_pp.h"
 #include "ast/ast_smt2_pp.h"
@@ -30,7 +33,7 @@ void poly_rewriter<Config>::updt_params(params_ref const & _p) {
     m_flat = p.flat();
     m_som  = p.som();
     m_hoist_mul = p.hoist_mul();
-    m_hoist_cmul = p.hoist_cmul();
+    m_hoist_ite = p.hoist_ite();
     m_som_blowup = p.som_blowup();
     if (!m_flat) m_som = false;
     if (m_som) m_hoist_mul = false;
@@ -48,7 +51,7 @@ expr * poly_rewriter<Config>::mk_add_app(unsigned num_args, expr * const * args)
     switch (num_args) {
     case 0: return mk_numeral(numeral(0));
     case 1: return args[0];
-    default: return m().mk_app(get_fid(), add_decl_kind(), num_args, args);
+    default: return M().mk_app(get_fid(), add_decl_kind(), num_args, args);
     }
 }
 
@@ -83,42 +86,48 @@ expr * poly_rewriter<Config>::mk_mul_app(unsigned num_args, expr * const * args)
         return args[0];
     default: 
         if (use_power()) {
+            sort* s = args[0]->get_sort();
             rational k_prev;
             expr * prev = get_power_body(args[0], k_prev);
             rational k;
             ptr_buffer<expr> new_args;
-#define PUSH_POWER() {                                                                          \
-                if (k_prev.is_one()) {                                                          \
-                    new_args.push_back(prev);                                                   \
-                }                                                                               \
-                else {                                                                          \
-                    expr * pargs[2] = { prev, mk_numeral(k_prev) };                             \
-                    new_args.push_back(m().mk_app(get_fid(), power_decl_kind(), 2, pargs));     \
-                }                                                                               \
-            }
+            auto push_power = [&]() { 
+                if (k_prev.is_one())                                                           
+                    new_args.push_back(this->coerce(prev, s));
+                else  
+                    new_args.push_back(this->mk_power(prev, k_prev, s));
+            };
  
-            for (unsigned i = 1; i < num_args; i++) {
+            for (unsigned i = 1; i < num_args; ++i) {
                 expr * arg = get_power_body(args[i], k);
                 if (arg == prev) {
                     k_prev += k;
                 }
                 else {
-                    PUSH_POWER();
+                    push_power();
                     prev   = arg;
                     k_prev = k;
                 }
             }
-            PUSH_POWER();
+            push_power();
             SASSERT(new_args.size() > 0);
             if (new_args.size() == 1) {
                 return new_args[0];
             }
             else {
-                return m().mk_app(get_fid(), mul_decl_kind(), new_args.size(), new_args.c_ptr());
+                numeral a;
+                if (new_args.size() > 2 && is_numeral(new_args.get(0), a)) {
+                    return mk_mul_app(a, mk_mul_app(new_args.size() - 1, new_args.data() + 1));
+                }
+                return M().mk_app(get_fid(), mul_decl_kind(), new_args.size(), new_args.data());
             }
         }
         else {
-            return m().mk_app(get_fid(), mul_decl_kind(), num_args, args);
+            numeral a;
+            if (num_args > 2 && is_numeral(args[0], a)) {
+                return mk_mul_app(a, mk_mul_app(num_args - 1, args + 1));
+            }
+            return M().mk_app(get_fid(), mul_decl_kind(), num_args, args);
         }
     }
 }
@@ -145,7 +154,7 @@ br_status poly_rewriter<Config>::mk_flat_mul_core(unsigned num_args, expr * cons
     // - (* c (* x_1 ... x_n))
     if (num_args != 2 || !is_numeral(args[0]) || (is_mul(args[1]) && is_numeral(to_app(args[1])->get_arg(0)))) {
         unsigned i;
-        for (i = 0; i < num_args; i++) {
+        for (i = 0; i < num_args; ++i) {
             if (is_mul(args[i]))
                 break;
         }
@@ -155,7 +164,7 @@ br_status poly_rewriter<Config>::mk_flat_mul_core(unsigned num_args, expr * cons
             // we need the todo buffer to handle: (* (* c (* x_1 ... x_n)) (* d (* y_1 ... y_n)))
             ptr_buffer<expr> todo;
             flat_args.append(i, args);
-            for (unsigned j = i; j < num_args; j++) {
+            for (unsigned j = i; j < num_args; ++j) {
                 if (is_mul(args[j])) {
                     todo.push_back(args[j]);
                     while (!todo.empty()) {
@@ -177,14 +186,16 @@ br_status poly_rewriter<Config>::mk_flat_mul_core(unsigned num_args, expr * cons
                     flat_args.push_back(args[j]);
                 }
             }
-            TRACE("poly_rewriter",
+            br_status st = mk_nflat_mul_core(flat_args.size(), flat_args.data(), result);
+            TRACE(poly_rewriter,
                   tout << "flat mul:\n";
-                  for (unsigned i = 0; i < num_args; i++) tout << mk_bounded_pp(args[i], m()) << "\n";
+                  for (unsigned i = 0; i < num_args; ++i) tout << mk_bounded_pp(args[i], M()) << "\n";
                   tout << "---->\n";
-                  for (unsigned i = 0; i < flat_args.size(); i++) tout << mk_bounded_pp(flat_args[i], m()) << "\n";);
-            br_status st = mk_nflat_mul_core(flat_args.size(), flat_args.c_ptr(), result);
+                  for (unsigned i = 0; i < flat_args.size(); ++i) tout << mk_bounded_pp(flat_args[i], M()) << "\n";
+                  tout << st << "\n";
+                  );
             if (st == BR_FAILED) {
-                result = mk_mul_app(flat_args.size(), flat_args.c_ptr());
+                result = mk_mul_app(flat_args.size(), flat_args.data());
                 return BR_DONE;
             }
             return st;
@@ -207,7 +218,7 @@ br_status poly_rewriter<Config>::mk_nflat_mul_core(unsigned num_args, expr * con
     unsigned num_coeffs = 0;
     unsigned num_add    = 0;
     expr *  var         = nullptr;
-    for (unsigned i = 0; i < num_args; i++) {
+    for (unsigned i = 0; i < num_args; ++i) {
         expr * arg = args[i];
         if (is_numeral(arg, a)) {
             num_coeffs++;
@@ -257,8 +268,8 @@ br_status poly_rewriter<Config>::mk_nflat_mul_core(unsigned num_args, expr * con
             }
         }
         
-        if (num_add == 0 || m_hoist_cmul) {
-            SASSERT(!is_add(var) || m_hoist_cmul);
+        if (num_add == 0) {
+            SASSERT(!is_add(var));
             if (num_args == 2 && args[1] == var) {
                 DEBUG_CODE({ 
                     numeral c_prime;
@@ -277,14 +288,26 @@ br_status poly_rewriter<Config>::mk_nflat_mul_core(unsigned num_args, expr * con
             // (* c_1 ... c_n (+ t_1 ... t_m)) --> (+ (* c_1*...*c_n t_1) ... (* c_1*...*c_n t_m))
             ptr_buffer<expr> new_add_args;
             unsigned num = to_app(var)->get_num_args();
-            for (unsigned i = 0; i < num; i++) {
+            for (unsigned i = 0; i < num; ++i) {
                 new_add_args.push_back(mk_mul_app(c, to_app(var)->get_arg(i)));
             }
-            result = mk_add_app(new_add_args.size(), new_add_args.c_ptr());
-            TRACE("mul_bug", tout << "result: " << mk_bounded_pp(result, m(),5) << "\n";);
+            result = mk_add_app(new_add_args.size(), new_add_args.data());
+            TRACE(mul_bug, tout << "result: " << mk_bounded_pp(result, M(), 5) << "\n";);
             return BR_REWRITE2;
         }
     }
+
+    if (num_coeffs > 1 || (num_coeffs == 1 && !is_numeral(args[0]))) {
+        ptr_buffer<expr> m_args;
+        for (unsigned i = 0; i < num_args; i ++) {
+            if (!is_numeral(args[i])) {
+                m_args.push_back(args[i]);
+            }
+        }
+        result = mk_mul_app(c, mk_mul_app(m_args.size(), m_args.data()));
+        return BR_REWRITE2;
+    }
+
 
     SASSERT(num_coeffs <= num_args - 2);
 
@@ -292,7 +315,7 @@ br_status poly_rewriter<Config>::mk_nflat_mul_core(unsigned num_args, expr * con
         ptr_buffer<expr> new_args;
         expr * prev = nullptr;
         bool ordered = true;
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * curr = args[i];
             if (is_numeral(curr))
                 continue;
@@ -301,30 +324,33 @@ br_status poly_rewriter<Config>::mk_nflat_mul_core(unsigned num_args, expr * con
             new_args.push_back(curr);
             prev = curr;
         }
-        TRACE("poly_rewriter", 
-              for (unsigned i = 0; i < new_args.size(); i++) {
+        TRACE(poly_rewriter, 
+              for (unsigned i = 0; i < new_args.size(); ++i) {
                   if (i > 0)
                       tout << (lt(new_args[i-1], new_args[i]) ? " < " : " !< ");
-                  tout << mk_ismt2_pp(new_args[i], m());
+                  tout << mk_ismt2_pp(new_args[i], M());
               }
               tout << "\nordered: " << ordered << "\n";);
         if (ordered && num_coeffs == 0 && !use_power())
             return BR_FAILED;
         if (!ordered) {
             std::sort(new_args.begin(), new_args.end(), lt);
-        TRACE("poly_rewriter",
+        TRACE(poly_rewriter,
                   tout << "after sorting:\n";
-                  for (unsigned i = 0; i < new_args.size(); i++) {
+                  for (unsigned i = 0; i < new_args.size(); ++i) {
                       if (i > 0)
                           tout << (lt(new_args[i-1], new_args[i]) ? " < " : " !< ");
-                      tout << mk_ismt2_pp(new_args[i], m());
+                      tout << mk_ismt2_pp(new_args[i], M());
                   }
                   tout << "\n";);
         }
         SASSERT(new_args.size() >= 2);
-        result = mk_mul_app(new_args.size(), new_args.c_ptr());
+        result = mk_mul_app(new_args.size(), new_args.data());
         result = mk_mul_app(c, result);
-        TRACE("poly_rewriter", tout << "mk_nflat_mul_core result:\n" << mk_ismt2_pp(result, m()) << "\n";);
+        TRACE(poly_rewriter, 
+              for (unsigned i = 0; i < num_args; ++i)
+                  tout << mk_ismt2_pp(args[i], M()) << " ";
+              tout << "\nmk_nflat_mul_core result:\n" << mk_ismt2_pp(result, M()) << "\n";);
         return BR_DONE;
     }
 
@@ -346,31 +372,33 @@ br_status poly_rewriter<Config>::mk_nflat_mul_core(unsigned num_args, expr * con
             SASSERT(sums.back()[0] == arg);
         }
     }
-    expr_ref_buffer sum(m()); // must be ref_buffer because we may throw an exception
+    unsigned orig_size = sums.size();
+    expr_ref_buffer sum(M()); // must be ref_buffer because we may throw an exception
     ptr_buffer<expr> m_args;
-    TRACE("som", tout << "starting som...\n";);
+    TRACE(som, tout << "starting soM()...\n";);
     do {
-        TRACE("som", for (unsigned i = 0; i < it.size(); i++) tout << it[i] << " ";
+        TRACE(som, for (unsigned i = 0; i < it.size(); ++i) tout << it[i] << " ";
               tout << "\n";);
-        if (sum.size() > m_som_blowup)
-            throw rewriter_exception("sum of monomials blowup");
+        if (sum.size() > m_som_blowup * orig_size) {
+            return BR_FAILED;
+        }
         m_args.reset();
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * const * v = sums[i];
             expr * arg       = v[it[i]];
-            m_args.push_back(arg);
+            m_args.push_back(arg);            
         }
-        sum.push_back(mk_mul_app(m_args.size(), m_args.c_ptr()));
+        sum.push_back(mk_mul_app(m_args.size(), m_args.data()));
     }
-    while (product_iterator_next(szs.size(), szs.c_ptr(), it.c_ptr()));
-    result = mk_add_app(sum.size(), sum.c_ptr());
+    while (product_iterator_next(szs.size(), szs.data(), it.data()));
+    result = mk_add_app(sum.size(), sum.data());
     return BR_REWRITE2;
 }
 
 template<typename Config>
 br_status poly_rewriter<Config>::mk_flat_add_core(unsigned num_args, expr * const * args, expr_ref & result) {
     unsigned i;
-    for (i = 0; i < num_args; i++) {
+    for (i = 0; i < num_args; ++i) {
         if (is_add(args[i]))
             break;
     }
@@ -378,21 +406,21 @@ br_status poly_rewriter<Config>::mk_flat_add_core(unsigned num_args, expr * cons
         // has nested ADDs
         ptr_buffer<expr> flat_args;
         flat_args.append(i, args);
-        for (; i < num_args; i++) {
+        for (; i < num_args; ++i) {
             expr * arg = args[i];
             // Remark: all rewrites are depth 1.
             if (is_add(arg)) {
                 unsigned num = to_app(arg)->get_num_args();
-                for (unsigned j = 0; j < num; j++)
+                for (unsigned j = 0; j < num; ++j)
                     flat_args.push_back(to_app(arg)->get_arg(j));
             }
             else {
                 flat_args.push_back(arg);
             }
         }
-        br_status st = mk_nflat_add_core(flat_args.size(), flat_args.c_ptr(), result);
+        br_status st = mk_nflat_add_core(flat_args.size(), flat_args.data(), result);
         if (st == BR_FAILED) {
-            result = mk_add_app(flat_args.size(), flat_args.c_ptr());
+            result = mk_add_app(flat_args.size(), flat_args.data());
             return BR_DONE;
         }
         return st;
@@ -416,7 +444,7 @@ inline expr * poly_rewriter<Config>::get_power_product(expr * t, numeral & a) {
 }
 
 template<typename Config>
-bool poly_rewriter<Config>::is_mul(expr * t, numeral & c, expr * & pp) {
+bool poly_rewriter<Config>::is_mul(expr * t, numeral & c, expr * & pp) const {
     if (!is_mul(t) || to_app(t)->get_num_args() != 2)
         return false;
     if (!is_numeral(to_app(t)->get_arg(0), c))
@@ -426,66 +454,41 @@ bool poly_rewriter<Config>::is_mul(expr * t, numeral & c, expr * & pp) {
 }
 
 template<typename Config>
-struct poly_rewriter<Config>::hoist_cmul_lt {
-    poly_rewriter<Config> & m_r;
-    hoist_cmul_lt(poly_rewriter<Config> & r):m_r(r) {}
-
-    bool operator()(expr * t1, expr * t2) const {
-        expr * pp1 = nullptr;
-        expr * pp2 = nullptr;
-        numeral c1, c2;
-        bool is_mul1 = m_r.is_mul(t1, c1, pp1);
-        bool is_mul2 = m_r.is_mul(t2, c2, pp2);
-        if (!is_mul1 && is_mul2)
+bool poly_rewriter<Config>::gcd_test(expr* lhs, expr* rhs) const {
+    numeral g(0), offset(0), c;
+    expr* t = nullptr;
+    unsigned sz = 0; 
+    expr* const* args = get_monomials(lhs, sz);
+    auto test = [&](bool side, expr* e) {
+        if (is_numeral(e, c)) {
+            if (!c.is_int())
+                return false;
+            if (side)                
+                offset += c;
+            else
+                offset -= c;
             return true;
-        if (is_mul1 && !is_mul2)
-            return false;
-        if (!is_mul1 && !is_mul2)
-            return t1->get_id() < t2->get_id();
-        if (c1 < c2)
-            return true;
-        if (c1 > c2)
-            return false;
-        return pp1->get_id() < pp2->get_id();
-    }
-};
-
-template<typename Config>
-void poly_rewriter<Config>::hoist_cmul(expr_ref_buffer & args) {
-    unsigned sz = args.size();
-    std::sort(args.c_ptr(), args.c_ptr() + sz, hoist_cmul_lt(*this));
-    numeral c, c_prime;
-    ptr_buffer<expr> pps;
-    expr * pp, * pp_prime;
-    unsigned j = 0;
-    unsigned i = 0;
-    while (i < sz) {
-        expr * mon = args[i];
-        if (is_mul(mon, c, pp) && i < sz - 1) {
-            expr * mon_prime = args[i+1];
-            if (is_mul(mon_prime, c_prime, pp_prime) && c == c_prime) {
-                // found target
-                pps.reset();
-                pps.push_back(pp);
-                pps.push_back(pp_prime);
-                i += 2;
-                while (i < sz && is_mul(args[i], c_prime, pp_prime) && c == c_prime) {
-                    pps.push_back(pp_prime);
-                    i++;
-                }
-                SASSERT(is_numeral(to_app(mon)->get_arg(0), c_prime) && c == c_prime);
-                expr * mul_args[2] = { to_app(mon)->get_arg(0), mk_add_app(pps.size(), pps.c_ptr()) };
-                args.set(j, mk_mul_app(2, mul_args));
-                j++;
-                continue;
-            }
         }
-        args.set(j, mon);
-        j++;
-        i++;
-    }
-    args.resize(j);
+        else if (is_mul(e, c, t)) {
+            if (!c.is_int() || c.is_zero())
+                return false;
+            g = gcd(abs(c), g);
+            return !g.is_one();
+        }
+        return false;
+    };
+    for (unsigned i = 0; i < sz; ++i) 
+        if (!test(true, args[i]))
+            return true;        
+    args = get_monomials(rhs, sz);
+    for (unsigned i = 0; i < sz; ++i) 
+        if (!test(false, args[i]))
+            return true;
+    if (!offset.is_zero() && !g.is_zero() && !divides(g, offset))
+        return false;
+    return true;
 }
+
 
 template<typename Config>
 bool poly_rewriter<Config>::mon_lt::operator()(expr* e1, expr * e2) const {
@@ -535,7 +538,7 @@ br_status poly_rewriter<Config>::mk_nflat_add_core(unsigned num_args, expr * con
     bool     has_multiple = false;
     expr *   prev = nullptr;
     bool     ordered  = true;
-    for (unsigned i = 0; i < num_args; i++) {
+    for (unsigned i = 0; i < num_args; ++i) {
         expr * arg = args[i];
 
         if (is_numeral(arg, a)) {
@@ -561,16 +564,16 @@ br_status poly_rewriter<Config>::mk_nflat_add_core(unsigned num_args, expr * con
     }
     normalize(c);
     SASSERT(m_sort_sums || ordered);
-    TRACE("rewriter", 
+    TRACE(rewriter, 
           tout << "ordered: " << ordered << " sort sums: " << m_sort_sums << "\n";
-          for (unsigned i = 0; i < num_args; i++) tout << mk_ismt2_pp(args[i], m()) << "\n";);
+          for (unsigned i = 0; i < num_args; ++i) tout << mk_ismt2_pp(args[i], M()) << "\n";);
 
     if (has_multiple) {
         // expensive case
         buffer<numeral>  coeffs;
         m_expr2pos.reset();
         // compute the coefficient of power products that occur multiple times.
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * arg = args[i];
             if (is_numeral(arg))
                 continue;
@@ -586,13 +589,13 @@ br_status poly_rewriter<Config>::mk_nflat_add_core(unsigned num_args, expr * con
                 coeffs.push_back(a);
             }
         }
-        expr_ref_buffer new_args(m());
+        expr_ref_buffer new_args(M());
         if (!c.is_zero()) {
             new_args.push_back(mk_numeral(c));
         }
         // copy power products with non zero coefficients to new_args
         visited.reset();
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * arg = args[i];
             if (is_numeral(arg))
                 continue;
@@ -611,51 +614,51 @@ br_status poly_rewriter<Config>::mk_nflat_add_core(unsigned num_args, expr * con
                     new_args.push_back(mk_mul_app(a, pp));
             }
         }
-        if (m_hoist_cmul) {
-            hoist_cmul(new_args);
-        }
-        else if (m_sort_sums) {
-            TRACE("rewriter_bug", tout << "new_args.size(): " << new_args.size() << "\n";);
+        if (m_sort_sums) {
+            TRACE(rewriter_bug, tout << "new_args.size(): " << new_args.size() << "\n";);
             if (c.is_zero())
-                std::sort(new_args.c_ptr(), new_args.c_ptr() + new_args.size(), mon_lt(*this));
+                std::sort(new_args.data(), new_args.data() + new_args.size(), mon_lt(*this));
             else
-                std::sort(new_args.c_ptr() + 1, new_args.c_ptr() + new_args.size(), mon_lt(*this));
+                std::sort(new_args.data() + 1, new_args.data() + new_args.size(), mon_lt(*this));
         }
-        result = mk_add_app(new_args.size(), new_args.c_ptr());
-        TRACE("rewriter", tout << result << "\n";);
+        result = mk_add_app(new_args.size(), new_args.data());
+        TRACE(rewriter, tout << result << "\n";);
         if (hoist_multiplication(result)) {
+            return BR_REWRITE_FULL;
+        }
+        if (hoist_ite(result)) {
             return BR_REWRITE_FULL;
         }
         return BR_DONE;
     }
     else {
         SASSERT(!has_multiple);
-        if (ordered && !m_hoist_mul && !m_hoist_cmul) {
+        if (ordered && !m_hoist_mul && !m_hoist_ite) {
             if (num_coeffs == 0)
                 return BR_FAILED; 
             if (num_coeffs == 1 && is_numeral(args[0], a) && !a.is_zero())
                 return BR_FAILED;
         }
-        expr_ref_buffer new_args(m());
+        expr_ref_buffer new_args(M());
         if (!c.is_zero())
             new_args.push_back(mk_numeral(c));
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * arg = args[i];
             if (is_numeral(arg))
                 continue;
             new_args.push_back(arg);
         }
-        if (m_hoist_cmul) {
-            hoist_cmul(new_args);
-        }
-        else if (!ordered) {
+        if (!ordered) {
             if (c.is_zero())
-                std::sort(new_args.c_ptr(), new_args.c_ptr() + new_args.size(), lt);
+                std::sort(new_args.data(), new_args.data() + new_args.size(), lt);
             else 
-                std::sort(new_args.c_ptr() + 1, new_args.c_ptr() + new_args.size(), lt);
-    }
-        result = mk_add_app(new_args.size(), new_args.c_ptr());        
+                std::sort(new_args.data() + 1, new_args.data() + new_args.size(), lt);
+        }
+        result = mk_add_app(new_args.size(), new_args.data());        
         if (hoist_multiplication(result)) {
+            return BR_REWRITE_FULL;
+        }
+        if (hoist_ite(result)) {
             return BR_REWRITE_FULL;
         }
         return BR_DONE;
@@ -666,7 +669,7 @@ br_status poly_rewriter<Config>::mk_nflat_add_core(unsigned num_args, expr * con
 template<typename Config>
 br_status poly_rewriter<Config>::mk_uminus(expr * arg, expr_ref & result) {
     numeral a;
-    set_curr_sort(m().get_sort(arg));
+    set_curr_sort(arg->get_sort());
     if (is_numeral(arg, a)) {
         a.neg();
         normalize(a);
@@ -686,16 +689,16 @@ br_status poly_rewriter<Config>::mk_sub(unsigned num_args, expr * const * args, 
         result = args[0];
         return BR_DONE;
     }
-    set_curr_sort(m().get_sort(args[0]));
-    expr_ref minus_one(mk_numeral(numeral(-1)), m());
-    expr_ref_buffer new_args(m());
+    set_curr_sort(args[0]->get_sort());
+    expr_ref minus_one(mk_numeral(numeral(-1)), M());
+    expr_ref_buffer new_args(M());
     new_args.push_back(args[0]);
-    for (unsigned i = 1; i < num_args; i++) {
+    for (unsigned i = 1; i < num_args; ++i) {
         if (is_zero(args[i])) continue;
         expr * aux_args[2] = { minus_one, args[i] };
         new_args.push_back(mk_mul_app(2, aux_args));
     }
-    result = mk_add_app(new_args.size(), new_args.c_ptr());
+    result = mk_add_app(new_args.size(), new_args.data());
     return BR_REWRITE2;
 }
 
@@ -706,7 +709,7 @@ br_status poly_rewriter<Config>::mk_sub(unsigned num_args, expr * const * args, 
 */
 template<typename Config>
 br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool move, expr_ref & lhs_result, expr_ref & rhs_result) {
-    set_curr_sort(m().get_sort(lhs));
+    set_curr_sort(lhs->get_sort());
     mon_lt lt(*this);
     unsigned lhs_sz;
     expr * const * lhs_monomials = get_monomials(lhs, lhs_sz);
@@ -721,7 +724,7 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
     numeral a;
     unsigned num_coeffs = 0;
 
-    for (unsigned i = 0; i < lhs_sz; i++) {
+    for (unsigned i = 0; i < lhs_sz; ++i) {
         expr * arg = lhs_monomials[i];
         if (is_numeral(arg, a)) {
             c += a;
@@ -733,11 +736,10 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
     }
 
     if (move && num_coeffs == 0 && is_numeral(rhs)) {
-        TRACE("mk_le_bug", tout << "no coeffs\n";);
         return BR_FAILED;
     }
 
-    for (unsigned i = 0; i < rhs_sz; i++) {
+    for (unsigned i = 0; i < rhs_sz; ++i) {
         expr * arg = rhs_monomials[i];
         if (is_numeral(arg, a)) {
             c -= a;
@@ -769,7 +771,7 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
     
     buffer<numeral>  coeffs;
     m_expr2pos.reset();
-    for (unsigned i = 0; i < lhs_sz; i++) {
+    for (unsigned i = 0; i < lhs_sz; ++i) {
         expr * arg = lhs_monomials[i];
         if (is_numeral(arg))
             continue;
@@ -786,7 +788,7 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
         }
     }
 
-    for (unsigned i = 0; i < rhs_sz; i++) {
+    for (unsigned i = 0; i < rhs_sz; ++i) {
         expr * arg = rhs_monomials[i];
         if (is_numeral(arg))
             continue;
@@ -804,7 +806,7 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
     new_lhs_monomials.push_back(0); // save space for coefficient if needed
     // copy power products with non zero coefficients to new_lhs_monomials
     visited.reset();
-    for (unsigned i = 0; i < lhs_sz; i++) {
+    for (unsigned i = 0; i < lhs_sz; ++i) {
         expr * arg = lhs_monomials[i];
         if (is_numeral(arg))
             continue;
@@ -825,7 +827,7 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
     
     ptr_buffer<expr> new_rhs_monomials;
     new_rhs_monomials.push_back(0); // save space for coefficient if needed
-    for (unsigned i = 0; i < rhs_sz; i++) {
+    for (unsigned i = 0; i < rhs_sz; ++i) {
         expr * arg = rhs_monomials[i];
         if (is_numeral(arg))
             continue;
@@ -877,9 +879,9 @@ br_status poly_rewriter<Config>::cancel_monomials(expr * lhs, expr * rhs, bool m
     const unsigned rhs_offset = insert_c_rhs ? 0 : 1;
     new_rhs_monomials[0] = insert_c_rhs ? mk_numeral(c) : nullptr;
     new_lhs_monomials[0] = insert_c_lhs ? mk_numeral(c) : nullptr;
-    lhs_result = mk_add_app(new_lhs_monomials.size() - lhs_offset, new_lhs_monomials.c_ptr() + lhs_offset);
-    rhs_result = mk_add_app(new_rhs_monomials.size() - rhs_offset, new_rhs_monomials.c_ptr() + rhs_offset);
-    TRACE("mk_le_bug", tout << lhs_result << " " << rhs_result << "\n";);
+    lhs_result = mk_add_app(new_lhs_monomials.size() - lhs_offset, new_lhs_monomials.data() + lhs_offset);
+    rhs_result = mk_add_app(new_rhs_monomials.size() - rhs_offset, new_rhs_monomials.data() + rhs_offset);
+    TRACE(le_bug, tout << lhs_result << " " << rhs_result << "\n";);
     return BR_DONE;
 }
 
@@ -920,7 +922,7 @@ bool poly_rewriter<Config>::hoist_multiplication(expr_ref& som) {
                 continue;
             }
             if (mul_map.find(e, j) && valid[j] && j != k) {
-                m_curr_sort = m().get_sort(adds[k]);
+                m_curr_sort = adds[k]->get_sort();
                 adds[j]  = merge_muls(adds[j], adds[k]);
                 adds[k]  = mk_numeral(rational(0)); 
                 valid[j] = false;
@@ -937,7 +939,7 @@ bool poly_rewriter<Config>::hoist_multiplication(expr_ref& som) {
         return false;
     }
     
-    som = mk_add_app(adds.size(), adds.c_ptr());
+    som = mk_add_app(adds.size(), adds.data());
     
        
     return true;
@@ -963,18 +965,126 @@ expr* poly_rewriter<Config>::merge_muls(expr* x, expr* y) {
             ++k;
         }
     }
-    m_curr_sort = m().get_sort(x);
+    m_curr_sort = x->get_sort();
     SASSERT(k > 0);
     SASSERT(m1.size() >= k); 
     SASSERT(m2.size() >= k);
-    expr* args[2] = { mk_mul_app(m1.size()-k, m1.c_ptr()+k), 
-                      mk_mul_app(m2.size()-k, m2.c_ptr()+k) };
+    expr* args[2] = { mk_mul_app(m1.size()-k, m1.data()+k), 
+                      mk_mul_app(m2.size()-k, m2.data()+k) };
     if (k == m1.size()) {
         m1.push_back(0);
     }
     m1[k] = mk_add_app(2, args);
-    return mk_mul_app(k+1, m1.c_ptr());
+    return mk_mul_app(k+1, m1.data());
 }
+
+template<typename Config>
+bool poly_rewriter<Config>::hoist_ite(expr_ref& e) {
+    if (!m_hoist_ite)  
+        return false;
+    obj_hashtable<expr> shared;
+    ptr_buffer<expr> adds;
+    expr_ref_vector bs(M()), pinned(M());
+    TO_BUFFER(is_add, adds, e);
+    unsigned i = 0;
+    for (expr* a : adds) {
+        if (M().is_ite(a)) {
+            shared.reset();
+            numeral g(0);
+            if (hoist_ite(a, shared, g) && (is_nontrivial_gcd(g) || !shared.empty())) {
+                bs.reset();
+                if (!shared.empty()) {
+                    g = numeral(1);
+                }
+                bs.push_back(apply_hoist(a, g, shared));
+                if (is_nontrivial_gcd(g)) {
+                    bs.push_back(mk_numeral(g));
+                    bs[0] = mk_mul_app(2, bs.data());
+                    bs.pop_back();
+                }
+                else {
+                    for (expr* s : shared) {
+                        bs.push_back(s);
+                    }
+                }
+                expr* a2 = mk_add_app(bs.size(), bs.data()); 
+                if (a != a2) {
+                    adds[i] = a2;
+                    pinned.push_back(a2);
+                }
+            }
+        }
+        ++i;
+    }
+    if (!pinned.empty()) {
+        e = mk_add_app(adds.size(), adds.data());
+        return true;
+    }
+    return false;
+}
+
+template<typename Config>
+bool poly_rewriter<Config>::hoist_ite(expr* a, obj_hashtable<expr>& shared, numeral& g) {
+    expr* c = nullptr, *t = nullptr, *e = nullptr;
+    if (M().is_ite(a, c, t, e)) {
+        return hoist_ite(t, shared, g) && hoist_ite(e, shared, g);
+    }
+    rational k, g1;
+    if (is_int_numeral(a, k)) {
+        return false;
+    }
+    ptr_buffer<expr> adds;
+    TO_BUFFER(is_add, adds, a);    
+    if (g.is_zero()) { // first 
+        for (expr* e : adds) {
+            shared.insert(e);            
+        }        
+    }
+    else {
+        obj_hashtable<expr> tmp;        
+        for (expr* e : adds) {
+            tmp.insert(e);            
+        }
+        set_intersection<obj_hashtable<expr>, obj_hashtable<expr>>(shared, tmp);
+    }
+    if (shared.empty())
+        return false;
+    // ensure that expression occur uniquely, otherwise 
+    // using the shared hash-table is unsound.
+    ast_mark is_marked;
+    for (expr* e : adds) {
+        if (is_marked.is_marked(e))
+            return false;
+        is_marked.mark(e, true);
+    }
+    g = numeral(1);
+    return true;
+}
+
+template<typename Config>
+expr* poly_rewriter<Config>::apply_hoist(expr* a, numeral const& g, obj_hashtable<expr> const& shared) {
+    expr* c = nullptr, *t = nullptr, *e = nullptr;
+    if (M().is_ite(a, c, t, e)) {
+        expr_ref then_expr(apply_hoist(t, g, shared), M());
+        expr_ref else_expr(apply_hoist(e, g, shared), M());
+        return M().mk_ite(c, then_expr, else_expr);
+    }
+    rational k;
+    if (is_nontrivial_gcd(g) && is_int_numeral(a, k)) {
+        return mk_numeral(k/g);
+    }
+    ptr_buffer<expr> adds;
+    TO_BUFFER(is_add, adds, a);
+    unsigned i = 0;
+    for (expr* e : adds) {
+        if (!shared.contains(e)) {
+            adds[i++] = e;
+        }
+    }
+    adds.shrink(i);
+    return mk_add_app(adds.size(), adds.data());
+}
+
 
 template<typename Config>
 bool poly_rewriter<Config>::is_times_minus_one(expr * n, expr* & r) const {
@@ -1031,6 +1141,6 @@ bool poly_rewriter<Config>::is_var_plus_ground(expr * n, bool & inv, var * & v, 
     if (v == nullptr)
         return false; // did not find variable
     SASSERT(!args.empty());
-    mk_add(args.size(), args.c_ptr(), t);
+    mk_add(args.size(), args.data(), t);
     return true;
 }

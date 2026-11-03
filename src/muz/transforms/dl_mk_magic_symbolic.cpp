@@ -63,8 +63,6 @@ namespace datalog {
         m(ctx.get_manager()),
         m_ctx(ctx) {        
     }
-
-    mk_magic_symbolic::~mk_magic_symbolic() { }
         
     rule_set * mk_magic_symbolic::operator()(rule_set const & source) {
         if (!m_ctx.magic()) {
@@ -72,12 +70,12 @@ namespace datalog {
         }
         context& ctx = source.get_context();
         rule_manager& rm = source.get_rule_manager();
-        rule_set * result = alloc(rule_set, ctx);
+        scoped_ptr<rule_set> result = alloc(rule_set, ctx);
         unsigned sz = source.get_num_rules();
         rule_ref new_rule(rm);
         app_ref_vector tail(m);
         app_ref head(m);
-        svector<bool> neg;
+        bool_vector neg;
         for (unsigned i = 0; i < sz; ++i) {            
             rule & r = *source.get_rule(i);
             unsigned utsz = r.get_uninterpreted_tail_size();
@@ -94,7 +92,7 @@ namespace datalog {
                 tail.push_back(mk_ans(r.get_tail(j)));
                 neg.push_back(false);
             }
-            new_rule = rm.mk(mk_ans(r.get_head()), tail.size(), tail.c_ptr(), neg.c_ptr(), r.name(), true);
+            new_rule = rm.mk(mk_ans(r.get_head()), tail.size(), tail.data(), neg.data(), r.name(), true);
             result->add_rule(new_rule);                
             if (source.is_output_predicate(r.get_decl())) {
                 result->set_output_predicate(new_rule->get_decl());
@@ -103,13 +101,13 @@ namespace datalog {
             }
 
             for (unsigned j = 0; j < utsz; ++j) {
-                new_rule = rm.mk(mk_query(r.get_tail(j)), tail.size()-utsz+j, tail.c_ptr(), neg.c_ptr(), r.name(), true);
+                new_rule = rm.mk(mk_query(r.get_tail(j)), tail.size()-utsz+j, tail.data(), neg.data(), r.name(), true);
                 result->add_rule(new_rule);
             }            
             
         }
-        TRACE("dl", result->display(tout););
-        return result;
+        TRACE(dl, result->display(tout););
+        return result.detach();
     }
 
     app_ref mk_magic_symbolic::mk_query(app* q) {
@@ -132,4 +130,4 @@ namespace datalog {
         return app_ref(m.mk_app(g, q->get_num_args(), q->get_args()), m);        
     }
 
-};
+}

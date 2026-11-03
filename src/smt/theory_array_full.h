@@ -16,28 +16,36 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_ARRAY_FULL_H_
-#define THEORY_ARRAY_FULL_H_
+#pragma once
 
 #include "smt/theory_array.h"
 #include "ast/ast_trail.h"
 
 namespace smt {
 
-    class theory_array_full : public theory_array {
+    class theory_array_full final : public theory_array {
         struct var_data_full {
             ptr_vector<enode>  m_maps;
             ptr_vector<enode>  m_consts;
             ptr_vector<enode>  m_as_arrays;
+            ptr_vector<enode>  m_lambdas;
             ptr_vector<enode>  m_parent_maps;
-            var_data_full() {}
         };
 
         ptr_vector<var_data_full> m_var_data_full;
 
-        ast2ast_trailmap<sort,app> m_sort2epsilon;
-        obj_pair_map<expr,expr,bool> m_eqs;
-        svector<literal>             m_eqsv;
+        ast2ast_trailmap<sort, app> m_sort2epsilon;
+        ast2ast_trailmap<sort, func_decl> m_sort2diag;
+        obj_pair_map<expr, expr, bool> m_eqs;
+        enode_vector m_choice_terms;
+        unsigned m_choice_qhead = 0;
+        
+        static unsigned const m_default_map_fingerprint = UINT_MAX - 112;
+        static unsigned const m_default_store_fingerprint = UINT_MAX - 113;
+        static unsigned const m_default_const_fingerprint = UINT_MAX - 115;
+        static unsigned const m_default_as_array_fingerprint = UINT_MAX - 116;
+        static unsigned const m_default_lambda_fingerprint = UINT_MAX - 117;
+        static unsigned const m_choice_fingerprint = UINT_MAX - 118;
 
     protected:
 
@@ -54,12 +62,16 @@ namespace smt {
         bool internalize_atom(app * atom, bool gate_ctx) override;
         void pop_scope_eh(unsigned num_scopes) override;
         theory_var mk_var(enode * n) override;
-        void relevant_eh(app * n) override;
+        void relevant_eh(expr * n) override;
+
+        bool should_research(expr_ref_vector & unsat_core) override;
+        void add_theory_assumptions(expr_ref_vector & assumptions) override;
 
         void add_const(theory_var v, enode* c);
         void add_map(theory_var v, enode* s);
         void add_parent_map(theory_var v, enode* s);
         void add_as_array(theory_var v, enode* arr);
+        void add_lambda(theory_var v, enode* lam);
 
         void add_parent_select(theory_var v, enode * s) override;
         void add_parent_default(theory_var v);        
@@ -70,23 +82,34 @@ namespace smt {
         bool instantiate_default_store_axiom(enode* store);
         bool instantiate_default_map_axiom(enode* map);
         bool instantiate_default_as_array_axiom(enode* arr);
+        bool instantiate_default_lambda_def_axiom(enode* arr);
 
-        bool has_large_domain(app* array_term);
-        app* mk_epsilon(sort* s);
+        bool instantiate_choice_axiom(enode* ch);
+        bool instantiate_parent_stores_default(theory_var v);
+
+
+        std::pair<app*,func_decl*> mk_epsilon(sort* s);
+        enode_vector m_as_array;
+        enode_vector m_lambdas;
+        bool instantiate_lambda_defaults();
+        bool assert_lambda_congruence();
+        bool has_non_beta_as_array();
+        bool is_supported_array_eq(enode* p);
 
         bool instantiate_select_const_axiom(enode* select, enode* cnst);
         bool instantiate_select_as_array_axiom(enode* select, enode* arr);
         bool instantiate_select_map_axiom(enode* select, enode* map);
-
         bool instantiate_axiom_map_for(theory_var v);
 
 
         bool try_assign_eq(expr* n1, expr* n2);
         void assign_eqs();
 
+        lbool check_const_arrays();
+
         
     public:
-        theory_array_full(ast_manager & m, theory_array_params & params);
+        theory_array_full(context& ctx);
         ~theory_array_full() override;
 
         theory * mk_fresh(context * new_ctx) override;
@@ -94,15 +117,8 @@ namespace smt {
         void merge_eh(theory_var v1, theory_var v2, theory_var, theory_var) override;
         void display_var(std::ostream & out, theory_var v) const override;
         void collect_statistics(::statistics & st) const override;
-        void init(context* ctx) override {
-            // the parent class is theory_array.
-            // theory::init(ctx); 
-            theory_array::init(ctx); 
-        }
-
+        bool can_propagate() override { return theory_array::can_propagate() || m_choice_qhead < m_choice_terms.size(); }
+        void propagate() override;
     };
 
-};
-
-#endif /* THEORY_ARRAY_H_ */
-
+}

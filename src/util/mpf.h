@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MPF_H_
-#define MPF_H_
+#pragma once
 
 #include<string>
 #include "util/mpz.h"
@@ -37,6 +36,11 @@ typedef enum {
 
 typedef int64_t mpf_exp_t;
 
+// mpf stores ebits and sbits in bit-fields of these widths; larger formats
+// cannot be represented and must be rejected before an mpf is created.
+const unsigned MPF_MAX_EBITS = (1u << 15) - 1;
+const unsigned MPF_MAX_SBITS = (1u << 16) - 1;
+
 class mpf {
     friend class mpf_manager;
     friend class scoped_mpf;
@@ -45,21 +49,15 @@ class mpf {
     unsigned sign:1; // counts as one sbit.
     mpz significand;
     mpf_exp_t exponent;
-    mpf & operator=(mpf const & other) { UNREACHABLE(); return *this; }
     void set(unsigned _ebits, unsigned _sbits);
 public:
     mpf();
     mpf(unsigned ebits, unsigned sbits);
-    mpf(mpf && other) :
-        ebits(other.ebits),
-        sbits(other.sbits),
-        sign(other.sign),
-        significand(std::move(other.significand)),
-        exponent(other.exponent) {}
-    ~mpf();
+    mpf(mpf &&) = default;
+    mpf & operator=(mpf const & other) = delete;
     unsigned get_ebits() const { return ebits; }
     unsigned get_sbits() const { return sbits; }
-    void swap(mpf & other);
+    void swap(mpf & other) noexcept;
 };
 
 class mpf_manager {
@@ -70,7 +68,6 @@ public:
     typedef mpf numeral;
 
     mpf_manager();
-    ~mpf_manager();
 
     void reset(mpf & o, unsigned ebits, unsigned sbits) { set(o, ebits, sbits, 0); }
     void set(mpf & o, unsigned ebits, unsigned sbits, int value);
@@ -94,6 +91,8 @@ public:
 
     void neg(mpf & o);
     void neg(mpf const & x, mpf & o);
+    
+    void swap(mpf& a, mpf& b) noexcept { a.swap(b); }
 
     bool is_zero(mpf const & x);
     bool is_neg(mpf const & x);
@@ -253,9 +252,9 @@ protected:
         }
 
         void dispose(u_map<mpz*> & map) {
-            for (u_map<mpz*>::iterator it = map.begin(); it != map.end(); it++) {
-                m.del(*it->m_value);
-                dealloc(it->m_value);
+            for (auto& kv : map) {
+                m.del(*kv.m_value);
+                dealloc(kv.m_value);
             }
         }
 
@@ -325,5 +324,3 @@ public:
 };
 
 typedef _scoped_numeral_vector<mpf_manager> scoped_mpf_vector;
-
-#endif

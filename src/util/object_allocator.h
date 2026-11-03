@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef OBJECT_ALLOCATOR_H_
-#define OBJECT_ALLOCATOR_H_
+#pragma once
 
 #include "util/util.h"
 #include "util/vector.h"
@@ -71,7 +70,7 @@ class object_allocator : public ResetProc {
 
         void call_destructors_for_page(T * page, unsigned end) {
             T * page_end = page + end;
-            for (; page < page_end; page++)
+            for (; page < page_end; ++page)
                 page->~T();
         }
 
@@ -175,7 +174,7 @@ public:
         if (num_workers > old_capacity) {
             m_regions.resize(num_workers);
             m_free_lists.resize(num_workers);
-            for (unsigned i = old_capacity; i < capacity(); i++) {
+            for (unsigned i = old_capacity; i < capacity(); ++i) {
                 m_regions[i] = alloc(region);
             }
         }
@@ -195,7 +194,7 @@ public:
     void reset() {
         SASSERT(!m_concurrent);
         unsigned c = capacity();
-        for (unsigned i = 0; i < c; i++) {
+        for (unsigned i = 0; i < c; ++i) {
             m_regions[i]->reset();
             m_free_lists[i].reset();
         }
@@ -276,7 +275,7 @@ public:
     unsigned get_objects_count() const {
         unsigned count = 0;
         unsigned n_regions = m_regions.size();
-        for (unsigned i = 0; i < n_regions; i++) {
+        for (unsigned i = 0; i < n_regions; ++i) {
             count += m_regions[i]->get_objects_count();
             count -= m_free_lists[i].size();
         }
@@ -285,5 +284,4 @@ public:
 
 };
 
-#endif /* OBJECT_ALLOCATOR_H_ */
 

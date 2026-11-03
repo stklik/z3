@@ -18,8 +18,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_SIMPLIFIER_H_
-#define SAT_SIMPLIFIER_H_
+#pragma once
 
 #include "sat/sat_types.h"
 #include "sat/sat_clause.h"
@@ -32,26 +31,32 @@ Revision History:
 #include "util/statistics.h"
 #include "util/params.h"
 
+namespace pb {
+    class solver;
+}
+
 namespace sat {
     class solver;
 
     class use_list {
         vector<clause_use_list> m_use_list;
+        
     public:
         void init(unsigned num_vars);
+        void reserve(unsigned num_vars) { while (m_use_list.size() <= 2*num_vars) m_use_list.push_back(clause_use_list()); }
         void insert(clause & c);
         void block(clause & c);
         void unblock(clause & c);
         void erase(clause & c);
         void erase(clause & c, literal l);
-        clause_use_list & get(literal l) { return m_use_list[l.index()]; }
-        clause_use_list const & get(literal l) const { return m_use_list[l.index()]; }
+        clause_use_list& get(literal l) { return m_use_list[l.index()]; }
+        clause_use_list const& get(literal l) const { return m_use_list[l.index()]; }
         void finalize() { m_use_list.finalize(); }
         std::ostream& display(std::ostream& out, literal l) const { return m_use_list[l.index()].display(out); }
     };
 
     class simplifier {
-        friend class ba_solver;
+        friend class pb::solver;
         friend class elim_vars;
         solver &               s;
         unsigned               m_num_calls;
@@ -61,7 +66,7 @@ namespace sat {
         svector<bin_clause>    m_sub_bin_todo;
         unsigned               m_last_sub_trail_sz; // size of the trail since last cleanup
         bool_var_set           m_elim_todo;
-        bool                   m_need_cleanup;
+        bool                   m_need_cleanup = false;
         tmp_clause             m_dummy;
 
         // simplifier extra variable fields.
@@ -74,7 +79,7 @@ namespace sat {
         // config
         bool                   m_abce; // block clauses using asymmetric added literals
         bool                   m_cce;  // covered clause elimination
-        bool                   m_acce; // cce with asymetric literal addition
+        bool                   m_acce; // cce with asymmetric literal addition
         bool                   m_bca;  // blocked (binary) clause addition. 
         unsigned               m_bce_delay; 
         bool                   m_bce;  // blocked clause elimination
@@ -127,15 +132,13 @@ namespace sat {
         void init_visited();
         void mark_visited(literal l) { m_visited[l.index()] = true; }
         void unmark_visited(literal l) { m_visited[l.index()] = false; }
-        bool is_marked(literal l) const { return m_visited[l.index()] != 0; }
+        
         void mark_all_but(clause const & c, literal l);
         void unmark_all(clause const & c);
 
         void register_clauses(clause_vector & cs);
 
-        void remove_clause_core(clause & c);
-        void remove_clause(clause & c);
-        void remove_clause(clause & c, literal l);
+        void remove_clause(clause & c, bool is_unique);
         void set_learned(clause & c);
         void set_learned(literal l1, literal l2);
 
@@ -154,7 +157,7 @@ namespace sat {
         void collect_subsumed0(clause const & c1, clause_vector & out);
         void back_subsumption0(clause & c1);
 
-        bool cleanup_clause(clause & c, bool in_use_list);
+        bool cleanup_clause(clause & c);
         bool cleanup_clause(literal_vector & c);
         void elim_lit(clause & c, literal l);
         void elim_dup_bins();
@@ -164,7 +167,7 @@ namespace sat {
 
         void cleanup_watches();
         void move_clauses(clause_vector & cs, bool learned);
-        void cleanup_clauses(clause_vector & cs, bool learned, bool vars_eliminated, bool in_use_lists);
+        void cleanup_clauses(clause_vector & cs, bool learned, bool vars_eliminated);
 
         bool is_external(bool_var v) const;
         bool is_external(literal l) const { return is_external(l.var()); }
@@ -242,7 +245,10 @@ namespace sat {
         void propagate_unit(literal l);
         void subsume();
 
-    };
-};
+        bool is_marked(literal l) const { return m_visited[l.index()] != 0; }
 
-#endif
+        bool need_cleanup() const { return m_need_cleanup; }
+
+    };
+}
+

@@ -24,17 +24,18 @@ Revision History:
 #include "util/container_util.h"
 
 
-proof_post_order::proof_post_order(proof* root, ast_manager& manager) : m(manager)
-{m_todo.push_back(root);}
+proof_post_order::proof_post_order(proof* root, ast_manager& manager) : m(manager) {
+    m_todo.push_back(root);
+}
 
-bool proof_post_order::hasNext()
-{return !m_todo.empty();}
+bool proof_post_order::hasNext() {
+    return !m_todo.empty();
+}
 
 /*
  * iterative post-order depth-first search (DFS) through the proof DAG
  */
-proof* proof_post_order::next()
-{
+proof* proof_post_order::next() {
     while (!m_todo.empty()) {
         proof* currentNode = m_todo.back();
 
@@ -93,8 +94,7 @@ class reduce_hypotheses {
     // stack
     ptr_vector<proof> m_todo;
 
-    void reset()
-    {
+    void reset() {
         m_cache.reset();
         m_units.reset();
         m_hyps.reset();
@@ -102,8 +102,7 @@ class reduce_hypotheses {
         m_pinned.reset();
     }
 
-    bool compute_mark1(proof *pr)
-    {
+    bool compute_mark1(proof *pr) {
         bool hyp_mark = false;
         // lemmas clear all hypotheses
         if (!m.is_lemma(pr)) {
@@ -168,7 +167,7 @@ class reduce_hypotheses {
                 pp = m.get_parent(p, i);
                 if (m_cache.find(pp, tmp)) {
                     args.push_back(tmp);
-                    dirty = dirty || pp != tmp;
+                    dirty |= pp != tmp;
                 } else {
                     m_todo.push_back(pp);
                 }
@@ -193,18 +192,18 @@ class reduce_hypotheses {
                 compute_mark1(res);
             } else if (m.is_unit_resolution(p)) {
                 // unit: reduce units; reduce the first premise; rebuild unit resolution
-                res = mk_unit_resolution_core(args.size(), args.c_ptr());
+                res = mk_unit_resolution_core(args.size(), args.data());
                 compute_mark1(res);
             } else  {
                 // other: reduce all premises; reapply
                 if (m.has_fact(p)) { args.push_back(to_app(m.get_fact(p))); }
                 SASSERT(p->get_decl()->get_arity() == args.size());
-                res = m.mk_app(p->get_decl(), args.size(), (expr * const*)args.c_ptr());
-                m_pinned.push_back(res);
+                res = m.mk_app(p->get_decl(), args.size(), (expr * const*)args.data());
                 compute_mark1(res);
             }
 
             SASSERT(res);
+            m_pinned.push_back(res);
             m_cache.insert(p, res);
 
             if (m.has_fact(res) && m.is_false(m.get_fact(res))) { break; }
@@ -216,10 +215,7 @@ class reduce_hypotheses {
     // returns true if (hypothesis (not a)) would be reduced
     bool is_reduced(expr *a)
     {
-        expr_ref e(m);
-        if (m.is_not(a)) { e = to_app(a)->get_arg(0); }
-        else { e = m.mk_not(a); }
-
+        expr_ref e(mk_not(m, a), m);
         return m_units.contains(e);
     }
 
@@ -229,21 +225,20 @@ class reduce_hypotheses {
         expr_ref lemma(m);
 
         if (m.is_or(fact)) {
-            for (unsigned i = 0, sz = to_app(fact)->get_num_args(); i < sz; ++i) {
-                expr *a = to_app(fact)->get_arg(i);
+            for (expr* a : *to_app(fact)) {
                 if (!is_reduced(a))
-                { args.push_back(a); }
+                    args.push_back(a); 
             }
-        } else if (!is_reduced(fact))
-        { args.push_back(fact); }
-
-
-        if (args.size() == 0) { return pf; }
-        else if (args.size() == 1) {
-            lemma = args.get(0);
-        } else {
-            lemma = m.mk_or(args.size(), args.c_ptr());
+        } 
+        else if (!is_reduced(fact)) { 
+            args.push_back(fact); 
         }
+
+
+        if (args.empty()) { 
+            return pf; 
+        }
+        lemma = mk_or(m, args.size(), args.data());
         proof* res = m.mk_lemma(pf, lemma);
         m_pinned.push_back(res);
 
@@ -265,7 +260,7 @@ class reduce_hypotheses {
             { cls.push_back(cls_fact->get_arg(i)); }
         } else { cls.push_back(cls_fact); }
 
-        // construct new resovent
+        // construct new resolvent
         ptr_buffer<expr> new_fact_cls;
         bool found;
         // XXX quadratic
@@ -285,10 +280,10 @@ class reduce_hypotheses {
 
         SASSERT(new_fact_cls.size() + pf_args.size() - 1 == cls.size());
         expr_ref new_fact(m);
-        new_fact = mk_or(m, new_fact_cls.size(), new_fact_cls.c_ptr());
+        new_fact = mk_or(m, new_fact_cls.size(), new_fact_cls.data());
 
         // create new proof step
-        proof *res = m.mk_unit_resolution(pf_args.size(), pf_args.c_ptr(), new_fact);
+        proof *res = m.mk_unit_resolution(pf_args.size(), pf_args.data(), new_fact);
         m_pinned.push_back(res);
         return res;
     }
@@ -468,11 +463,13 @@ public:
     reduce_hypotheses0(ast_manager& m): m(m), m_refs(m) {}
     
     void operator()(proof_ref& pr) {
+        if (!pr)
+            throw default_exception("proof reduction requires well defined proofs");
         proof_ref tmp(m);
         tmp = pr;
         elim(pr);
         reset();
-        CTRACE("proof_utils", contains_hypothesis(pr),
+        CTRACE(proof_utils, contains_hypothesis(pr),
             tout << "Contains hypothesis:\n";
             tout << mk_ismt2_pp(tmp, m) << "\n====>\n";
             tout << mk_ismt2_pp(pr, m) << "\n";);
@@ -559,7 +556,7 @@ public:
                     clause = m_literals[0];
                 }
                 else {
-                    clause = m.mk_or(m_literals.size(), m_literals.c_ptr());
+                    clause = m.mk_or(m_literals);
                 }
                 tmp = m.mk_lemma(tmp, clause);
                 m_refs.push_back(tmp);
@@ -572,7 +569,7 @@ public:
             m_hypmap.insert(result, new_hyps);
             // might push 0 into m_hyprefs. No reason for that
             m_hyprefs.push_back(new_hyps);
-            TRACE("proof_utils",            
+            TRACE(proof_utils,            
                     tout << "New lemma: " << mk_pp(m.get_fact(p), m) 
                       << "\n==>\n" 
                       << mk_pp(m.get_fact(result), m) << "\n";
@@ -607,7 +604,7 @@ public:
                 // -- otherwise, the fact has not changed. nothing to simplify
                 SASSERT(m.get_fact(tmp) == m.get_fact(m.get_parent(p, i)));
                 parents.push_back(tmp);          
-                // remember that we have this derivation while we have not poped the trail
+                // remember that we have this derivation while we have not popped the trail
                 // but only if the proof is closed (i.e., a real unit)
                 if (is_closed(tmp) && !m_units.contains(m.get_fact(tmp))) {
                     m_units.insert(m.get_fact(tmp), tmp);
@@ -645,7 +642,7 @@ public:
                     if (m.is_complement(clause, m.get_fact(parents[i].get()))) {
                         parents[1] = parents[i].get();
                         parents.resize(2);
-                        result = m.mk_unit_resolution(parents.size(), parents.c_ptr());
+                        result = m.mk_unit_resolution(parents.size(), parents.data());
                         m_refs.push_back(result);               
                         add_hypotheses(result);
                         found = true;
@@ -682,7 +679,7 @@ public:
                 result = parents[0].get();
             }
             else {
-                result = m.mk_unit_resolution(parents.size(), parents.c_ptr());
+                result = m.mk_unit_resolution(parents.size(), parents.data());
                 m_refs.push_back(result);               
                 add_hypotheses(result);
             }
@@ -712,7 +709,7 @@ public:
                 args.push_back(m.get_fact(p));
             }
             if (change) {
-                tmp = m.mk_app(p->get_decl(), args.size(), args.c_ptr());
+                tmp = m.mk_app(p->get_decl(), args.size(), args.data());
                 m_refs.push_back(tmp);
             }
             else {
@@ -746,7 +743,7 @@ void proof_utils::reduce_hypotheses(proof_ref& pr) {
     ast_manager& m = pr.get_manager();
     class reduce_hypotheses0 reduce(m);
     reduce(pr);
-    CTRACE("proof_utils", !is_closed(m, pr), tout << mk_pp(pr, m) << "\n";);
+    CTRACE(proof_utils, !is_closed(m, pr), tout << mk_pp(pr, m) << "\n";);
 }
 
 class proof_is_closed {
@@ -889,7 +886,7 @@ static void permute_unit_resolution(expr_ref_vector& refs, obj_map<proof,proof*>
         // AG: This can lead to merging of the units with other terms in interpolation,
         // AG: but without farkas coefficients this does not make sense
         prNew = m.mk_th_lemma(tid, m.get_fact(pr), 
-                              premises.size(), premises.c_ptr(), num_params-1, params+1);
+                              premises.size(), premises.data(), num_params-1, params+1);
     }
     else {
         ptr_vector<expr> args;
@@ -899,7 +896,7 @@ static void permute_unit_resolution(expr_ref_vector& refs, obj_map<proof,proof*>
         if (m.has_fact(pr)) {
             args.push_back(m.get_fact(pr));
         }
-        prNew = m.mk_app(pr->get_decl(), args.size(), args.c_ptr());
+        prNew = m.mk_app(pr->get_decl(), args.size(), args.data());
     }    
     
     cache.insert(pr, prNew);
@@ -941,7 +938,7 @@ private:
             }
             instantiate(sub, conclusion);
             return 
-                m.mk_hyper_resolve(premises.size(), premises.c_ptr(), conclusion, 
+                m.mk_hyper_resolve(premises.size(), premises.data(), conclusion, 
                                    positions, 
                                    substs);
         }        
@@ -970,12 +967,12 @@ private:
         substs.push_back(sub);
         conclusion = m.get_fact(p);
         instantiate(sub, conclusion);
-        return m.mk_hyper_resolve(premises.size(), premises.c_ptr(), conclusion, positions, substs);
+        return m.mk_hyper_resolve(premises.size(), premises.data(), conclusion, positions, substs);
     }
 
     void compose(expr_ref_vector& sub, expr_ref_vector const& s0) {
         for (unsigned i = 0; i < sub.size(); ++i) {
-            sub[i] = var_subst(m, false)(sub[i].get(), s0.size(), s0.c_ptr());
+            sub[i] = var_subst(m, false)(sub[i].get(), s0.size(), s0.data());
         }
     }
 
@@ -988,12 +985,12 @@ private:
         }
         quantifier* q = to_quantifier(fml);
         if (q->get_num_decls() != sub.size()) {
-            TRACE("proof_utils", tout << "quantifier has different number of variables than substitution";
+            TRACE(proof_utils, tout << "quantifier has different number of variables than substitution";
                   tout << mk_pp(q, m) << "\n";
                   tout << sub.size() << "\n";);
             return;
         }
-        fml = var_subst(m, false)(q->get_expr(), sub.size(), sub.c_ptr());
+        fml = var_subst(m, false)(q->get_expr(), sub.size(), sub.data());
     }
 
 };

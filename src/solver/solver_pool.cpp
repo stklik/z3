@@ -68,6 +68,10 @@ public:
     }
 
     solver* base_solver() { return m_base.get(); }
+    void set_phase(expr* e) override { m_base->set_phase(e); }
+    phase* get_phase() override { return m_base->get_phase(); }
+    void set_phase(phase* p) override { m_base->set_phase(p); }
+    void move_to_front(expr* e) override { m_base->move_to_front(e); }
 
     solver* translate(ast_manager& m, params_ref const& p) override { UNREACHABLE(); return nullptr; }
     void updt_params(params_ref const& p) override {
@@ -77,9 +81,9 @@ public:
     }
     void push_params() override {m_base->push_params();}
     void pop_params() override {m_base->pop_params();}
-
+    
     void collect_param_descrs(param_descrs & r) override { m_base->collect_param_descrs(r); }
-    void collect_statistics(statistics & st) const override { m_base->collect_statistics(st); }
+    void collect_statistics_core(statistics & st) const override { m_base->collect_statistics(st); }
     unsigned get_num_assertions() const override { return m_base->get_num_assertions(); }
     expr * get_assertion(unsigned idx) const override { return m_base->get_assertion(idx); }
 
@@ -98,10 +102,10 @@ public:
     }
 
 
-    proof * get_proof() override {
+    proof * get_proof_core() override {
         scoped_watch _t_(m_pool.m_proof_watch);
         if (!m_proof.get()) {
-            m_proof = m_base->get_proof();
+            m_proof = m_base->get_proof_core();
             if (m_proof) {
                 elim_aux_assertions pc(m_pred);
                 pc(m, m_proof, m_proof);
@@ -119,7 +123,15 @@ public:
         }
     }
 
-    lbool check_sat_core(unsigned num_assumptions, expr * const * assumptions) override {
+    void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth) override {
+        m_base->get_levels(vars, depth);
+    }
+
+    expr_ref_vector get_trail(unsigned max_level) override {
+        return m_base->get_trail(max_level);
+    }
+
+    lbool check_sat_core2(unsigned num_assumptions, expr * const * assumptions) override {
         SASSERT(!m_pushed || get_scope_level() > 0);
         m_proof.reset();
         scoped_watch _t_(m_pool.m_check_watch);
@@ -250,6 +262,10 @@ public:
 
     expr_ref_vector cube(expr_ref_vector& vars, unsigned ) override { return expr_ref_vector(m); }
 
+    expr* congruence_next(expr* e) override { return e; }
+    expr* congruence_root(expr* e) override { return e; }
+    expr_ref congruence_explain(expr* a, expr* b) override { return expr_ref(m.mk_eq(a, b), m); }
+
     ast_manager& get_manager() const override { return m_base->get_manager(); }
 
     void refresh(solver* new_base) {
@@ -271,13 +287,14 @@ private:
                         lbool last_status, double last_time) {
         std::string file_name = mk_file_name();
         std::ofstream out(file_name);
+        STRACE(spacer_ind_gen, tout << "Dumping benchmark to " << file_name << "\n";);
         if (!out) {
             IF_VERBOSE(0, verbose_stream() << "could not open file " << file_name << " for output\n");
             return;
         }
 
         out << "(set-info :status " << lbool2status(last_status) << ")\n";
-        m_base->display(out, cube.size(), cube.c_ptr());
+        m_base->display(out, cube.size(), cube.data());
         for (auto const& clause : clauses) {
             out << ";; extra clause\n";
             out << "(assert (or ";
@@ -286,7 +303,7 @@ private:
         }
 
         out << "(check-sat";
-        for (auto * lit : cube) out << " " << mk_pp(lit, m);
+        for (auto * lit : cube) out << " " << mk_pp(lit, m) << "\n";
         out << ")\n";
 
         out << "(exit)\n";
@@ -294,6 +311,7 @@ private:
         m_base->collect_statistics(st);
         st.update("time", last_time);
         st.display_smt2(out);
+        m_base->get_params().display(out);
         out.close();
     }
 
@@ -381,11 +399,11 @@ solver* solver_pool::mk_solver() {
     }
     else {
         solver* s = m_solvers[(m_current_pool++) % m_num_pools];
-        base_solver = dynamic_cast<pool_solver*>(s)->base_solver();
+        base_solver = static_cast<pool_solver*>(s)->base_solver();
     }
     std::stringstream name;
     name << "vsolver#" << m_solvers.size();
-    app_ref pred(m.mk_const(symbol(name.str().c_str()), m.mk_bool_sort()), m);
+    app_ref pred(m.mk_const(symbol(name.str()), m.mk_bool_sort()), m);
     pool_solver* solver = alloc(pool_solver, base_solver.get(), *this, pred);
     m_solvers.push_back(solver);
     return solver;
@@ -394,7 +412,7 @@ solver* solver_pool::mk_solver() {
 void solver_pool::reset_solver(solver* s) {
     pool_solver* ps = dynamic_cast<pool_solver*>(s);
     SASSERT(ps);
-    if (ps) ps->reset();
+    ps->reset();
 }
 
 void solver_pool::refresh(solver* base_solver) {

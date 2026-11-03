@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef NUMERAL_BUFFER_H_
-#define NUMERAL_BUFFER_H_
+#pragma once
 
 #include "util/vector.h"
 
@@ -27,7 +26,7 @@ class numeral_buffer {
     svector<Numeral>  m_buffer;
 public:
     typedef Numeral numeral;
-    typedef Numeral data;
+    typedef Numeral data_t;
     typedef NumeralManager manager;
 
     numeral_buffer(NumeralManager & m):m_manager(m) {}
@@ -69,23 +68,20 @@ public:
     }
 
     void reset() {
-        typename vector<Numeral>::iterator it  = m_buffer.begin();
-        typename vector<Numeral>::iterator end = m_buffer.end();
-        for (; it != end; ++it)
-            m().del(*it);
+        for (auto& numeral : m_buffer)
+            m().del(numeral);
         m_buffer.reset();
     }
 
-    Numeral * c_ptr() { return m_buffer.c_ptr(); }
+    Numeral * data() { return m_buffer.data(); }
 
     void reserve(unsigned sz) {
         m_buffer.reserve(sz);
     }
 
-    void swap(svector<Numeral> & other) {
+    void swap(svector<Numeral> & other) noexcept {
         m_buffer.swap(other);
     }
 
 };
 
-#endif

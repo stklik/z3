@@ -20,20 +20,16 @@ Revision History:
 
 #pragma once
 
-// reads an MPS file reperesenting a Mixed Integer Program
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include "util/lp/lp_primal_simplex.h"
-#include "util/lp/lp_dual_simplex.h"
-#include "util/lp/lar_solver.h"
+#include "math/lp/lar_solver.h"
 #include <iostream>
 #include <fstream>
 #include <functional>
 #include <algorithm>
-#include "util/lp/mps_reader.h"
-#include "util/lp/ul_pair.h"
-#include "util/lp/lar_constraints.h"
+#include "math/lp/column.h"
+#include "math/lp/lar_constraints.h"
 #include <sstream>
 #include <cstdlib>
 namespace lp {
@@ -52,7 +48,7 @@ namespace lp {
             std::string m_head;
             std::vector<lisp_elem> m_elems;
             void print() {
-                if (m_elems.size()) {
+                if (!m_elems.empty()) {
                     std::cout << '(';
                     std::cout << m_head << ' ';
                     for (auto & el : m_elems)
@@ -70,7 +66,7 @@ namespace lp {
             lconstraint_kind m_kind;
             std::vector<std::pair<mpq, std::string>> m_coeffs;
             mpq m_right_side;
-            void add_pair(mpq c, std::string name) {
+            void add_pair(mpq c, const std::string& name) {
                 m_coeffs.push_back(make_pair(c, name));
             }
             formula_constraint() : m_right_side(numeric_traits<mpq>::zero()) {}
@@ -85,7 +81,7 @@ namespace lp {
         std::string                               m_file_name;
         std::ifstream                             m_file_stream;
         std::string                               m_line;
-        smt_reader(std::string file_name):
+        smt_reader(const std::string& file_name):
             m_is_OK(true),
             m_line_number(0),
             m_file_name(file_name), 
@@ -121,19 +117,19 @@ namespace lp {
 
         void fill_simple_elem(lisp_elem & lm) {
             int separator = first_separator();
-            lp_assert(-1 != separator && separator != 0);
+            ENSURE(-1 != separator && separator != 0);
             lm.m_head = m_line.substr(0, separator);
             m_line = m_line.substr(separator);
         }
 
         void fill_nested_elem(lisp_elem & lm) {
-            lp_assert(m_line[0] == '(');
+            ENSURE(m_line[0] == '(');
             m_line = m_line.substr(1);
             int separator = first_separator();
             lm.m_head = m_line.substr(0, separator);
             m_line = m_line.substr(lm.m_head.size());
             eat_blanks();
-            while (m_line.size()) {
+            while (!m_line.empty()) {
                 if (m_line[0] == '(') {
                     lisp_elem el;
                     fill_nested_elem(el);
@@ -152,7 +148,7 @@ namespace lp {
         }
 
         void eat_blanks() {
-            while (m_line.size()) {
+            while (!m_line.empty()) {
                 if (m_line[0] == ' ')
                     m_line = m_line.substr(1);
                 else
@@ -193,20 +189,21 @@ namespace lp {
             }
         }
 
-        void adjust_rigth_side(formula_constraint & /* c*/, lisp_elem & /*el*/) {
-            // lp_assert(el.m_head == "0"); // do nothing for the time being
+        void adjust_right_side(formula_constraint & /* c*/, lisp_elem & /*el*/) {
+            // ENSURE(el.m_head == "0"); // do nothing for the time being
         }
 
         void set_constraint_coeffs(formula_constraint & c, lisp_elem & el) {
-            lp_assert(el.m_elems.size() == 2);
+            ENSURE(el.m_elems.size() == 2);
             set_constraint_coeffs_on_coeff_element(c, el.m_elems[0]);
-            adjust_rigth_side(c, el.m_elems[1]);
+            adjust_right_side(c, el.m_elems[1]);
         }
 
 
         bool is_integer(std::string & s) {
-            if (s.size() == 0) return false;
-            return atoi(s.c_str()) != 0 || isdigit(s.c_str()[0]);
+            if (s.empty()) return false;
+            // A signed char may be negative; isdigit accepts only unsigned-char values or EOF.
+            return atoi(s.c_str()) != 0 || isdigit(static_cast<unsigned char>(s.c_str()[0]));
         }
 
         void add_complex_sum_elem(formula_constraint & c, lisp_elem & el) {
@@ -214,7 +211,7 @@ namespace lp {
                 add_mult_elem(c, el.m_elems);
             } else if (el.m_head == "~") {
                 lisp_elem & minel = el.m_elems[0];
-                lp_assert(minel.is_simple());
+                ENSURE(minel.is_simple());
                 c.m_right_side += mpq(str_to_int(minel.m_head));
             } else {
                 std::cout << "unexpected input " << el.m_head << std::endl;
@@ -224,14 +221,14 @@ namespace lp {
         }
 
         std::string get_name(lisp_elem & name) {
-            lp_assert(name.is_simple());
-            lp_assert(!is_integer(name.m_head));
+            ENSURE(name.is_simple());
+            ENSURE(!is_integer(name.m_head));
             return name.m_head;
         }
 
 
         void add_mult_elem(formula_constraint & c, std::vector<lisp_elem> & els) {
-            lp_assert(els.size() == 2);
+            ENSURE(els.size() == 2);
             mpq coeff = get_coeff(els[0]);
             std::string col_name = get_name(els[1]);
             c.add_pair(coeff, col_name);
@@ -241,16 +238,16 @@ namespace lp {
             if (le.is_simple()) {
                 return mpq(str_to_int(le.m_head));
             } else {
-                lp_assert(le.m_head == "~");
-                lp_assert(le.size() == 1);
+                ENSURE(le.m_head == "~");
+                ENSURE(le.size() == 1);
                 lisp_elem & el = le.m_elems[0];
-                lp_assert(el.is_simple());
+                ENSURE(el.is_simple());
                 return -mpq(str_to_int(el.m_head));
             }
         }
 
         int str_to_int(std::string & s) {
-            lp_assert(is_integer(s));
+            ENSURE(is_integer(s));
             return atoi(s.c_str());
         }
 
@@ -258,7 +255,7 @@ namespace lp {
             if (el.size()) {
                 add_complex_sum_elem(c, el);
             } else {
-                lp_assert(is_integer(el.m_head));
+                ENSURE(is_integer(el.m_head));
                 int v = atoi(el.m_head.c_str());
                 mpq vr(v);
                 c.m_right_side -= vr;
@@ -276,7 +273,7 @@ namespace lp {
             } else if (el.m_head == "+") {
                 add_sum(c, el.m_elems);
             } else {
-                lp_assert(false); // unexpected input
+                UNREACHABLE(); // unexpected input
             }
         }
 
@@ -347,7 +344,7 @@ namespace lp {
             solver->add_constraint(&c);
         }
 
-        void create_equality_contraint_for_var(column* col, bound * b, lar_solver *solver) {
+        void create_equality_constraint_for_var(column* col, bound * b, lar_solver *solver) {
             lar_constraint c(EQ, b->m_fixed_value);
             var_index i = solver->add_var(col->m_name);
             c.add_variable_to_constraint(i, numeric_traits<T>::one());
@@ -370,13 +367,13 @@ namespace lp {
                     create_upper_constraint_for_var(col, b, solver);
                 }
                 if (b->m_value_is_fixed) {
-                    create_equality_contraint_for_var(col, b, solver);
+                    create_equality_constraint_for_var(col, b, solver);
                 }
             }
         }
         */
 
-        unsigned register_name(std::string s) {
+        unsigned register_name(const std::string& s) {
             auto it = m_name_to_var_index.find(s);
             if (it!= m_name_to_var_index.end())
                 return it->second;
@@ -386,17 +383,19 @@ namespace lp {
             return ret;
         }
         
-        void add_constraint_to_solver(lar_solver * solver, formula_constraint & fc) {
-            vector<std::pair<mpq, var_index>> ls;
+        void add_constraint_to_solver(lar_solver * solver, formula_constraint & fc, unsigned i) {
+            vector<std::pair<mpq, lpvar>> ls;
             for (auto & it : fc.m_coeffs) {
                 ls.push_back(std::make_pair(it.first, solver->add_var(register_name(it.second), false)));
             }
-            solver->add_constraint(ls, fc.m_kind, fc.m_right_side);
+            unsigned j =  solver->add_term(ls, i);
+            solver->add_var_bound(j, fc.m_kind, fc.m_right_side);
         }
 
         void fill_lar_solver(lar_solver * solver) {
+            unsigned i = 0;
             for (formula_constraint & fc : m_constraints)
-                add_constraint_to_solver(solver, fc);
+                add_constraint_to_solver(solver, fc, i++);
         }
 
 

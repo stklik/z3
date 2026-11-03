@@ -18,11 +18,11 @@ Author:
 Notes:
 
 --*/
-#ifndef CMD_CONTEXT_H_
-#define CMD_CONTEXT_H_
+#pragma once
 
 #include<sstream>
 #include<vector>
+#include<functional>
 #include "util/stopwatch.h"
 #include "util/cmd_context_types.h"
 #include "util/event_handler.h"
@@ -32,21 +32,26 @@ Notes:
 #include "ast/ast.h"
 #include "ast/ast_printer.h"
 #include "ast/datatype_decl_plugin.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/recfun_decl_plugin.h"
+#include "ast/rewriter/seq_rewriter.h"
+#include "ast/rewriter/var_subst.h"
+#include "ast/converters/generic_model_converter.h"
 #include "solver/solver.h"
+#include "solver/check_logic.h"
 #include "solver/progress_callback.h"
+#include "solver/simplifier_solver.h"
+#include "solver/preferred_value_propagator.h"
 #include "cmd_context/pdecl.h"
 #include "cmd_context/tactic_manager.h"
-#include "cmd_context/check_logic.h"
-#include "cmd_context/context_params.h"
+#include "params/context_params.h"
 
 
 class func_decls {
-    func_decl * m_decls;
+    func_decl * m_decls { nullptr };
     bool signatures_collide(func_decl* f, func_decl* g) const;
     bool signatures_collide(unsigned n, sort*const* domain, sort* range, func_decl* g) const;
 public:
-    func_decls():m_decls(nullptr) {}
+    func_decls() = default;
     func_decls(ast_manager & m, func_decl * f);
     void finalize(ast_manager & m);
     bool contains(func_decl * f) const;
@@ -57,10 +62,12 @@ public:
     bool clash(func_decl * f) const;
     bool empty() const { return m_decls == nullptr; }
     func_decl * first() const;
-    func_decl * find(unsigned arity, sort * const * domain, sort * range) const;
-    func_decl * find(ast_manager & m, unsigned num_args, expr * const * args, sort * range) const;
+    func_decl * find(ast_manager & m, unsigned arity, sort * const * domain, sort * range);
+    func_decl * find(ast_manager & m, unsigned arity, expr * const * args, sort * range);
     unsigned get_num_entries() const;
     func_decl * get_entry(unsigned inx);
+    bool check_signature(ast_manager& m, func_decl* f, unsigned arityh, sort * const* domain, sort * range, bool& coerced) const;
+    bool check_poly_signature(ast_manager& m, func_decl* f, unsigned arity, sort* const* domain, sort* range, func_decl*& g);
 };
 
 struct macro_decl {
@@ -80,20 +87,34 @@ public:
     macro_decls() { m_decls = nullptr; }
     void finalize(ast_manager& m);
     bool insert(ast_manager& m, unsigned arity, sort *const* domain, expr* body);
+    bool empty() const { return !m_decls || m_decls->empty(); }
     expr* find(unsigned arity, sort *const* domain) const;
     void erase_last(ast_manager& m);
+    macro_decl const& last() const { return m_decls->back(); }
     vector<macro_decl>::iterator begin() const { return m_decls->begin(); }
     vector<macro_decl>::iterator end() const { return m_decls->end(); }
 };
+
+
+class proof_cmds {
+public:
+    virtual ~proof_cmds() = default;
+    virtual void add_literal(expr* e) = 0;
+    virtual void end_assumption() = 0;
+    virtual void end_infer() = 0;
+    virtual void end_deleted() = 0;
+    virtual void updt_params(params_ref const& p) = 0;
+    virtual void register_on_clause(void* ctx, user_propagator::on_clause_eh_t& on_clause) = 0;
+};
+
 
 /**
    \brief Generic wrapper.
 */
 class object_ref {
-    unsigned m_ref_count;
+    unsigned m_ref_count = 0;
 public:
-    object_ref():m_ref_count(0) {}
-    virtual ~object_ref() {}
+    virtual ~object_ref() = default;
     virtual void finalize(cmd_context & ctx) = 0;
     void inc_ref(cmd_context & ctx) {
         m_ref_count++;
@@ -136,29 +157,50 @@ public:
 };
 
 struct builtin_decl {
-    family_id      m_fid;
-    decl_kind      m_decl;
-    builtin_decl * m_next;
-    builtin_decl():m_fid(null_family_id), m_decl(0), m_next(nullptr) {}
+    family_id      m_fid = null_family_id;
+    decl_kind      m_decl = 0;
+    builtin_decl * m_next = nullptr;
+    builtin_decl() = default;
     builtin_decl(family_id fid, decl_kind k, builtin_decl * n = nullptr):m_fid(fid), m_decl(k), m_next(n) {}
 };
 
 class opt_wrapper : public check_sat_result {
+protected:
+    preferred_value_propagator *m_preferred = nullptr;
+
 public:
+    opt_wrapper(ast_manager& m): check_sat_result(m) {}
     virtual bool empty() = 0;
     virtual void push() = 0;
     virtual void pop(unsigned n) = 0;
-    virtual lbool optimize() = 0;
-    virtual void set_hard_constraints(ptr_vector<expr> & hard) = 0;
+    virtual lbool optimize(expr_ref_vector const& asms) = 0;
+    virtual void set_hard_constraints(expr_ref_vector const & hard) = 0;
     virtual void display_assignment(std::ostream& out) = 0;
     virtual bool is_pareto() = 0;
     virtual void set_logic(symbol const& s) = 0;
     virtual void get_box_model(model_ref& mdl, unsigned index) = 0;
     virtual void updt_params(params_ref const& p) = 0;
+    virtual void initialize_value(expr* var, expr* value) = 0;
+    void set_preferred(preferred_value_propagator *p) { m_preferred = p; }
 };
+
+class ast_context_params : public context_params { 
+    ast_manager* m_manager { nullptr };
+public:
+    /**
+       \brief Create an AST manager using this configuration.
+    */
+    ast_manager * mk_ast_manager();
+
+    void set_foreign_manager(ast_manager* m) { m_manager = m; }
+    bool owns_manager() const { return m_manager != nullptr; }
+};
+
 
 class cmd_context : public progress_callback, public tactic_manager, public ast_printer_context {
 public:
+    using proof_check_callback = std::function<std::string(proof*, expr_ref_vector const&)>;
+
     enum status {
         UNSAT, SAT, UNKNOWN
     };
@@ -176,32 +218,51 @@ public:
         ~scoped_watch() { m_ctx.m_watch.stop(); }
     };
 
+    struct scoped_redirect {
+        cmd_context& m_ctx;
+        std::ostream& m_verbose;
+        std::ostream* m_warning;
+
+        scoped_redirect(cmd_context& ctx): m_ctx(ctx), m_verbose(verbose_stream()), m_warning(warning_stream()) {
+            set_warning_stream(&(*m_ctx.m_diagnostic));
+            set_verbose_stream(m_ctx.diagnostic_stream());
+        }
+
+        ~scoped_redirect() {
+            set_verbose_stream(m_verbose);
+            set_warning_stream(m_warning);
+        }
+    };
+
+    
+
 protected:
-    context_params               m_params;
+    ast_context_params           m_params;
     bool                         m_main_ctx;
     symbol                       m_logic;
-    bool                         m_interactive_mode;
-    bool                         m_global_decls;
+    bool                         m_interactive_mode = false;
+    bool                         m_global_decls = false;
     bool                         m_print_success;
-    unsigned                     m_random_seed;
-    bool                         m_produce_unsat_cores;
-    bool                         m_produce_unsat_assumptions;
-    bool                         m_produce_assignments;
-    status                       m_status;
-    bool                         m_numeral_as_real;
-    bool                         m_ignore_check;      // used by the API to disable check-sat() commands when parsing SMT 2.0 files.
-    bool                         m_processing_pareto; // used when re-entering check-sat for pareto front.
-    bool                         m_exit_on_error;
+    unsigned                     m_random_seed = 0;
+    bool                         m_produce_unsat_cores = false;
+    bool                         m_produce_unsat_assumptions = false;
+    bool                         m_produce_assignments = false;
+    status                       m_status = UNKNOWN;
+    bool                         m_numeral_as_real = false;
+    bool                         m_ignore_check = false;      // used by the API to disable check-sat() commands when parsing SMT 2.0 files.
+    bool                         m_exit_on_error = false;
+    bool                         m_allow_duplicate_declarations = false;
+    scoped_ptr<proof_cmds>       m_proof_cmds;
 
     static std::ostringstream    g_error_stream;
 
-    generic_model_converter_ref  m_mc0;
+    generic_model_converter* mc0() { return m_mcs.back(); }
+    sref_vector<generic_model_converter> m_mcs;
     ast_manager *                m_manager;
     bool                         m_own_manager;
-    bool                         m_manager_initialized;
-    bool                         m_rec_fun_declared;
-    pdecl_manager *              m_pmanager;
-    sexpr_manager *              m_sexpr_manager;
+    bool                         m_manager_initialized = false;
+    pdecl_manager *              m_pmanager = nullptr;
+    sexpr_manager *              m_sexpr_manager = nullptr;
     check_logic                  m_check_logic;
     stream_ref                   m_regular;
     stream_ref                   m_diagnostic;
@@ -210,6 +271,8 @@ protected:
     scoped_ptr_vector<builtin_decl> m_extra_builtin_decls; // make sure that dynamically allocated builtin_decls are deleted
     dictionary<object_ref*>      m_object_refs; // anything that can be named.
     dictionary<sexpr*>           m_user_tactic_decls;
+    vector<std::pair<expr_ref, expr_ref>> m_var2values;
+    scoped_ptr<preferred_value_propagator> m_preferred;
 
     dictionary<func_decls>       m_func_decls;
     obj_map<func_decl, symbol>   m_func_decl2alias;
@@ -227,6 +290,8 @@ protected:
     ptr_vector<expr>             m_assertions;
     std::vector<std::string>     m_assertion_strings;
     ptr_vector<expr>             m_assertion_names; // named assertions are represented using boolean variables.
+    scoped_ptr<var_subst>        m_std_subst, m_rev_subst;
+    simplifier_factory           m_simplifier_factory;
 
     struct scope {
         unsigned m_func_decls_stack_lim;
@@ -234,15 +299,16 @@ protected:
         unsigned m_macros_stack_lim;
         unsigned m_aux_pdecls_lim;
         unsigned m_psort_inst_stack_lim;
-        // only m_assertions_lim is relevant when m_global_decls = true
+        // Declaration limits are ignored when m_global_decls = true.
         unsigned m_assertions_lim;
+        unsigned m_rlimit;
     };
 
     svector<scope>               m_scopes;
     scoped_ptr<solver_factory>   m_solver_factory;
-    scoped_ptr<solver_factory>   m_interpolating_solver_factory;
     ref<solver>                  m_solver;
     ref<check_sat_result>        m_check_sat_result;
+    proof_check_callback        m_proof_check_callback;
     ref<opt_wrapper>             m_opt;
 
     stopwatch                    m_watch;
@@ -251,8 +317,8 @@ protected:
         cmd_context &             m_owner;
         datatype_util             m_dt_util;
     public:
+        void reset() { m_dt_util.reset(); }
         dt_eh(cmd_context & owner);
-        ~dt_eh() override;
         void operator()(sort * dt, pdecl* pd) override;
     };
 
@@ -265,14 +331,19 @@ protected:
     scoped_ptr<pp_env>            m_pp_env;
     pp_env & get_pp_env() const;
 
+    var_subst& std_subst() { if (!m_std_subst) m_std_subst = alloc(var_subst, m(), true); return *m_std_subst; }
+    var_subst& rev_subst() { if (!m_rev_subst) m_rev_subst = alloc(var_subst, m(), false); return *m_rev_subst; }
+
     void register_builtin_sorts(decl_plugin * p);
+    void restrict_builtin_sorts();
     void register_builtin_ops(decl_plugin * p);
     void load_plugin(symbol const & name, bool install_names, svector<family_id>& fids);
     void init_manager_core(bool new_manager);
-    void init_manager();
+
     void init_external_manager();
     void reset_cmds();
     void finalize_cmds();
+    void add_declared_functions(model& mdl);
 
     void restore_func_decls(unsigned old_sz);
     void restore_psort_decls(unsigned old_sz);
@@ -291,6 +362,7 @@ protected:
     bool logic_has_array() const;
     bool logic_has_datatype() const;
     bool logic_has_fpa() const;
+    bool logic_has_recfun() const;
 
     void print_unsupported_msg() { regular_stream() << "unsupported" << std::endl; }
     void print_unsupported_info(symbol const& s, int line, int pos) { if (s != symbol::null) diagnostic_stream() << "; " << s << " line: " << line << " position: " << pos << std::endl;}
@@ -298,22 +370,25 @@ protected:
     void mk_solver();
 
     bool contains_func_decl(symbol const& s, unsigned n, sort* const* domain, sort* range) const;
+    bool builtin_signature_collides(symbol const& s, unsigned arity, sort* const* domain) const;
+    bool is_transcendental_shadow_decl(symbol const& s, unsigned arity, sort* const* domain) const;
 
     bool contains_macro(symbol const& s) const;
     bool contains_macro(symbol const& s, func_decl* f) const;
     bool contains_macro(symbol const& s, unsigned arity, sort *const* domain) const;
     void insert_macro(symbol const& s, unsigned arity, sort*const* domain, expr* t);
     void erase_macro(symbol const& s);
-    bool macros_find(symbol const& s, unsigned n, expr*const* args, expr*& t) const;
+    bool macros_find(symbol const& s, unsigned n, expr*const* args, expr_ref_vector& coerced_args, expr_ref& t);
 
+    recfun::decl::plugin& get_recfun_plugin();
 
 public:
     cmd_context(bool main_ctx = true, ast_manager * m = nullptr, symbol const & l = symbol::null);
     ~cmd_context() override;
     void set_cancel(bool f);
+    void register_plist();
     context_params  & params() { return m_params; }
     solver_factory &get_solver_factory() { return *m_solver_factory; }
-    solver_factory &get_interpolating_solver_factory() { return *m_interpolating_solver_factory; }
     opt_wrapper*  get_opt();
     void          set_opt(opt_wrapper* o);
     void global_params_updated(); // this method should be invoked when global (and module) params are updated.
@@ -339,15 +414,15 @@ public:
     void set_random_seed(unsigned s) { m_random_seed = s; }
     bool produce_models() const;
     bool produce_proofs() const;
-    bool produce_interpolants() const;
     bool produce_unsat_cores() const;
     bool well_sorted_check_enabled() const;
     bool validate_model_enabled() const;
+    bool has_assertions() const { return !m_assertions.empty(); }
     void set_produce_models(bool flag);
     void set_produce_unsat_cores(bool flag);
     void set_produce_proofs(bool flag);
-    void set_produce_interpolants(bool flag);
     void set_produce_unsat_assumptions(bool flag) { m_produce_unsat_assumptions = flag; }
+    void set_allow_duplicate_declarations() { m_allow_duplicate_declarations = true; }
     bool produce_assignments() const { return m_produce_assignments; }
     bool produce_unsat_assumptions() const { return m_produce_unsat_assumptions; }
     void set_produce_assignments(bool flag) { m_produce_assignments = flag; }
@@ -361,13 +436,24 @@ public:
     pdecl_manager & pm() const { if (!m_pmanager) const_cast<cmd_context*>(this)->init_manager(); return *m_pmanager; }
     sexpr_manager & sm() const { if (!m_sexpr_manager) const_cast<cmd_context*>(this)->m_sexpr_manager = alloc(sexpr_manager); return *m_sexpr_manager; }
 
+    proof_cmds* get_proof_cmds() { return m_proof_cmds.get(); }
+    void init_manager();
+    solver* get_solver() { return m_solver.get(); }
+    void set_solver(solver* s) { m_solver = s; }
+    void set_proof_cmds(proof_cmds* pc) { m_proof_cmds = pc; }
+    void set_initial_value(expr* var, expr* value);
+    void set_preferred(expr *fmla);
+    void reset_preferred();
+
     void set_solver_factory(solver_factory * s);
-    void set_interpolating_solver_factory(solver_factory * s);
+    void set_simplifier_factory(simplifier_factory& sf) { m_simplifier_factory = sf; }
     void set_check_sat_result(check_sat_result * r) { m_check_sat_result = r; }
     check_sat_result * get_check_sat_result() const { return m_check_sat_result.get(); }
     check_sat_state cs_state() const;
     void complete_model(model_ref& mdl) const;
     void validate_model();
+    void analyze_failure(expr_mark& seen, model_evaluator& ev, expr* e, bool expected_value);
+    void display_detailed_analysis(std::ostream& out, model_evaluator& ev, expr* e);
     void display_model(model_ref& mdl);
 
     void register_plugin(symbol const & name, decl_plugin * p, bool install_names);
@@ -384,19 +470,29 @@ public:
     void insert(probe_info * p) { tactic_manager::insert(p); }
     void insert_user_tactic(symbol const & s, sexpr * d);
     void insert_aux_pdecl(pdecl * p);
-    void insert_rec_fun(func_decl* f, expr_ref_vector const& binding, svector<symbol> const& ids, expr* e);
     void model_add(symbol const & s, unsigned arity, sort *const* domain, expr * t);
     void model_del(func_decl* f);
+    void register_fun(symbol const& s, func_decl* f);
+    void insert_rec_fun(func_decl* f, expr_ref_vector const& binding, svector<symbol> const& ids, expr* e);
     func_decl * find_func_decl(symbol const & s) const;
     func_decl * find_func_decl(symbol const & s, unsigned num_indices, unsigned const * indices,
-                               unsigned arity, sort * const * domain, sort * range) const;
+                               unsigned arity, sort * const * domain, sort * range);
+    recfun::promise_def decl_rec_fun(const symbol &name, unsigned int arity, sort *const *domain, sort *range);
     psort_decl * find_psort_decl(symbol const & s) const;
     cmd * find_cmd(symbol const & s) const;
     sexpr * find_user_tactic(symbol const & s) const;
     object_ref * find_object_ref(symbol const & s) const;
-    void mk_const(symbol const & s, expr_ref & result) const;
+    void mk_const(symbol const & s, expr_ref & result);
     void mk_app(symbol const & s, unsigned num_args, expr * const * args, unsigned num_indices, parameter const * indices, sort * range,
+                expr_ref & r);
+    bool try_mk_macro_app(symbol const & s, unsigned num_args, expr * const * args, unsigned num_indices, parameter const * indices, sort * range,
+                expr_ref & r);
+    bool try_mk_builtin_app(symbol const & s, unsigned num_args, expr * const * args, unsigned num_indices, parameter const * indices, sort * range,
                 expr_ref & r) const;
+    bool try_mk_declared_app(symbol const & s, unsigned num_args, expr * const * args, 
+                             unsigned num_indices, parameter const * indices, sort * range,
+                             expr_ref & result);
+    bool try_mk_pdecl_app(symbol const & s, unsigned num_args, expr * const * args, unsigned num_indices, parameter const * indices, expr_ref & r) const;
     void erase_cmd(symbol const & s);
     void erase_func_decl(symbol const & s);
     void erase_func_decl(symbol const & s, func_decl * f);
@@ -428,6 +524,7 @@ public:
     void display_assertions();
     void display_statistics(bool show_total_time = false, double total_time = 0.0);
     void display_dimacs();
+    void display_parameters(std::ostream& out);
     void reset(bool finalize = false);
     void assert_expr(expr * t);
     void assert_expr(symbol const & name, expr * t);
@@ -436,6 +533,8 @@ public:
     void push(unsigned n);
     void pop(unsigned n);
     void check_sat(unsigned num_assumptions, expr * const * assumptions);
+    void set_proof_check_callback(proof_check_callback callback) { m_proof_check_callback = std::move(callback); }
+    void check_proof(unsigned num_assumptions = 0, expr* const* assumptions = nullptr);
     void get_consequences(expr_ref_vector const& assumptions, expr_ref_vector const& vars, expr_ref_vector & conseq);
     void reset_assertions();
     // display the result produced by a check-sat or check-sat-using commands in the regular stream
@@ -446,17 +545,16 @@ public:
 
     dictionary<macro_decls> const & get_macros() const { return m_macros; }
 
-    model_converter* get_model_converter() { return m_mc0.get(); }
+    model_converter* get_model_converter() { return mc0(); }
 
     bool is_model_available(model_ref& md) const;
 
     double get_seconds() const { return m_watch.get_seconds(); }
 
-    ptr_vector<expr>::const_iterator begin_assertions() const { return m_assertions.begin(); }
-    ptr_vector<expr>::const_iterator end_assertions() const { return m_assertions.end(); }
-
-    ptr_vector<expr>::const_iterator begin_assertion_names() const { return m_assertion_names.begin(); }
-    ptr_vector<expr>::const_iterator end_assertion_names() const { return m_assertion_names.end(); }
+    ptr_vector<expr> const& assertions() const { return m_assertions; }
+    ptr_vector<expr> const& assertion_names() const { return m_assertion_names; }
+    vector<std::pair<expr*,expr*>> tracked_assertions();
+    void reset_tracked_assertions();
 
     /**
        \brief Hack: consume assertions if there are no scopes.
@@ -470,6 +568,7 @@ public:
     }
 
     format_ns::format * pp(sort * s) const;
+    format_ns::format* try_pp(sort* s) const;
     void pp(sort * s, format_ns::format_ref & r) const override { r = pp(s); }
     void pp(func_decl * f, format_ns::format_ref & r) const override;
     void pp(expr * n, unsigned num_vars, char const * var_prefix, format_ns::format_ref & r, sbuffer<symbol> & var_names) const override;
@@ -492,4 +591,3 @@ public:
 
 std::ostream & operator<<(std::ostream & out, cmd_context::status st);
 
-#endif

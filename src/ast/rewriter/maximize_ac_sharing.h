@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MAXIMIZE_AC_SHARING_H_
-#define MAXIMIZE_AC_SHARING_H_
+#pragma once
 
 #include "util/hashtable.h"
 #include "util/region.h"
@@ -47,7 +46,7 @@ class maximize_ac_sharing : public default_rewriter_cfg {
 
         entry(func_decl * d = nullptr, expr * arg1 = nullptr, expr * arg2 = nullptr):m_decl(d), m_arg1(arg1), m_arg2(arg2) {
             SASSERT((d == 0 && arg1 == 0 && arg2 == 0) || (d != 0 && arg1 != 0 && arg2 != 0));
-            if (arg1->get_id() > arg2->get_id())
+            if (arg1 && arg2 && arg1->get_id() > arg2->get_id())
                 std::swap(m_arg1, m_arg2);
         }
 
@@ -96,6 +95,7 @@ public:
     void push_scope();
     void pop_scope(unsigned num_scopes);
     void reset();
+    void translate(maximize_ac_sharing const& src, ast_translation& tr);
     br_status reduce_app(func_decl* f, unsigned n, expr * const* args, expr_ref& result, proof_ref& result_pr);
 
 };
@@ -119,7 +119,5 @@ public:
     void push_scope() { m_cfg.push_scope(); }
     void pop_scope(unsigned n) { m_cfg.pop_scope(n); }
     void reset() { m_cfg.reset(); }
+    void translate(maximize_bv_sharing_rw const& src, ast_translation& tr) { m_cfg.translate(src.m_cfg, tr); }
 };
-
-#endif /* MAXIMIZE_AC_SHARING_H_ */
-

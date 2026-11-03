@@ -1,0 +1,375 @@
+/*++
+Copyright (c) 2026 Microsoft Corporation
+
+Module Name:
+
+    nla_transcendentals.cpp
+
+Abstract:
+
+    Tests for cross-application transcendental identity axioms. The
+    identity pairs (sin/cos, sinh/cosh, cosh/tanh sharing the same
+    argument) are no longer tracked on the nla side: nra_solver forwards
+    every registered application straight to nlsat, and
+    nlsat::transcendentals::add (nlsat/nlsat_transcendentals.cpp) itself
+    discovers matching pairs and asserts the corresponding permanent
+    polynomial identity. These tests exercise that end-to-end behavior
+    through nla::core/nra_solver.
+
+Author:
+
+    Test Coverage Improvement
+
+Revision History:
+
+--*/
+
+#include "api/z3.h"
+#include "math/lp/nla_core.h"
+#include "math/lp/lar_solver.h"
+#include "util/rational.h"
+#include "util/rlimit.h"
+#include <string>
+
+namespace nla {
+
+// sin(t)^2 + cos(t)^2 = 1 should catch an assignment that is monomial-wise
+// consistent (each square is within its trivial [0,1] range) but violates
+// the Pythagorean identity, only once the identity axiom is actually
+// injected into nlsat. test_check() (level 2) is used because it reaches
+// the unconditional nra_solver::check() call in nla_core::check(), unlike
+// the throttled/backoff-gated bounded_nlsat() used at lower levels.
+void test_sin_cos_identity_detects_conflict() {
+    std::cout << "test_sin_cos_identity_detects_conflict\n";
+
+    lp::lar_solver s;
+    reslimit rl;
+    params_ref p;
+    p.set_bool("arith.nl.nra", true);
+
+    // Integer columns would round the 3/5 lower bounds up to 1.
+    lpvar t       = s.add_var(0, false);
+    lpvar sin_val = s.add_var(1, false);
+    lpvar cos_val = s.add_var(2, false);
+    lpvar sin2    = s.add_var(3, false);
+    lpvar cos2    = s.add_var(4, false);
+
+    nla::core nla_solver(s, p, rl);
+    nla_solver.add_transcendental(nlsat::transcendental_op_kind::SIN, t, sin_val);
+    nla_solver.add_transcendental(nlsat::transcendental_op_kind::COS, t, cos_val);
+
+    vector<lpvar> sin_vars, cos_vars;
+    sin_vars.push_back(sin_val); sin_vars.push_back(sin_val);
+    cos_vars.push_back(cos_val); cos_vars.push_back(cos_val);
+    nla_solver.add_monic(sin2, sin_vars.size(), sin_vars.begin());
+    nla_solver.add_monic(cos2, cos_vars.size(), cos_vars.begin());
+
+    // sin_val = cos_val = 0.8: each square is 0.64, individually within the
+    // (already-known, identity-independent) [0,1] range, but their sum
+    // (1.28) contradicts sin^2+cos^2=1.
+    s.add_var_bound(sin2, lp::lconstraint_kind::GE, rational(3, 5));
+    s.add_var_bound(cos2, lp::lconstraint_kind::GE, rational(3, 5));
+    // impq(a, b) means a + b*epsilon, not a/b.
+    s.set_column_value_test(sin_val, lp::impq(rational(4, 5)));
+    s.set_column_value_test(cos_val, lp::impq(rational(4, 5)));
+    s.set_column_value_test(sin2, lp::impq(rational(16, 25)));
+    s.set_column_value_test(cos2, lp::impq(rational(16, 25)));
+    for (lpvar v : {sin_val, cos_val, sin2, cos2}) {
+        VERIFY(s.column_is_feasible(v));
+        VERIFY(s.get_column_value(v).y.is_zero());
+    }
+
+    lbool result = nla_solver.test_check();
+    VERIFY(result == l_false);
+}
+
+// cosh(t)^2 - sinh(t)^2 = 1: pick cosh_val = sinh_val = 2 (consistent with
+// cosh(t) >= 1 individually, but violating the hyperbolic identity, which
+// forces cosh^2 - sinh^2 = 1 rather than 0).
+void test_cosh_sinh_identity_detects_conflict() {
+    std::cout << "test_cosh_sinh_identity_detects_conflict\n";
+
+    lp::lar_solver s;
+    reslimit rl;
+    params_ref p;
+    p.set_bool("arith.nl.nra", true);
+
+    lpvar t        = s.add_var(0, true);
+    lpvar cosh_val = s.add_var(1, true);
+    lpvar sinh_val = s.add_var(2, true);
+
+    nla::core nla_solver(s, p, rl);
+    nla_solver.add_transcendental(nlsat::transcendental_op_kind::COSH, t, cosh_val);
+    nla_solver.add_transcendental(nlsat::transcendental_op_kind::SINH, t, sinh_val);
+
+    s.set_column_value_test(cosh_val, lp::impq(rational(2)));
+    s.set_column_value_test(sinh_val, lp::impq(rational(2)));
+    s.add_var_bound(cosh_val, lp::lconstraint_kind::LE, rational(2));
+    s.add_var_bound(cosh_val, lp::lconstraint_kind::GE, rational(2));
+    s.add_var_bound(sinh_val, lp::lconstraint_kind::LE, rational(2));
+    s.add_var_bound(sinh_val, lp::lconstraint_kind::GE, rational(2));
+
+    lbool result = nla_solver.test_check();
+    VERIFY(result == l_false);
+}
+
+// Direct check on core::is_nla_context_satisfied() itself (as opposed to
+// test_check(), which additionally goes through the rest of check()'s
+// pipeline). Uses a tightly-bounded argument so the plain transcendental
+// delta-check (rather than the identity axioms, which additionally require
+// bounded_nlsat to actually run) is what catches the bad value: this keeps
+// the test independent of nlsat-scheduling timing.
+void test_is_nla_context_satisfied() {
+    std::cout << "test_is_nla_context_satisfied\n";
+
+    lp::lar_solver s;
+    reslimit rl;
+    params_ref p;
+    p.set_bool("arith.nl.nra", true);
+
+    lpvar x  = s.add_var(0, true);
+    lpvar xx = s.add_var(1, true);
+
+    nla::core nla_solver(s, p, rl);
+    vector<lpvar> vars;
+    vars.push_back(x); vars.push_back(x);
+    nla_solver.add_monic(xx, vars.size(), vars.begin());
+
+    s.set_column_value_test(x, lp::impq(rational(3)));
+    s.set_column_value_test(xx, lp::impq(rational(9)));
+
+    // Monomial alone is consistent, and there are no transcendentals yet.
+    VERIFY(nla_solver.is_nla_context_satisfied());
+
+    lpvar t       = s.add_var(2, true);
+    lpvar sin_val = s.add_var(3, true);
+    nla_solver.add_transcendental(nlsat::transcendental_op_kind::SIN, t, sin_val);
+
+    // Pin t = 0 tightly, so the delta-check's Taylor sandwich for sin(t)
+    // around 0 is tight enough to immediately refute sin_val = 1 (the
+    // correct value is 0), without any help from nlsat/identity axioms.
+    s.set_column_value_test(t, lp::impq(rational(0)));
+    s.add_var_bound(t, lp::lconstraint_kind::LE, rational(0));
+    s.add_var_bound(t, lp::lconstraint_kind::GE, rational(0));
+    s.set_column_value_test(sin_val, lp::impq(rational(1)));
+
+    // Monomial is still fine, but the context as a whole must be reported
+    // unsatisfied because of the bogus sin(t) value.
+    VERIFY(!nla_solver.is_nla_context_satisfied());
+}
+
+// A delta-check failure that is not refined (here because nlsat is
+// disabled, as when its backoff defers it) must not be reported as l_true.
+void test_unrefined_failure_is_not_sat() {
+    std::cout << "test_unrefined_failure_is_not_sat\n";
+
+    lp::lar_solver s;
+    reslimit rl;
+    params_ref p;
+    p.set_bool("arith.nl.nra", false);
+
+    lpvar x       = s.add_var(0, false);
+    lpvar exp_val = s.add_var(1, false);
+
+    nla::core nla_solver(s, p, rl);
+    nla_solver.add_transcendental(nlsat::transcendental_op_kind::EXP, x, exp_val);
+
+    // exp(-3) ~ 0.0498, so exp_val = 1/10 fails the delta-check while
+    // satisfying the exact linear exp facts (exp(x) > 0, exp(x) >= 1 + x).
+    s.set_column_value_test(x, lp::impq(rational(-3)));
+    s.set_column_value_test(exp_val, lp::impq(rational(1, 10)));
+
+    VERIFY(nla_solver.test_check() != l_true);
+}
+
+// A satisfiable check in a popped scope must not leave stale literals behind
+// for the later unsatisfiable check.
+void test_incremental_exp_unsat() {
+    std::cout << "test_incremental_exp_unsat\n";
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    char const* spec =
+        "(set-logic ALL)\n"
+        "(declare-const x Real)\n"
+        "(push 1)\n"
+        "(assert (< x 0))\n"
+        "(assert (> (exp x) 0))\n"
+        "(check-sat)\n"
+        "(pop 1)\n"
+        "(assert (>= x (- 3)))\n"
+        "(assert (<= x (- (/ 299 100))))\n"
+        "(assert (> (* (exp x) (exp x)) (/ 1 300)))\n"
+        "(check-sat)\n";
+    std::string response = Z3_eval_smtlib2_string(ctx, spec);
+    if (response != "sat\nunsat\n" && response != "unknown\nunsat\n")
+        std::cout << response << "\n";
+    VERIFY(response == "sat\nunsat\n" || response == "unknown\nunsat\n");
+    Z3_del_context(ctx);
+}
+
+void test_exp_negative_twenty() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    char const* spec =
+        "(set-logic ALL)\n"
+        "(assert (= (exp (- 20.0)) 1.0))\n"
+        "(check-sat)\n";
+    std::string response = Z3_eval_smtlib2_string(ctx, spec);
+    if (response != "unsat\n")
+        std::cout << response << "\n";
+    VERIFY(response == "unsat\n");
+    Z3_del_context(ctx);
+}
+
+void test_sin_negative_interval() {
+    for (char const* options : {
+            "",
+            "(set-option :model_validate true)\n",
+            "(set-option :smt.arith.nl.transcendental false)\n"}) {
+        Z3_config cfg = Z3_mk_config();
+        Z3_context ctx = Z3_mk_context(cfg);
+        Z3_del_config(cfg);
+        std::string spec = options;
+        spec +=
+            "(set-logic ALL)\n"
+            "(declare-const h Real)\n"
+            "(declare-const e Real)\n"
+            "(assert (<= (- 0.3141592653589793) h (- 0.10471975511965975)))\n"
+            "(assert (= (sin h) 0.0))\n"
+            "(assert (= (* e e) 2.0))\n"
+            "(check-sat)\n"
+            "(set-option :smt.arith.nl.transcendental true)\n"
+            "(set-option :model_validate false)\n";
+        std::string response = Z3_eval_smtlib2_string(ctx, spec.c_str());
+        if (response != "unsat\n")
+            std::cout << response << "\n";
+        VERIFY(response == "unsat\n");
+        Z3_del_context(ctx);
+    }
+}
+
+void test_sin_polynomial_arguments() {
+    for (char const* arg : {"(* (/ 1.0 2.0) h)", "(* h h)"}) {
+        Z3_config cfg = Z3_mk_config();
+        Z3_context ctx = Z3_mk_context(cfg);
+        Z3_del_config(cfg);
+        std::string spec =
+            "(set-logic ALL)\n"
+            "(declare-const h Real)\n"
+            "(declare-const e Real)\n"
+            "(assert (<= (- 0.3) h (- 0.1)))\n"
+            "(assert (= (sin ";
+        spec += arg;
+        spec +=
+            ") 0.0))\n"
+            "(assert (= (* e e) 2.0))\n"
+            "(check-sat)\n";
+        std::string response = Z3_eval_smtlib2_string(ctx, spec.c_str());
+        if (response != "unsat\n")
+            std::cout << response << "\n";
+        VERIFY(response == "unsat\n");
+        Z3_del_context(ctx);
+    }
+}
+
+void test_finite_set_cardinality_with_transcendentals() {
+    for (char const* options : {
+             "",
+             "(set-option :model_validate true)\n"}) {
+        Z3_config cfg = Z3_mk_config();
+        Z3_context ctx = Z3_mk_context(cfg);
+        Z3_del_config(cfg);
+        std::string spec = options;
+        spec +=
+            "(set-logic ALL)\n"
+            "(declare-const x Real)\n"
+            "(declare-const y Real)\n"
+            "(declare-const S (FiniteSet Real))\n"
+            "(assert (= x 0.0))\n"
+            "(assert (= y 0.0))\n"
+            "(assert (>= (+ (sin x) (exp x)) 0.0))\n"
+            "(assert (>= (+ (sin y) (exp y)) 0.0))\n"
+            "(assert (= (set.size S) 1))\n"
+            "(check-sat)\n";
+        std::string response = Z3_eval_smtlib2_string(ctx, spec.c_str());
+        if (response != "sat\n")
+            std::cout << response << "\n";
+        VERIFY(response == "sat\n");
+        Z3_del_context(ctx);
+    }
+}
+
+void test_transcendental_enclosures_do_not_certify_sat() {
+    char const* assertions[] = {
+        "(= (exp (- 20.0)) 0.1)",
+        "(= (exp 0.0) 1.00000001)",
+        "(= (atan2 1.0 1.0) 0.7853982)"
+    };
+    for (char const* assertion : assertions) {
+        Z3_config cfg = Z3_mk_config();
+        Z3_context ctx = Z3_mk_context(cfg);
+        Z3_del_config(cfg);
+        std::string spec = "(set-logic ALL)\n(assert ";
+        spec += assertion;
+        spec += ")\n(check-sat)\n";
+        std::string response = Z3_eval_smtlib2_string(ctx, spec.c_str());
+        if (response == "sat\n")
+            std::cout << response << "\n";
+        VERIFY(response != "sat\n");
+        Z3_del_context(ctx);
+    }
+}
+
+void test_pi_positive_sat() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    char const* spec =
+        "(assert (> pi 0))\n"
+        "(check-sat)\n";
+    std::string response = Z3_eval_smtlib2_string(ctx, spec);
+    if (response != "sat\n")
+        std::cout << response << "\n";
+    VERIFY(response == "sat\n");
+    Z3_del_context(ctx);
+}
+
+void test_atan2_unsat_regression() {
+    Z3_config cfg = Z3_mk_config();
+    Z3_context ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
+    char const* spec =
+        "(set-logic QF_NTA)\n"
+        "(declare-const y Real)\n"
+        "(assert (< y 1))\n"
+        "(assert (> (atan2 y 1) 0.5))\n"
+        "(check-sat)\n";
+    std::string response = Z3_eval_smtlib2_string(ctx, spec);
+    if (response != "sat\n")
+        std::cout << response << "\n";
+    VERIFY(response == "sat\n");
+    Z3_del_context(ctx);
+}
+
+void test_nla_transcendentals() {
+    test_sin_cos_identity_detects_conflict();
+    test_cosh_sinh_identity_detects_conflict();
+    test_is_nla_context_satisfied();
+    test_unrefined_failure_is_not_sat();
+    test_incremental_exp_unsat();
+    test_exp_negative_twenty();
+    test_sin_negative_interval();
+    test_sin_polynomial_arguments();
+    test_finite_set_cardinality_with_transcendentals();
+    test_transcendental_enclosures_do_not_certify_sat();
+    test_pi_positive_sat();
+    test_atan2_unsat_regression();
+}
+
+} // namespace nla
+
+void tst_nla_transcendentals() {
+    nla::test_nla_transcendentals();
+}

@@ -35,7 +35,7 @@ Revision History:
 namespace spacer {
 
     unsat_core_plugin::unsat_core_plugin(unsat_core_learner& ctx):
-        m(ctx.get_manager()), m_ctx(ctx) {};
+        m(ctx.get_manager()), m_ctx(ctx) {}
 
     void unsat_core_plugin_lemma::compute_partial_core(proof* step) {
         SASSERT(m_ctx.is_a(step));
@@ -73,7 +73,7 @@ namespace spacer {
                 // the current step needs to be interpolated:
                 expr* fact = m.get_fact(pf);
                 // if we trust the current step and we are able to use it
-                if (m_ctx.is_b_pure (pf) && (m.is_asserted(pf) || is_literal(m, fact))) {
+                if (m_ctx.is_b_pure (pf) && (m.is_asserted(pf) || spacer::is_literal(m, fact)) && !spacer::contains_defaults(fact, m)) {
                     // just add it to the core
                     m_ctx.add_lemma_to_core(fact);
                 }
@@ -97,8 +97,7 @@ namespace spacer {
         // XXX this assertion should be true so there is no need to check for it
         SASSERT (!m_ctx.is_closed (step));
         func_decl* d = step->get_decl();
-        symbol sym;
-        TRACE("spacer.farkas",
+        TRACE(spacer_farkas,
               tout << "looking at: " << mk_pp(step, m) << "\n";);
         if (!m_ctx.is_closed(step) && is_farkas_lemma(m, step)) {
             // weaker check : d->get_num_parameters() >= m.get_num_parents(step) + 2
@@ -124,7 +123,7 @@ namespace spacer {
              * We can rewrite (E2) to rewrite (E1) to
              * (BP*Fark(BP)) => (neg(A*Fark(A) + BNP*Fark(BNP) + (neg D)*Fark(D))) (E3)
              * and since we can derive (A*Fark(A) + BNP*Fark(BNP) + (neg D)*Fark(D)) from
-             * A, BNP and D, we also know that it is inconsisent. Therefore
+             * A, BNP and D, we also know that it is inconsistent. Therefore
              * neg(A*Fark(A) + BNP*Fark(BNP) + (neg D)*Fark(D)) is a solution.
              *
              * Finally we also need the following workaround:
@@ -134,7 +133,7 @@ namespace spacer {
              */
             parameter const* params = d->get_parameters() + 2; // point to the first Farkas coefficient
 
-            TRACE("spacer.farkas",
+            TRACE(spacer_farkas,
                   tout << "Farkas input: "<< "\n";
                   for (unsigned i = 0; i < m.get_num_parents(step); ++i) {
                       proof * prem = m.get_parent(step, i);
@@ -210,7 +209,7 @@ namespace spacer {
             // AG: it will go into the core. However, it does not mean that this literal should/could not be added.
             m_ctx.set_closed(step, done);
             expr_ref res = compute_linear_combination(coeff_lits);
-            TRACE("spacer.farkas", tout << "Farkas core: " << res << "\n";);
+            TRACE(spacer_farkas, tout << "Farkas core: " << res << "\n";);
             m_ctx.add_lemma_to_core(res);
         }
     }
@@ -239,9 +238,8 @@ namespace spacer {
         SASSERT(m_ctx.is_b(step));
 
         func_decl* d = step->get_decl();
-        symbol sym;
         if (!m_ctx.is_closed(step) && // if step is not already interpolated
-           is_farkas_lemma(m, step)) {
+            is_farkas_lemma(m, step)) {
             SASSERT(d->get_num_parameters() == m.get_num_parents(step) + 2);
             SASSERT(m.has_fact(step));
 
@@ -249,7 +247,7 @@ namespace spacer {
 
             parameter const* params = d->get_parameters() + 2; // point to the first Farkas coefficient
 
-            TRACE("spacer.farkas",
+            TRACE(spacer_farkas,
                   tout << "Farkas input: "<< "\n";
                   for (unsigned i = 0; i < m.get_num_parents(step); ++i) {
                       proof * prem = m.get_parent(step, i);
@@ -396,8 +394,8 @@ namespace spacer {
                 matrix.set(i, map[pair.second], pair.first);
             }
         }
-        matrix.print_matrix();
 
+        IF_VERBOSE(10, matrix.display(verbose_stream()););
         // 3. normalize matrix to integer values
         matrix.normalize();
 
@@ -558,7 +556,7 @@ namespace spacer {
                     // if we trust the current step and we are able to use it
                     if (m_ctx.is_b_pure (current) &&
                         (m.is_asserted(current) ||
-                         is_literal(m, m.get_fact(current))))
+                         spacer::is_literal(m, m.get_fact(current))))
                     {
                         // we found a leaf of the subproof, so
                         // 1) we add corresponding edges

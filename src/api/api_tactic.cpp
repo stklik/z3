@@ -15,15 +15,16 @@ Author:
 Revision History:
 
 --*/
-#include<iostream>
 #include "api/z3.h"
 #include "api/api_log_macros.h"
 #include "api/api_context.h"
 #include "api/api_tactic.h"
 #include "api/api_model.h"
+#include "api/api_solver.h"
 #include "util/scoped_ctrl_c.h"
 #include "util/cancel_eh.h"
 #include "util/scoped_timer.h"
+#include "ast/simplifiers/then_simplifier.h"
 
 Z3_apply_result_ref::Z3_apply_result_ref(api::context& c, ast_manager & m): api::object(c) {
 }
@@ -46,13 +47,23 @@ extern "C" {
         RETURN_Z3(_result_);                                    \
 }
 
+#define RETURN_SIMPLIFIER(_t_) {                                    \
+        Z3_simplifier_ref * _ref_ = alloc(Z3_simplifier_ref, *mk_c(c)); \
+        _ref_->m_simplifier   = _t_;                                \
+        mk_c(c)->save_object(_ref_);                            \
+        Z3_simplifier _result_  = of_simplifier(_ref_);                 \
+        RETURN_Z3(_result_);                                    \
+}
+
     Z3_tactic Z3_API Z3_mk_tactic(Z3_context c, Z3_string name) {
         Z3_TRY;
         LOG_Z3_mk_tactic(c, name);
         RESET_ERROR_CODE();
         tactic_cmd * t = mk_c(c)->find_tactic_cmd(symbol(name));
         if (t == nullptr) {
-            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            std::stringstream err;
+            err << "unknown tactic " << name;
+            SET_ERROR_CODE(Z3_INVALID_ARG, err.str());
             RETURN_Z3(nullptr);
         }
         tactic * new_t = t->mk(mk_c(c)->m());
@@ -71,8 +82,8 @@ extern "C" {
     void Z3_API Z3_tactic_dec_ref(Z3_context c, Z3_tactic t) {
         Z3_TRY;
         LOG_Z3_tactic_dec_ref(c, t);
-        RESET_ERROR_CODE();
-        to_tactic(t)->dec_ref();
+        if (t)
+            to_tactic(t)->dec_ref();
         Z3_CATCH;
     }
 
@@ -101,8 +112,8 @@ extern "C" {
     void Z3_API Z3_probe_dec_ref(Z3_context c, Z3_probe p) {
         Z3_TRY;
         LOG_Z3_probe_dec_ref(c, p);
-        RESET_ERROR_CODE();
-        to_probe(p)->dec_ref();
+        if (p)
+            to_probe(p)->dec_ref();
         Z3_CATCH;
     }
 
@@ -129,10 +140,10 @@ extern "C" {
         LOG_Z3_tactic_par_or(c, num, ts);
         RESET_ERROR_CODE();
         ptr_buffer<tactic> _ts;
-        for (unsigned i = 0; i < num; i++) {
+        for (unsigned i = 0; i < num; ++i) {
             _ts.push_back(to_tactic_ref(ts[i]));
         }
-        tactic * new_t = par(num, _ts.c_ptr());
+        tactic * new_t = par(num, _ts.data());
         RETURN_TACTIC(new_t);
         Z3_CATCH_RETURN(nullptr);
     }
@@ -224,8 +235,9 @@ extern "C" {
         RESET_ERROR_CODE();
         param_descrs r;
         to_tactic_ref(t)->collect_param_descrs(r);
-        to_param_ref(p).validate(r);
-        tactic * new_t = using_params(to_tactic_ref(t), to_param_ref(p));
+        auto &params = to_param_ref(p);
+        params.validate(r);
+        tactic * new_t = using_params(to_tactic_ref(t), params);
         RETURN_TACTIC(new_t);
         Z3_CATCH_RETURN(nullptr);
     }
@@ -326,8 +338,8 @@ extern "C" {
         if (idx >= mk_c(c)->num_tactics()) {
             SET_ERROR_CODE(Z3_IOB, nullptr);
             return "";
-        }
-        return mk_c(c)->get_tactic(idx)->get_name().bare_str();
+        }        
+        return mk_c(c)->mk_external_string(mk_c(c)->get_tactic(idx)->get_name().str());
         Z3_CATCH_RETURN("");
     }
 
@@ -347,7 +359,7 @@ extern "C" {
             SET_ERROR_CODE(Z3_IOB, nullptr);
             return "";
         }
-        return mk_c(c)->get_probe(idx)->get_name().bare_str();
+        return mk_c(c)->mk_external_string(mk_c(c)->get_probe(idx)->get_name().str());
         Z3_CATCH_RETURN("");
     }
 
@@ -359,7 +371,7 @@ extern "C" {
         param_descrs descrs;
         to_tactic_ref(t)->collect_param_descrs(descrs);
         descrs.display(buffer);
-        return mk_c(c)->mk_external_string(buffer.str());
+        return mk_c(c)->mk_external_string(std::move(buffer).str());
         Z3_CATCH_RETURN("");
     }
 
@@ -415,7 +427,7 @@ extern "C" {
 
         api::context::set_interruptable si(*(mk_c(c)), eh);
         {
-            scoped_ctrl_c ctrlc(eh, false, use_ctrl_c);
+            scoped_ctrl_c ctrlc(eh, use_ctrl_c);
             scoped_timer timer(timeout, &eh);
             try {
                 exec(*to_tactic_ref(t), new_goal, ref->m_subgoals);
@@ -454,8 +466,9 @@ extern "C" {
         RESET_ERROR_CODE();
         param_descrs pd;
         to_tactic_ref(t)->collect_param_descrs(pd);
-        to_param_ref(p).validate(pd);
-        Z3_apply_result r = _tactic_apply(c, t, g, to_param_ref(p));
+        auto &params = to_param_ref(p);
+        params.validate(pd);
+        Z3_apply_result r = _tactic_apply(c, t, g, params);
         RETURN_Z3(r);
         Z3_CATCH_RETURN(nullptr);
     }
@@ -471,8 +484,8 @@ extern "C" {
     void Z3_API Z3_apply_result_dec_ref(Z3_context c, Z3_apply_result r) {
         Z3_TRY;
         LOG_Z3_apply_result_dec_ref(c, r);
-        RESET_ERROR_CODE();
-        to_apply_result(r)->dec_ref();
+        if (r)
+            to_apply_result(r)->dec_ref();
         Z3_CATCH;
     }
     
@@ -483,11 +496,11 @@ extern "C" {
         std::ostringstream buffer;
         buffer << "(goals\n";
         unsigned sz = to_apply_result(r)->m_subgoals.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             to_apply_result(r)->m_subgoals[i]->display(buffer);
         }
-        buffer << ")";
-        return mk_c(c)->mk_external_string(buffer.str());
+        buffer << ')';
+        return mk_c(c)->mk_external_string(std::move(buffer).str());
         Z3_CATCH_RETURN("");
     }
     
@@ -503,7 +516,7 @@ extern "C" {
         Z3_TRY;
         LOG_Z3_apply_result_get_subgoal(c, r, i);
         RESET_ERROR_CODE();
-        if (i > to_apply_result(r)->m_subgoals.size()) {
+        if (i >= to_apply_result(r)->m_subgoals.size()) {
             SET_ERROR_CODE(Z3_IOB, nullptr);
             RETURN_Z3(nullptr);
         }
@@ -514,6 +527,146 @@ extern "C" {
         RETURN_Z3(result);
         Z3_CATCH_RETURN(nullptr);
     }
+
+
+
+    Z3_simplifier Z3_API Z3_mk_simplifier(Z3_context c, Z3_string name) {
+        Z3_TRY;
+        LOG_Z3_mk_simplifier(c, name);
+        RESET_ERROR_CODE();
+        simplifier_cmd * t = mk_c(c)->find_simplifier_cmd(symbol(name));
+        if (t == nullptr) {
+            std::stringstream err;
+            err << "unknown simplifier " << name;
+            SET_ERROR_CODE(Z3_INVALID_ARG, err.str());
+            RETURN_Z3(nullptr);
+        }
+        simplifier_factory new_t = t->factory();
+        RETURN_SIMPLIFIER(new_t);
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    void Z3_API Z3_simplifier_inc_ref(Z3_context c, Z3_simplifier t) {
+        Z3_TRY;
+        LOG_Z3_simplifier_inc_ref(c, t);
+        RESET_ERROR_CODE();
+        to_simplifier(t)->inc_ref();
+        Z3_CATCH;
+    }
+
+    void Z3_API Z3_simplifier_dec_ref(Z3_context c, Z3_simplifier t) {
+        Z3_TRY;
+        LOG_Z3_simplifier_dec_ref(c, t);
+        if (t)
+            to_simplifier(t)->dec_ref();
+        Z3_CATCH;
+    }
+
+    unsigned Z3_API Z3_get_num_simplifiers(Z3_context c) {
+        Z3_TRY;
+        LOG_Z3_get_num_simplifiers(c);
+        RESET_ERROR_CODE();
+        return mk_c(c)->num_simplifiers();
+        Z3_CATCH_RETURN(0);
+    }
+
+    Z3_string Z3_API Z3_get_simplifier_name(Z3_context c, unsigned idx) {
+        Z3_TRY;
+        LOG_Z3_get_simplifier_name(c, idx);
+        RESET_ERROR_CODE();
+        if (idx >= mk_c(c)->num_simplifiers()) {
+            SET_ERROR_CODE(Z3_IOB, nullptr);
+            return "";
+        }        
+        return mk_c(c)->mk_external_string(mk_c(c)->get_simplifier(idx)->get_name().str());
+        Z3_CATCH_RETURN("");
+    }
+
+    Z3_simplifier Z3_API Z3_simplifier_and_then(Z3_context c, Z3_simplifier t1, Z3_simplifier t2) {
+        Z3_TRY;
+        LOG_Z3_simplifier_and_then(c, t1, t2);
+        RESET_ERROR_CODE();
+        auto fac1 = *to_simplifier_ref(t1);
+        auto fac2 = *to_simplifier_ref(t2);
+        auto new_s = [fac1, fac2](auto& m, auto& p, auto& st) {
+            auto* r = alloc(then_simplifier, m, p, st);
+            r->add_simplifier(fac1(m, p, st));
+            r->add_simplifier(fac2(m, p, st));
+            return r;
+    };
+        RETURN_SIMPLIFIER(new_s);
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    Z3_simplifier Z3_API Z3_simplifier_using_params(Z3_context c, Z3_simplifier t, Z3_params p) {
+        Z3_TRY;
+        LOG_Z3_simplifier_using_params(c, t, p);
+        RESET_ERROR_CODE();
+        param_descrs r;
+        ast_manager& m = mk_c(c)->m();
+        default_dependent_expr_state st(m);
+        params_ref p1;
+        auto fac = (*to_simplifier_ref(t));
+        scoped_ptr<dependent_expr_simplifier> simp = fac(m, p1, st);
+        simp->collect_param_descrs(r);
+        auto params = to_param_ref(p);
+        params.validate(r);
+        auto new_s = [params, fac](auto& m, auto& p, auto& st) {
+            params_ref pp;
+            pp.append(params);
+            pp.append(p);
+            return fac(m, pp, st);
+        };
+        RETURN_SIMPLIFIER(new_s);
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+
+    Z3_string Z3_API Z3_simplifier_get_help(Z3_context c, Z3_simplifier t) {
+        Z3_TRY;
+        LOG_Z3_simplifier_get_help(c, t);
+        RESET_ERROR_CODE();
+        std::ostringstream buffer;
+        param_descrs descrs;
+        ast_manager& m = mk_c(c)->m();
+        default_dependent_expr_state st(m);
+        params_ref p;
+        scoped_ptr<dependent_expr_simplifier> simp = (*to_simplifier_ref(t))(m, p, st);
+        simp->collect_param_descrs(descrs);
+        descrs.display(buffer);
+        return mk_c(c)->mk_external_string(std::move(buffer).str());
+        Z3_CATCH_RETURN("");
+    }
+
+    Z3_param_descrs Z3_API Z3_simplifier_get_param_descrs(Z3_context c, Z3_simplifier t) {
+        Z3_TRY;
+        LOG_Z3_simplifier_get_param_descrs(c, t);
+        RESET_ERROR_CODE();
+        Z3_param_descrs_ref * d = alloc(Z3_param_descrs_ref, *mk_c(c));
+        mk_c(c)->save_object(d);
+        ast_manager& m = mk_c(c)->m();
+        default_dependent_expr_state st(m);
+        params_ref p;
+        scoped_ptr<dependent_expr_simplifier> simp = (*to_simplifier_ref(t))(m, p, st);
+        simp->collect_param_descrs(d->m_descrs);
+        Z3_param_descrs r = of_param_descrs(d);
+        RETURN_Z3(r);
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    Z3_string Z3_API Z3_simplifier_get_descr(Z3_context c, Z3_string name) {
+        Z3_TRY;
+        LOG_Z3_simplifier_get_descr(c, name);
+        RESET_ERROR_CODE();
+        simplifier_cmd * t = mk_c(c)->find_simplifier_cmd(symbol(name));
+        if (t == nullptr) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            return "";
+        }
+        return t->get_descr();
+        Z3_CATCH_RETURN("");
+    }
+
     
 
-};
+}

@@ -16,12 +16,12 @@ Author:
 Revision History:
 
 --*/
-#ifndef PATTERN_INFERENCE_H_
-#define PATTERN_INFERENCE_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter.h"
-#include "ast/pattern/pattern_inference_params.h"
+#include "ast/rewriter/rewriter_def.h"
+#include "params/pattern_inference_params.h"
 #include "util/vector.h"
 #include "util/uint_set.h"
 #include "util/nat_set.h"
@@ -38,7 +38,6 @@ Revision History:
    every instance of f(g(X)) is also an instance of f(X).
 */
 class smaller_pattern {
-    ast_manager &    m;
     ptr_vector<expr> m_bindings;
 
     typedef std::pair<expr *, expr *> expr_pair;
@@ -49,20 +48,16 @@ class smaller_pattern {
     void save(expr * p1, expr * p2);
     bool process(expr * p1, expr * p2);
 
-    smaller_pattern & operator=(smaller_pattern const &); 
-
 public:
 
-    smaller_pattern(ast_manager & m):
-        m(m) {
-    }
+    smaller_pattern & operator=(smaller_pattern const &) = delete;
 
     bool operator()(unsigned num_bindings, expr * p1, expr * p2);
 };
 
 class pattern_inference_cfg :  public default_rewriter_cfg {
     ast_manager&               m;
-    pattern_inference_params & m_params;
+    pattern_inference_params const & m_params;
     family_id                  m_bfid;
     family_id                  m_afid;
     svector<family_id>         m_forbidden;
@@ -73,6 +68,7 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
     expr * const *             m_no_patterns;
     bool                       m_nested_arith_only;
     bool                       m_block_loop_patterns;
+    bool                       m_decompose_patterns;
 
     struct info {
         uint_set m_free_vars;
@@ -116,9 +112,9 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
     //
     class collect {
         struct entry {
-            expr *    m_node;
-            unsigned  m_delta;
-            entry():m_node(nullptr), m_delta(0) {}
+            expr *    m_node = nullptr;
+            unsigned  m_delta = 0;
+            entry() = default;
             entry(expr * n, unsigned d):m_node(n), m_delta(d) {}
             unsigned hash() const { 
                 return hash_u_u(m_node->get_id(), m_delta);
@@ -129,17 +125,16 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
         };
         
         struct info {
-            expr_ref    m_node;
-            uint_set    m_free_vars;
+            uint_set    m_free_vars, m_bound_vars;
             unsigned    m_size;
-            info(ast_manager & m, expr * n, uint_set const & vars, unsigned sz):
-                m_node(n, m), m_free_vars(vars), m_size(sz) {}
+            info(uint_set const & fvars, uint_set const& bvars, unsigned sz):
+                m_free_vars(fvars), m_bound_vars(bvars), m_size(sz) {}
         };
         
         ast_manager &            m;
         pattern_inference_cfg &     m_owner;
-        family_id                m_afid;
-        unsigned                 m_num_bindings;
+        family_id                m_afid = null_family_id;
+        unsigned                 m_num_bindings = 0;
         typedef map<entry, info *, obj_hash<entry>, default_eq<entry> > cache;
         cache                    m_cache;
         ptr_vector<info>         m_info;
@@ -192,6 +187,9 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
     ptr_vector<pre_pattern>      m_pre_patterns;
     expr_pattern_match           m_database;
 
+    ptr_buffer<app> m_args;
+    app* mk_pattern(app* candidate);
+
     void candidates2unary_patterns(ptr_vector<app> const & candidate_patterns,
                                    ptr_vector<app> & remaining_candidate_patterns,
                                    app_ref_buffer & result);
@@ -216,7 +214,7 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
                      app_ref_buffer & result);           // OUT result
     
 public:
-    pattern_inference_cfg(ast_manager & m, pattern_inference_params & params);
+    pattern_inference_cfg(ast_manager & m, pattern_inference_params const & params);
     
     void register_forbidden_family(family_id fid) {
         SASSERT(fid != m_bfid);
@@ -238,7 +236,7 @@ public:
                            expr_ref & result,
                            proof_ref & result_pr);
 
-    void register_preferred(unsigned num, func_decl * const * fs) { for (unsigned i = 0; i < num; i++) register_preferred(fs[i]); }
+    void register_preferred(unsigned num, func_decl * const * fs) { for (unsigned i = 0; i < num; ++i) register_preferred(fs[i]); }
     
     bool is_forbidden(func_decl const * decl) const {
         family_id fid = decl->get_family_id();
@@ -253,8 +251,7 @@ public:
 class pattern_inference_rw : public rewriter_tpl<pattern_inference_cfg> {
     pattern_inference_cfg m_cfg;
 public:
-    pattern_inference_rw(ast_manager& m, pattern_inference_params & params);
+    pattern_inference_rw(ast_manager& m, pattern_inference_params const & params);
 };
 
-#endif /* PATTERN_INFERENCE_H_ */
 

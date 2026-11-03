@@ -17,6 +17,7 @@ Revision History:
 
 
 --*/
+#pragma once
 
 #include <unordered_map>
 #include <vector>
@@ -36,31 +37,31 @@ class argument_parser {
 public:
     std::string m_error_message;
     argument_parser(unsigned argn, char * const* args) {
-        for (unsigned i = 0; i < argn; i++) {
+        for (unsigned i = 0; i < argn; ++i) {
             m_args.push_back(std::string(args[i]));
         }
     }
 
-    void add_option(std::string s) {
+    void add_option(const std::string& s) {
         add_option_with_help_string(s, "");
     }
 
-    void add_option_with_help_string(std::string s, std::string help_string) {
+    void add_option_with_help_string(const std::string& s, const std::string& help_string) {
         m_options[s]=help_string;
     }
 
-    void add_option_with_after_string(std::string s) {
+    void add_option_with_after_string(const std::string& s) {
         add_option_with_after_string_with_help(s, "");
     }
 
-    void add_option_with_after_string_with_help(std::string s, std::string help_string) {
+    void add_option_with_after_string_with_help(const std::string& s, const std::string& help_string) {
         m_options_with_after_string[s]=help_string;
     }
 
 
     bool parse() {
         bool status_is_ok = true;
-        for (unsigned i = 0; i < m_args.size(); i++) {
+        for (unsigned i = 0; i < m_args.size(); ++i) {
             std::string ar = m_args[i];
             if (m_options.find(ar) != m_options.end() )
                 m_used_options.insert(ar);
@@ -81,19 +82,19 @@ public:
         return status_is_ok;
     }
 
-    bool contains(std::unordered_map<std::string, std::string> & m, std::string s) {
+    bool contains(std::unordered_map<std::string, std::string> & m, const std::string& s) {
         return m.find(s) != m.end();
     }
 
-    bool contains(std::set<std::string> & m, std::string s) {
+    bool contains(std::set<std::string> & m, const std::string& s) {
         return m.find(s) != m.end();
     }
 
-    bool option_is_used(std::string option) {
+    bool option_is_used(const std::string& option) {
         return contains(m_used_options, option) || contains(m_used_options_with_after_string, option);
     }
 
-    std::string get_option_value(std::string option) {
+    std::string get_option_value(const std::string& option) {
         auto t = m_used_options_with_after_string.find(option);
         if (t != m_used_options_with_after_string.end()){
             return t->second;
@@ -101,52 +102,52 @@ public:
         return std::string();
     }
 
-    bool starts_with(std::string s, char const * prefix) {
+    bool starts_with(const std::string& s, char const * prefix) {
         return starts_with(s, std::string(prefix));
     }
 
-    bool starts_with(std::string s, std::string prefix) {
+    bool starts_with(const std::string& s, const std::string& prefix) {
         return s.substr(0, prefix.size()) == prefix;
     }
 
     std::string usage_string() {
         std::string ret = "";
         std::vector<std::string> unknown_options;
-        for (auto t : m_free_args) {
+        for (const auto & t : m_free_args) {
             if (starts_with(t, "-") || starts_with(t, "\\")) {
                 unknown_options.push_back(t);
             }
         }
-        if (unknown_options.size()) {
+        if (!unknown_options.empty()) {
             ret = "Unknown options:";
         }
-        for (auto unknownOption : unknown_options) {
+        for (const auto & unknownOption : unknown_options) {
             ret += unknownOption;
             ret += ",";
         }
         ret += "\n";
         ret += "Usage:\n";
         for (auto allowed_option : m_options)
-            ret += allowed_option.first + " " + (allowed_option.second.size() == 0 ? std::string("") : std::string("/") + allowed_option.second) + std::string("\n");
+            ret += allowed_option.first + " " + (allowed_option.second.empty() ? std::string("") : std::string("/") + allowed_option.second) + std::string("\n");
         for (auto s : m_options_with_after_string) {
-            ret += s.first + " " + (s.second.size() == 0? " \"option value\"":("\""+ s.second+"\"")) + "\n";
+            ret += s.first + " " + (s.second.empty()? " \"option value\"":("\""+ s.second+"\"")) + "\n";
         }
         return ret;
     }
 
     void print() {
-        if (m_used_options.size() == 0 && m_used_options_with_after_string.size() == 0 && m_free_args.size() == 0) {
+        if (m_used_options.empty() && m_used_options_with_after_string.empty() && m_free_args.empty()) {
             std::cout << "no options are given" << std::endl;
             return;
         }
         std::cout << "options are: " << std::endl;
-        for (std::string s : m_used_options) {
+        for (const std::string & s : m_used_options) {
             std::cout << s << std::endl;
         }
         for (auto & t : m_used_options_with_after_string) {
             std::cout << t.first << " " << t.second << std::endl;
         }
-        if (m_free_args.size() > 0) {
+        if (!m_free_args.empty()) {
             std::cout << "free arguments are: "  << std::endl;
             for (auto & t : m_free_args) {
                 std::cout << t << " " <<  std::endl;

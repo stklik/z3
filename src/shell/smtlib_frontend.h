@@ -16,12 +16,14 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMTLIB_FRONTEND_H_
-#define SMTLIB_FRONTEND_H_
+#pragma once
 
 unsigned read_smtlib_file(char const * benchmark_file);
 unsigned read_smtlib2_commands(char const * command_file);
-
-#endif /* SMTLIB_FRONTEND_H_ */
+void help_tactics();
+void help_simplifiers();
+void help_probes();
+void help_tactic(char const* name, bool markdown);
+void help_simplifier(char const* name, bool markdown);
 
 

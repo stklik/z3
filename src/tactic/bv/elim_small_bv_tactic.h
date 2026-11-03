@@ -15,18 +15,30 @@ Author:
 
 Revision History:
 
+Tactic Documentation
+
+## Tactic elim-small-bv
+
+### Short Description
+
+Eliminate small, quantified bit-vectors by expansion
+
+### Example
+
+```z3
+(declare-fun p ((_ BitVec 2)) Bool)
+(assert (forall ((x (_ BitVec 2))) (p x)))
+(apply elim-small-bv)
+```
+
 --*/
-#ifndef ELIM_SMALL_BV_H_
-#define ELIM_SMALL_BV_H_
+#pragma once
 
 #include "util/params.h"
+#include "tactic/tactic.h"
 class ast_manager;
 class tactic;
 
 tactic * mk_elim_small_bv_tactic(ast_manager & m, params_ref const & p = params_ref());
 
-/*
-    ADD_TACTIC("elim-small-bv", "eliminate small, quantified bit-vectors by expansion.", "mk_elim_small_bv_tactic(m, p)")
-*/
-
-#endif
+Z3_ADD_TACTIC(elim_small_bv, "elim-small-bv", "eliminate small, quantified bit-vectors by expansion.", mk_elim_small_bv_tactic(m, p));

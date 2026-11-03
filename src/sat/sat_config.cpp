@@ -16,10 +16,11 @@ Author:
 Revision History:
 
 --*/
+#include "params/sat_params.hpp"
 #include "sat/sat_config.h"
 #include "sat/sat_types.h"
-#include "sat/sat_params.hpp"
 #include "sat/sat_simplifier_params.hpp"
+#include "params/solver_params.hpp"
 
 
 namespace sat {
@@ -31,6 +32,8 @@ namespace sat {
 
     void config::updt_params(params_ref const & _p) {
         sat_params p(_p);
+        solver_params sp(_p);
+
         m_max_memory  = megabytes_to_bytes(p.max_memory());
 
         symbol s = p.restart();
@@ -43,7 +46,7 @@ namespace sat {
         else if (s == symbol("static"))
             m_restart = RS_STATIC;
         else
-            throw sat_param_exception("invalid restart strategy");
+            throw sat_param_exception("invalid restart strategy. Use ema (default), luby, geometric, static");
 
         m_fast_glue_avg = p.restart_emafastglue();
         m_slow_glue_avg = p.restart_emaslowglue();
@@ -54,15 +57,25 @@ namespace sat {
             m_phase = PS_ALWAYS_FALSE;
         else if (s == symbol("always_true"))
             m_phase = PS_ALWAYS_TRUE;
+        else if (s == symbol("basic_caching"))
+            m_phase = PS_BASIC_CACHING;
         else if (s == symbol("caching"))
-            m_phase = PS_CACHING;
+            m_phase = PS_SAT_CACHING;
         else if (s == symbol("random"))
             m_phase = PS_RANDOM;
+        else if (s == symbol("frozen"))
+            m_phase = PS_FROZEN;
+        else if (s == symbol("local_search"))
+            m_phase = PS_LOCAL_SEARCH;
         else
-            throw sat_param_exception("invalid phase selection strategy");
+            throw sat_param_exception("invalid phase selection strategy: always_false, always_true, basic_caching, caching, random");
 
-        m_phase_caching_on  = p.phase_caching_on();
-        m_phase_caching_off = p.phase_caching_off();
+        m_rephase_base      = p.rephase_base();
+        m_reorder_base      = p.reorder_base();
+        m_reorder_itau      = p.reorder_itau();
+        m_activity_scale  = p.reorder_activity_scale();
+        m_search_sat_conflicts = p.search_sat_conflicts();
+        m_search_unsat_conflicts = p.search_unsat_conflicts();
         m_phase_sticky      = p.phase_sticky();
 
         m_restart_initial = p.restart_initial();
@@ -70,25 +83,34 @@ namespace sat {
         m_restart_max     = p.restart_max();
         m_propagate_prefetch = p.propagate_prefetch();
         m_inprocess_max   = p.inprocess_max();
+        m_inprocess_out   = p.inprocess_out();
 
         m_random_freq     = p.random_freq();
         m_random_seed     = p.random_seed();
-        if (m_random_seed == 0) 
+        if (m_random_seed == 0) {
             m_random_seed = _p.get_uint("random_seed", 0);
+        }
         
         m_burst_search    = p.burst_search();
+        m_enable_pre_simplify  = p.enable_pre_simplify();
         
         m_max_conflicts   = p.max_conflicts();
         m_num_threads     = p.threads();
+        m_ddfw_search     = p.ddfw_search();
+        m_ddfw_threads    = p.ddfw_threads();
+        m_prob_search     = p.prob_search();
         m_local_search    = p.local_search();
         m_local_search_threads = p.local_search_threads();
         if (p.local_search_mode() == symbol("gsat"))
             m_local_search_mode = local_search_mode::gsat;
         else
             m_local_search_mode = local_search_mode::wsat;
-        m_unit_walk       = p.unit_walk();
-        m_unit_walk_threads = p.unit_walk_threads();
+        m_local_search_dbg_flips = p.local_search_dbg_flips();
+        m_anf_simplify      = p.anf();
+        m_anf_delay         = p.anf_delay();
+        m_anf_exlin         = p.anf_exlin();
         m_lookahead_simplify = p.lookahead_simplify();
+        m_lookahead_double = p.lookahead_double();
         m_lookahead_simplify_bca = p.lookahead_simplify_bca();
         if (p.lookahead_reward() == symbol("heule_schur")) 
             m_lookahead_reward = heule_schur_reward;
@@ -122,13 +144,16 @@ namespace sat {
         m_lookahead_cube_psat_clause_base = p.lookahead_cube_psat_clause_base();
         m_lookahead_cube_psat_trigger = p.lookahead_cube_psat_trigger();
         m_lookahead_global_autarky = p.lookahead_global_autarky();
+        m_lookahead_delta_fraction = p.lookahead_delta_fraction();
         m_lookahead_use_learned = p.lookahead_use_learned();
-
+        if (m_lookahead_delta_fraction < 0 || m_lookahead_delta_fraction > 1.0) {
+            throw sat_param_exception("invalid value for delta fraction. It should be a number in the interval 0 to 1"); 
+        }
 
         // These parameters are not exposed
-        m_next_simplify1  = _p.get_uint("next_simplify", 30000);
+        m_next_simplify1  = _p.get_uint("next_simplify", 90000);
         m_simplify_mult2  = _p.get_double("simplify_mult2", 1.5);
-        m_simplify_max    = _p.get_uint("simplify_max", 500000);
+        m_simplify_max    = _p.get_uint("simplify_max", 1000000);
         // --------------------------------
         m_simplify_delay  = p.simplify_delay();
 
@@ -152,13 +177,35 @@ namespace sat {
         m_gc_burst        = p.gc_burst();
         m_gc_defrag       = p.gc_defrag();
 
+        m_force_cleanup   = p.force_cleanup();
+
+        m_backtrack_scopes = p.backtrack_scopes();
+        m_backtrack_init_conflicts = p.backtrack_conflicts();
+
         m_minimize_lemmas = p.minimize_lemmas();
         m_core_minimize   = p.core_minimize();
         m_core_minimize_partial   = p.core_minimize_partial();
         m_drat_check_unsat  = p.drat_check_unsat();
         m_drat_check_sat  = p.drat_check_sat();
         m_drat_file       = p.drat_file();
-        m_drat            = (m_drat_check_unsat || m_drat_file != symbol("") || m_drat_check_sat) && p.threads() == 1;
+        m_smt_proof_check = p.smt_proof_check();
+        m_drat_disable = p.drat_disable();
+        if (m_drat_file.is_non_empty_string() &&
+            (m_drat_disable || m_num_threads != 1 ||
+             m_local_search_threads > 0 || m_ddfw_threads > 0))
+            throw sat_param_exception("external DRAT output requires threads=1, "
+                                      "local_search_threads=0, ddfw.threads=0, "
+                                      "and drat.disable=false");
+        m_drat            =
+            !m_drat_disable && p.threads() == 1 &&
+            (sp.lemmas2console() ||
+             m_drat_check_unsat ||
+             m_drat_file.is_non_empty_string() ||
+             sp.proof_log().is_non_empty_string() ||
+             m_smt_proof_check ||
+             m_drat_check_sat);
+        m_drat_binary     = p.drat_binary();
+        m_drat_activity   = p.drat_activity();
         m_dyn_sub_res     = p.dyn_sub_res();
 
         // Parameters used in Liang, Ganesh, Poupart, Czarnecki AAAI 2016.
@@ -167,10 +214,8 @@ namespace sat {
             m_branching_heuristic = BH_VSIDS;
         else if (p.branching_heuristic() == symbol("chb")) 
             m_branching_heuristic = BH_CHB;
-        else if (p.branching_heuristic() == symbol("lrb")) 
-            m_branching_heuristic = BH_LRB;
         else 
-            throw sat_param_exception("invalid branching heuristic: accepted heuristics are 'vsids', 'lrb' or 'chb'");
+            throw sat_param_exception("invalid branching heuristic: accepted heuristics are 'vsids' or 'chb'");
 
         m_anti_exploration = p.branching_anti_exploration();
         m_step_size_init = 0.40;
@@ -183,27 +228,41 @@ namespace sat {
 
         // PB parameters
         s = p.pb_solver();
-        if (s == symbol("circuit")) 
-            m_pb_solver = PB_CIRCUIT;
-        else if (s == symbol("sorting")) 
-            m_pb_solver = PB_SORTING;
-        else if (s == symbol("totalizer")) 
-            m_pb_solver = PB_TOTALIZER;
-        else if (s == symbol("solver")) 
-            m_pb_solver = PB_SOLVER;
-        else if (s == symbol("segmented")) 
-            m_pb_solver = PB_SEGMENTED;
+        if (s != symbol("circuit") &&
+            s != symbol("sorting") && 
+            s != symbol("totalizer") && 
+            s != symbol("solver") &&
+            s != symbol("segmented") &&
+            s != symbol("binary_merge")) {
+            throw sat_param_exception("invalid PB solver: solver, totalizer, circuit, sorting, segmented, binary_merge");
+        }
+
+        s = p.pb_resolve();
+        if (s == "cardinality") 
+            m_pb_resolve = PB_CARDINALITY;
+        else if (s == "rounding") 
+            m_pb_resolve = PB_ROUNDING;
         else 
-            throw sat_param_exception("invalid PB solver: solver, totalizer, circuit, sorting, segmented");
+            throw sat_param_exception("invalid PB resolve: 'cardinality' or 'rounding' expected");
 
+        s = p.pb_lemma_format();
+        if (s == "cardinality") 
+            m_pb_lemma_format = PB_LEMMA_CARDINALITY;
+        else if (s == "pb")
+            m_pb_lemma_format = PB_LEMMA_PB;
+        else
+            throw sat_param_exception("invalid PB lemma format: 'cardinality' or 'pb' expected");
+        
         m_card_solver = p.cardinality_solver();
+        m_xor_solver = false; // prevent users from playing with this option
 
-        sat_simplifier_params sp(_p);
-        m_elim_vars = sp.elim_vars();
+        sat_simplifier_params ssp(_p);
+        m_elim_vars = ssp.elim_vars();
+
     }
 
     void config::collect_param_descrs(param_descrs & r) {
         sat_params::collect_param_descrs(r);
     }
 
-};
+}

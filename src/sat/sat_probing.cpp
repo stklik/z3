@@ -19,11 +19,13 @@ Revision History:
 --*/
 #include "sat/sat_probing.h"
 #include "sat/sat_solver.h"
+#include "sat/sat_elim_eqs.h"
 #include "sat/sat_simplifier_params.hpp"
 
 namespace sat {
     probing::probing(solver & _s, params_ref const & p):
-        s(_s) {
+        s(_s),
+        m_big(s.rand()) {
         updt_params(p);
         reset_statistics();
         m_stopped_at = 0;
@@ -50,8 +52,11 @@ namespace sat {
         entry.m_available = true;
         entry.m_lits.reset();
         unsigned tr_sz = s.m_trail.size();
-        for (unsigned i = old_tr_sz; i < tr_sz; i++) {
+        for (unsigned i = old_tr_sz; i < tr_sz; ++i) {
             entry.m_lits.push_back(s.m_trail[i]);
+            if (s.m_config.m_drat) {
+                s.m_drat.add(~l, s.m_trail[i], status::redundant());
+            }
         }
     }
 
@@ -65,7 +70,11 @@ namespace sat {
         if (implied_lits) {
             for (literal lit : *implied_lits) {
                 if (m_assigned.contains(lit)) {
-                    s.assign(lit, justification());
+                    if (s.m_config.m_drat) {
+                        s.m_drat.add(l, lit, status::redundant());
+                        s.m_drat.add(~l, lit, status::redundant());
+                    }
+                    s.assign_scoped(lit);
                     m_num_assigned++;
                 }
             }
@@ -73,20 +82,23 @@ namespace sat {
         else {
             m_to_assert.reset();
             s.push();
-            s.assign(l, justification());
+            TRACE(sat, tout << "probing " << l << "\n";);
+            s.assign_scoped(l);
             m_counter--;
             unsigned old_tr_sz = s.m_trail.size();
             s.propagate(false);
             if (s.inconsistent()) {
+                TRACE(sat, tout << "probe failed: " << ~l << "\n";);
                 // ~l must be true
+                s.drat_explain_conflict();
                 s.pop(1);
-                s.assign(~l, justification());
+                s.assign_scoped(~l);
                 s.propagate(false);
                 return false;
             }
             // collect literals that were assigned after assigning l
             unsigned tr_sz = s.m_trail.size();
-            for (unsigned i = old_tr_sz; i < tr_sz; i++) {
+            for (unsigned i = old_tr_sz; i < tr_sz; ++i) {
                 if (m_assigned.contains(s.m_trail[i])) {
                     m_to_assert.push_back(s.m_trail[i]);
                 }
@@ -95,8 +107,12 @@ namespace sat {
                 cache_bins(l, old_tr_sz);
             s.pop(1);
 
-            for (literal l : m_to_assert) {
-                s.assign(l, justification());
+            for (literal lit : m_to_assert) {
+                if (s.m_config.m_drat) {
+                    s.m_drat.add(l, lit, status::redundant());
+                    s.m_drat.add(~l, lit, status::redundant());
+                }
+                s.assign_scoped(lit);
                 m_num_assigned++;
             }
         }
@@ -105,19 +121,23 @@ namespace sat {
     }
 
     void probing::process_core(bool_var v) {
-        TRACE("probing", tout << "processing: " << v << " counter: " << -m_counter << "\n";);
+        TRACE(probing, tout << "processing: " << v << " counter: " << -m_counter << "\n";);
         SASSERT(s.m_qhead == s.m_trail.size());
         SASSERT(s.value(v) == l_undef);
         m_counter--;
         s.push();
         literal l(v, false);
-        s.assign(l, justification());
+        s.assign_scoped(l);
+        TRACE(sat, tout << "probing " << l << "\n";);
         unsigned old_tr_sz = s.m_trail.size();
         s.propagate(false);
         if (s.inconsistent()) {
             // ~l must be true
+            TRACE(sat, tout << "probe failed: " << ~l << "\n";
+                  s.display(tout););
+            s.drat_explain_conflict();
             s.pop(1);
-            s.assign(~l, justification());
+            s.assign_scoped(~l);
             s.propagate(false);
             m_num_assigned++;
             return;
@@ -125,18 +145,32 @@ namespace sat {
         // collect literals that were assigned after assigning l
         m_assigned.reset();
         unsigned tr_sz = s.m_trail.size();
-        for (unsigned i = old_tr_sz; i < tr_sz; i++) {
-            m_assigned.insert(s.m_trail[i]);
+        for (unsigned i = old_tr_sz; i < tr_sz; ++i) {
+            literal lit = s.m_trail[i];
+            m_assigned.insert(lit);
+
+#if 0
+            // learn equivalences during probing:
+            if (implies(lit, l)) {
+                if (nullptr == find_binary_watch(s.get_wlist(lit), l) ||
+                    nullptr == find_binary_watch(s.get_wlist(~l), ~lit)) {
+                    m_equivs.push_back(std::make_pair(lit, l));
+                }
+            }
+#endif
         }
         cache_bins(l, old_tr_sz);
+        
         s.pop(1);
 
         if (!try_lit(~l, true))
             return;
 
         if (m_probing_binary) {
-            watch_list & wlist = s.get_wlist(~l);
-            for (watched & w : wlist) {
+            unsigned sz = s.get_wlist(~l).size();
+            for (unsigned i = 0; i < sz; ++i) {
+                watch_list& wlist = s.get_wlist(~l);
+                watched & w = wlist[i];                
                 if (!w.is_binary_clause())
                     continue;
                 literal l2 = w.get_literal();
@@ -144,12 +178,13 @@ namespace sat {
                     continue;
                 if (s.value(l2) != l_undef)
                     continue;
-                // verbose_stream() << "probing " << l << " " << l2 << " " << m_counter << "\n";
-                // Note: that try_lit calls propagate, which may update the watch lists.
+                // Note: that try_lit calls propagate, which may update the watch lists
+                // and potentially change the set of variables.
                 if (!try_lit(l2, false))
                     return;
                 if (s.inconsistent())
                     return;
+                sz = wlist.size();
             }
         }
     }
@@ -166,23 +201,28 @@ namespace sat {
     }
 
     struct probing::report {
-        probing    & m_probing;
+        probing    & p;
         stopwatch    m_watch;
-        unsigned     m_num_assigned;
+        unsigned     m_num_assigned;        
         report(probing & p):
-            m_probing(p),
+            p(p),
             m_num_assigned(p.m_num_assigned) {
             m_watch.start();
         }
 
         ~report() {
             m_watch.stop();
-            IF_VERBOSE(SAT_VB_LVL,
-                       verbose_stream() << " (sat-probing :probing-assigned "
-                       << (m_probing.m_num_assigned - m_num_assigned)
-                       << " :cost " << m_probing.m_counter;
-                       if (m_probing.m_stopped_at != 0) verbose_stream() << " :stopped-at " << m_probing.m_stopped_at;
-                       verbose_stream() << mem_stat() << " :time " << std::fixed << std::setprecision(2) << m_watch.get_seconds() << ")\n";);
+            unsigned units = (p.m_num_assigned - m_num_assigned);
+            IF_VERBOSE(2,
+                       verbose_stream() << " (sat-probing";
+                       if (units > 0) verbose_stream() << " :probing-assigned " << units;
+                       if (!p.m_equivs.empty()) verbose_stream() << " :equivs " << p.m_equivs.size();
+                       verbose_stream() << " :cost " << p.m_counter;
+                       if (p.m_stopped_at != 0) verbose_stream() << " :stopped-at " << p.m_stopped_at;
+                       if (!get_suppress_platform_verbose()) {
+                           verbose_stream() << mem_stat() << m_watch;
+                       }
+                       verbose_stream() << ")\n";);
         }
     };
 
@@ -200,13 +240,16 @@ namespace sat {
         if (m_probing_cache && memory::get_allocation_size() > m_probing_cache_limit)
             m_cached_bins.finalize();
 
+        flet<bool> _is_probing(s.m_is_probing, true);
         report rpt(*this);
         bool r    = true;
         m_counter = 0;
+        m_equivs.reset();
+        m_big.init(s, true);
         int limit = -static_cast<int>(m_probing_limit);
         unsigned i;
         unsigned num = s.num_vars();
-        for (i = 0; i < num; i++) {
+        for (i = 0; i < num; ++i) {
             bool_var v = (m_stopped_at + i) % num;
             if (m_counter < limit) {
                 m_stopped_at = v;
@@ -236,7 +279,24 @@ namespace sat {
         }
         CASSERT("probing", s.check_invariant());
         finalize();
+        if (!m_equivs.empty()) {
+            union_find_default_ctx ctx;
+            union_find<> uf(ctx);
+            for (unsigned i = 2*s.num_vars(); i--> 0; ) uf.mk_var();
+            for (auto const& p : m_equivs) {
+                literal l1 = p.first, l2 = p.second;
+                uf.merge(l1.index(), l2.index());
+                uf.merge((~l1).index(), (~l2).index());
+            }
+            elim_eqs elim(s);
+            elim(uf);
+        }
+        
         return r;
+    }
+
+    bool probing::implies(literal a, literal b) {
+        return m_big.connected(a, b);
     }
 
     void probing::updt_params(params_ref const & _p) {
@@ -259,10 +319,10 @@ namespace sat {
     }
 
     void probing::collect_statistics(statistics & st) const {
-        st.update("probing assigned", m_num_assigned);
+        st.update("sat probing assigned", m_num_assigned);
     }
 
     void probing::reset_statistics() {
         m_num_assigned = 0;
     }
-};
+}

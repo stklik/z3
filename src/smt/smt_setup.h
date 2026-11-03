@@ -16,11 +16,10 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_SETUP_H_
-#define SMT_SETUP_H_
+#pragma once
 
 #include "ast/ast.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 
 struct static_features;
 namespace smt {
@@ -81,6 +80,9 @@ namespace smt {
         void setup_QF_FPBV();
         void setup_QF_S();
         void setup_LRA();
+        void setup_CSP();
+        void setup_special_relations();
+        void setup_polymorphism();
         void setup_AUFLIA(bool simple_array = true);
         void setup_AUFLIA(static_features const & st);
         void setup_AUFLIRA(bool simple_array = true);
@@ -93,17 +95,21 @@ namespace smt {
         void setup_unknown(static_features & st);
         void setup_arrays();
         void setup_datatypes();
+        void setup_recfuns();
         void setup_bv();
         void setup_arith();
         void setup_dl();
         void setup_seq_str(static_features const & st);
         void setup_seq();
+        void setup_char();
+        void setup_finite_set();
         void setup_card();
+        void setup_sls();
         void setup_i_arith();
         void setup_mi_arith();
         void setup_lra_arith();
         void setup_fpa();
-        void setup_str();
+        void setup_relevancy(static_features& st);
 
     public:
         setup(context & c, smt_params & params);
@@ -117,8 +123,8 @@ namespace smt {
         }
         symbol const & get_logic() const { return m_logic; }
         void operator()(config_mode cm);
+        void setup_ff();
     };
-};
+}
 
-#endif /* SMT_SETUP_H_ */
 

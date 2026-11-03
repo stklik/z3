@@ -13,6 +13,7 @@ z3_add_component(smtlogic_tactics
     qfufbv_tactic.cpp
     qfuf_tactic.cpp
     quant_tactics.cpp
+    smt_tactic.cpp
   COMPONENT_DEPENDENCIES
     ackermannization
     aig_tactic
@@ -24,19 +25,4 @@ z3_add_component(smtlogic_tactics
     qe
     sat_solver
     smt_tactic
-  PYG_FILES
-    qfufbv_tactic_params.pyg
-  TACTIC_HEADERS
-    nra_tactic.h
-    qfaufbv_tactic.h
-    qfauflia_tactic.h
-    qfbv_tactic.h
-    qfidl_tactic.h
-    qflia_tactic.h
-    qflra_tactic.h
-    qfnia_tactic.h
-    qfnra_tactic.h
-    qfuf_tactic.h
-    qfufbv_tactic.h
-    quant_tactics.h
 )

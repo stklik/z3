@@ -30,7 +30,7 @@ Revision History:
 #include "ast/substitution/matcher.h"
 #include "ast/expr_functors.h"
 #include "smt/smt_solver.h"
-#include "qe/qe_term_graph.h"
+#include "qe/mbp/mbp_term_graph.h"
 
 namespace spacer {
 void lemma_sanity_checker::operator()(lemma_ref &lemma) {
@@ -50,7 +50,7 @@ namespace{
         contains_array_op_proc(ast_manager &manager) :
             m(manager), m_array_fid(m.mk_family_id("array"))
             {}
-        virtual bool operator()(expr *e) {
+        bool operator()(expr *e) override {
             return is_app(e) && to_app(e)->get_family_id() == m_array_fid;
         }
     };
@@ -107,8 +107,7 @@ void lemma_bool_inductive_generalizer::operator()(lemma_ref &lemma) {
             expand_literals(m, extra_lits);
             SASSERT(extra_lits.size() > 0);
             bool found = false;
-            if (extra_lits.get(0) != lit) {
-                SASSERT(extra_lits.size() > 1);
+            if (extra_lits.get(0) != lit && extra_lits.size() > 1) {
                 for (unsigned j = 0, sz = extra_lits.size(); !found && j < sz; ++j) {
                     cube[i] = extra_lits.get(j);
                     if (pt.check_inductive(lemma->level(), cube, uses_level, weakness)) {
@@ -132,7 +131,7 @@ void lemma_bool_inductive_generalizer::operator()(lemma_ref &lemma) {
     }
 
     if (dirty) {
-        TRACE("spacer",
+        TRACE(spacer,
                tout << "Generalized from:\n" << mk_and(lemma->get_cube())
                << "\ninto\n" << mk_and(cube) << "\n";);
 
@@ -165,10 +164,10 @@ void unsat_core_generalizer::operator()(lemma_ref &lemma)
     expr_ref_vector core(m);
     VERIFY(pt.is_invariant(lemma->level(), lemma.get(), uses_level, &core));
 
-    CTRACE("spacer", old_sz > core.size(),
+    CTRACE(spacer, old_sz > core.size(),
            tout << "unsat core reduced lemma from: "
            << old_sz << " to " << core.size() << "\n";);
-    CTRACE("spacer", old_level < uses_level,
+    CTRACE(spacer, old_level < uses_level,
            tout << "unsat core moved lemma up from: "
            << old_level << " to " << uses_level << "\n";);
     if (old_sz > core.size()) {
@@ -196,8 +195,10 @@ public:
     void operator()(app* a)
     {
         if (a->get_family_id() == null_family_id && m_au.is_array(a)) {
-            if (m_sort && m_sort != get_sort(a)) { return; }
-            if (!m_sort) { m_sort = get_sort(a); }
+            if (m_sort && m_sort != a->get_sort())
+                return; 
+            if (!m_sort)
+                m_sort = a->get_sort(); 
             m_symbs.insert(a->get_decl());
         }
     }
@@ -209,16 +210,10 @@ public:
 bool lemma_array_eq_generalizer::is_array_eq (ast_manager &m, expr* e) {
 
     expr *e1 = nullptr, *e2 = nullptr;
-    if (m.is_eq(e, e1, e2) && is_app(e1) && is_app(e2)) {
-        app *a1 = to_app(e1);
-        app *a2 = to_app(e2);
-        array_util au(m);
-        if (a1->get_family_id() == null_family_id &&
-            a2->get_family_id() == null_family_id &&
-            au.is_array(a1) && au.is_array(a2))
-            return true;
-    }
-    return false;
+    array_util au(m);
+    return m.is_eq(e, e1, e2) &&
+        is_uninterp(e1) && is_uninterp(e2) &&
+        au.is_array(e1) && au.is_array(e2);
 }
 
 void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
@@ -238,7 +233,7 @@ void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
     v = mk_and(core);
     for_each_expr(cap, v);
 
-    CTRACE("core_array_eq", symb.size() > 1 && symb.size() <= 8,
+    CTRACE(core_array_eq, symb.size() > 1 && symb.size() <= 8,
           tout << "found " << symb.size() << " array variables in: \n"
           << v << "\n";);
 
@@ -256,8 +251,11 @@ void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
     expr_ref_vector eqs(m);
     for (unsigned i = 0, sz = vsymbs.size(); i < sz; ++i) {
         for (unsigned j = i + 1; j < sz; ++j) {
-            eqs.push_back(m.mk_eq(m.mk_const(vsymbs.get(i)),
-                                  m.mk_const(vsymbs.get(j))));
+            {
+                expr_ref lhs(m.mk_const(vsymbs.get(i)), m);
+                expr_ref rhs(m.mk_const(vsymbs.get(j)), m);
+                eqs.push_back(m.mk_eq(lhs, rhs));
+            }
         }
     }
 
@@ -281,7 +279,7 @@ void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
             lbool res = sol->check_sat(0, nullptr);
 
             if (res == l_false) {
-                TRACE("core_array_eq",
+                TRACE(core_array_eq,
                       tout << "strengthened " << mk_pp(lits.get(i), m)
                       << " with " << mk_pp(mk_not(m, e), m) << "\n";);
                 lits[i] = mk_not(m, e);
@@ -294,7 +292,7 @@ void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
     // nothing changed
     if (!dirty) return;
 
-    TRACE("core_array_eq",
+    TRACE(core_array_eq,
            tout << "new possible core " << mk_and(lits) << "\n";);
 
 
@@ -302,22 +300,21 @@ void lemma_array_eq_generalizer::operator() (lemma_ref &lemma)
     // -- check if the generalized result is consistent with trans
     unsigned uses_level1;
     if (pt.check_inductive(lemma->level(), lits, uses_level1, lemma->weakness())) {
-        TRACE("core_array_eq", tout << "Inductive!\n";);
+        TRACE(core_array_eq, tout << "Inductive!\n";);
         lemma->update_cube(lemma->get_pob(), lits);
         lemma->set_level(uses_level1);
     }
     else
-    {TRACE("core_array_eq", tout << "Not-Inductive!\n";);}
+    {TRACE(core_array_eq, tout << "Not-Inductive!\n";);}
 }
 
-void lemma_eq_generalizer::operator() (lemma_ref &lemma)
-{
-    TRACE("core_eq", tout << "Transforming equivalence classes\n";);
+void lemma_eq_generalizer::operator() (lemma_ref &lemma) {
+    TRACE(core_eq, tout << "Transforming equivalence classes\n";);
 
     if (lemma->get_cube().empty()) return;
 
     ast_manager &m = m_ctx.get_ast_manager();
-    qe::term_graph egraph(m);
+    mbp::term_graph egraph(m);
     egraph.add_lits(lemma->get_cube());
 
     // -- expand the cube with all derived equalities
@@ -333,4 +330,4 @@ void lemma_eq_generalizer::operator() (lemma_ref &lemma)
 }
 
 
-};
+}

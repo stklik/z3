@@ -5,13 +5,14 @@ Copyright (c) 2015 Microsoft Corporation
 --*/
 
 #include "ast/expr_substitution.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "ast/substitution/substitution.h"
 #include "ast/substitution/unifier.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/ast_pp.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/reg_decl_plugins.h"
+#include <iostream>
 
 void tst_substitution()
 {
@@ -40,20 +41,24 @@ void tst_substitution()
 
     expr_ref res(m);
 
-    TRACE("substitution", subst.display(tout););
-    TRACE("substitution", tout << ok1 << " " << ok2 << "\n";);
+    TRACE(substitution, subst.display(tout););
+    TRACE(substitution, tout << ok1 << " " << ok2 << "\n";);
     subst.display(std::cout);
     subst.apply(v1.get(), res);
-    TRACE("substitution", tout << mk_pp(res, m) << "\n";);
+    TRACE(substitution, tout << mk_pp(res, m) << "\n";);
 
     expr_ref q(m), body(m);
     sort_ref_vector sorts(m);
     svector<symbol> names;
     sorts.push_back(m.mk_bool_sort());
     names.push_back(symbol("dude"));
-    body = m.mk_and(m.mk_eq(v1,v2), m.mk_eq(v3,v4));
-    q = m.mk_forall(sorts.size(), sorts.c_ptr(), names.c_ptr(), body);
+    {
+        expr_ref lhs(m.mk_eq(v1, v2), m);
+        expr_ref rhs(m.mk_eq(v3, v4), m);
+        body = m.mk_and(lhs, rhs);
+    }
+    q = m.mk_forall(sorts.size(), sorts.data(), names.data(), body);
     subst.apply(q, res);
-    TRACE("substitution", tout << mk_pp(q, m) << "\n->\n" << mk_pp(res, m) << "\n";);
+    TRACE(substitution, tout << mk_pp(q, m) << "\n->\n" << mk_pp(res, m) << "\n";);
 
 }

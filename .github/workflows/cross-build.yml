@@ -1,0 +1,38 @@
+name: RISC V and PowerPC 64
+
+on:
+  schedule:
+    - cron: '0 0 */2 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ubuntu:noble
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ aarch64, riscv64, powerpc64 ]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+
+    - name: Install cross build tools
+      run:  apt update && apt install -y ninja-build python3 g++-13-${{ matrix.arch }}-linux-gnu
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Configure CMake and build
+      run: |
+        cmake -S . -B build \
+          -G Ninja \
+          -DCMAKE_CXX_COMPILER=${{ matrix.arch }}-linux-gnu-g++-13
+        cmake --build build --parallel

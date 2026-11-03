@@ -29,6 +29,7 @@ Notes:
 #include "ast/fpa_decl_plugin.h"
 #include "tactic/tactical.h"
 #include "util/stats.h"
+#include <iostream>
 
 #include "tactic/core/collect_statistics_tactic.h"
 
@@ -51,14 +52,14 @@ public:
         m_params(p) {
     }
 
-    ~collect_statistics_tactic() override {}
+    char const* name() const override { return "collect_statistics"; }
 
     tactic * translate(ast_manager & m_) override {
         return alloc(collect_statistics_tactic, m_, m_params);
     }
 
     void updt_params(params_ref const & p) override {
-        m_params = p;
+        m_params.append(p);
     }
 
     void collect_param_descrs(param_descrs & r) override {}
@@ -69,13 +70,13 @@ public:
         collect_proc cp(m, m_stats);
         expr_mark visited;
         const unsigned sz = g->size();
-        for (unsigned i = 0; i < sz; i++)
+        for (unsigned i = 0; i < sz; ++i)
             for_each_expr(cp, visited, g->form(i));
 
-        std::cout << "(" << std::endl;
+        std::cout << "(\n";
         for (auto const& kv : m_stats) 
-            std::cout << " :" << kv.first << "    " << kv.second << std::endl;
-        std::cout << ")" << std::endl;
+            std::cout << " :" << kv.first << "    " << kv.second << '\n';
+        std::cout << ")\n";
 
         g->inc_depth();
         result.push_back(g.get());
@@ -108,7 +109,6 @@ protected:
         void operator()(quantifier * q) {
             m_stats["quantifiers"]++;
             SASSERT(is_app(q->get_expr()));
-            app * body = to_app(q->get_expr());
             switch (q->get_kind()) {
             case forall_k:
                 m_stats["forall-variables"] += q->get_num_decls();
@@ -119,6 +119,9 @@ protected:
             case lambda_k:
                 m_stats["lambda-variables"] += q->get_num_decls();
                 break;
+            case choice_k:
+                m_stats["choice-variables"] += q->get_num_decls();
+                break;
             }
             m_stats["patterns"] += q->get_num_patterns();
             m_stats["no-patterns"] += q->get_num_no_patterns();
@@ -126,12 +129,10 @@ protected:
             if (m_stats.find("max-quantification-depth") == m_stats.end() ||
                 m_stats["max-quantification-depth"] < m_qdepth)
                 m_stats["max-quantification-depth"] = m_qdepth;
-            this->operator()(body);
             m_qdepth--;
         }
 
         void operator()(app * n) {
-            m_stats["function-applications"]++;
             this->operator()(n->get_decl());
         }
 
@@ -159,7 +160,7 @@ protected:
         }
 
         void operator()(func_decl * f) {
-            for (unsigned i = 0; i < f->get_arity(); i++)
+            for (unsigned i = 0; i < f->get_arity(); ++i)
                 this->operator()(f->get_domain()[i]);
             this->operator()(f->get_range());
 

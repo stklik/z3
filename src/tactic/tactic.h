@@ -18,25 +18,22 @@ Author:
 Notes:
 
 --*/
-#ifndef TACTIC_H_
-#define TACTIC_H_
+#pragma once
 
-#include "tactic/goal.h"
 #include "util/params.h"
-#include "util/statistics.h"
-#include "tactic/tactic_exception.h"
 #include "util/lbool.h"
+#include "util/statistics.h"
+#include "tactic/user_propagator_base.h"
+#include "tactic/goal.h"
+#include "tactic/tactic_exception.h"
 
 class progress_callback;
 
 typedef ptr_buffer<goal> goal_buffer;
 
-class tactic {
-    unsigned m_ref_count;
+class tactic : public user_propagator::core {
+    unsigned m_ref_count = 0;
 public:
-    tactic():m_ref_count(0) {}
-    virtual ~tactic() {}
-
     void inc_ref() { m_ref_count++; }
     void dec_ref() { SASSERT(m_ref_count > 0); m_ref_count--; if (m_ref_count == 0) dealloc(this); }
 
@@ -63,7 +60,7 @@ public:
     */
     virtual void operator()(goal_ref const & in, goal_ref_buffer& result) = 0;
 
-    virtual void collect_statistics(statistics & st) const {}
+    virtual void collect_statistics(statistics& st) const {  }
     virtual void reset_statistics() {}
     virtual void cleanup() = 0;
     virtual void reset() { cleanup(); }
@@ -74,17 +71,61 @@ public:
 
     // translate tactic to the given manager
     virtual tactic * translate(ast_manager & m) = 0;
+
+    static void checkpoint(ast_manager& m);
+
+    void register_on_clause(void* ctx, user_propagator::on_clause_eh_t& on_clause) override {
+        throw default_exception("tactic does not support clause logging");
+    }
+
+    void user_propagate_init(
+        void* ctx,
+        user_propagator::push_eh_t& push_eh,
+        user_propagator::pop_eh_t& pop_eh,
+        user_propagator::fresh_eh_t& fresh_eh) override {
+        throw default_exception("tactic does not support user propagation");
+    }
+
+    void user_propagate_register_expr(expr* e) override { }
+    virtual char const* name() const = 0;
+
 protected:
     friend class nary_tactical;
     friend class binary_tactical;
     friend class unary_tactical;
-    friend class nl_purify_tactic;
 
 };
 
 typedef ref<tactic>         tactic_ref;
 typedef sref_vector<tactic> tactic_ref_vector;
 typedef sref_buffer<tactic> tactic_ref_buffer;
+
+/**
+   \brief Self-registration for built-in tactics, consumed by cmd_context/tactic_manager.cpp's
+   install_tactics() to populate a tactic_manager (once per Z3 context) -- replaces the old
+   ADD_TACTIC('name', 'descr', 'code') comment scraped by scripts/mk_install_tactic_cpp.py.
+   Lives here (rather than in cmd_context, which depends on tactic) so headers declaring
+   tactics don't need to depend "upward" on the frontend layer.
+   Each Z3_ADD_TACTIC(...) instantiates one as an `inline` global (safe across however many
+   translation units include the declaring header); the factory itself is a plain function
+   pointer, not invoked at registration time -- only later, once per tactic_manager, from
+   install_tactics().
+*/
+struct tactic_registration {
+    typedef tactic* (*factory_t)(ast_manager&, const params_ref&);
+    char const * name;
+    char const * descr;
+    factory_t factory;
+    tactic_registration * next;
+    static inline tactic_registration * g_head = nullptr;
+    tactic_registration(char const * name, char const * descr, factory_t factory):
+        name(name), descr(descr), factory(factory), next(g_head) {
+        g_head = this;
+    }
+};
+
+#define Z3_ADD_TACTIC(TAG, NAME, DESCR, CODE) \
+  inline tactic_registration g_z3_tactic_registration_##TAG(NAME, DESCR, [](ast_manager & m, params_ref const & p) -> tactic* { return CODE; })
 
 // minimum verbosity level for tactics
 #define TACTIC_VERBOSITY_LVL 10
@@ -99,22 +140,33 @@ public:
 
 void report_tactic_progress(char const * id, unsigned val);
 
+class statistics_report {
+    tactic* m_tactic = nullptr;
+    std::function<void(statistics& st)> m_collector;
+public:
+    statistics_report(tactic& t):m_tactic(&t) {}
+    statistics_report(std::function<void(statistics&)>&& coll): m_collector(std::move(coll)) {}
+    ~statistics_report();
+};
+
 class skip_tactic : public tactic {
 public:
     void operator()(goal_ref const & in, goal_ref_buffer& result) override;
     void cleanup() override {}
     tactic * translate(ast_manager & m) override { return this; } 
+    char const* name() const override { return "skip"; }
+    void collect_statistics(statistics& st) const override {}
+    void user_propagate_initialize_value(expr* var, expr* value) override { }
 };
 
 tactic * mk_skip_tactic();
 tactic * mk_fail_tactic();
 tactic * mk_fail_if_undecided_tactic();
+tactic*  mk_lazy_tactic(ast_manager& m, params_ref const& p, std::function<tactic*(ast_manager& m, params_ref const& p)>);
 
-/*
-  ADD_TACTIC("skip", "do nothing tactic.", "mk_skip_tactic()")
-  ADD_TACTIC("fail", "always fail tactic.", "mk_fail_tactic()")
-  ADD_TACTIC("fail-if-undecided", "fail if goal is undecided.", "mk_fail_if_undecided_tactic()")
-*/
+Z3_ADD_TACTIC(skip, "skip", "do nothing tactic.", mk_skip_tactic());
+Z3_ADD_TACTIC(fail, "fail", "always fail tactic.", mk_fail_tactic());
+Z3_ADD_TACTIC(fail_if_undecided, "fail-if-undecided", "fail if goal is undecided.", mk_fail_if_undecided_tactic());
 
 tactic * mk_report_verbose_tactic(char const * msg, unsigned lvl);
 tactic * mk_trace_tactic(char const * tag);
@@ -126,5 +178,5 @@ lbool check_sat(tactic & t, goal_ref & g, model_ref & md, labels_vec & labels, p
 void fail_if_proof_generation(char const * tactic_name, goal_ref const & in);
 void fail_if_unsat_core_generation(char const * tactic_name, goal_ref const & in);
 void fail_if_model_generation(char const * tactic_name, goal_ref const & in);
+void fail_if_has_quantifiers(char const* tactic_name, goal_ref const& in);
 
-#endif

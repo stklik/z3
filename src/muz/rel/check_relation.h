@@ -19,8 +19,7 @@ Revision History:
 
 --*/
 
-#ifndef CHECK_RELATION_H_
-#define CHECK_RELATION_H_
+#pragma once
 
 #include "muz/rel/doc.h"
 #include "muz/rel/dl_base.h"
@@ -90,7 +89,6 @@ namespace datalog {
             unsigned_vector const& cols1, unsigned_vector const& cols2);
     public:
         check_relation_plugin(relation_manager& rm);
-        ~check_relation_plugin() override;
         void set_plugin(relation_plugin* p) { m_base = p; }
 
         bool can_handle_signature(const relation_signature & s) override;
@@ -166,7 +164,6 @@ namespace datalog {
             unsigned_vector const& dst_eq,
             unsigned_vector const& neg_eq);
     };
-};
+}
        
-#endif /* CHECK_RELATION_H_ */
 

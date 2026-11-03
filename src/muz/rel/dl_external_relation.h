@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_EXTERNAL_RELATION_H_
-#define DL_EXTERNAL_RELATION_H_
+#pragma once
 
 #include "muz/rel/dl_base.h"
 
@@ -27,7 +26,7 @@ namespace datalog {
 
     class external_relation_context {
     public:
-        virtual ~external_relation_context() {}
+        virtual ~external_relation_context() = default;
 
         virtual family_id get_family_id() const = 0;
 
@@ -118,12 +117,11 @@ namespace datalog {
 
         unsigned size() const { return get_signature().size(); } 
 
-        sort*    get_sort() const { return m_rel.get_manager().get_sort(m_rel); }
+        sort*    get_sort() const { return m_rel->get_sort(); }
 
         void mk_accessor(decl_kind k, func_decl_ref& fn, const relation_fact& f, bool destructive, expr_ref& res) const;
 
         external_relation(external_relation_plugin & p, const relation_signature & s, expr* r);
-        ~external_relation() override;
 
     public:
         external_relation_plugin & get_plugin() const;
@@ -149,6 +147,5 @@ namespace datalog {
     };
 
 
-};
+}
 
-#endif

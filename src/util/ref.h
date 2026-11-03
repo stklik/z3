@@ -16,29 +16,27 @@ Author:
 Revision History:
 
 --*/
-#ifndef REF_H_
-#define REF_H_
+#pragma once
+#include <utility>
 
 template<typename T>
 class ref {
-    T * m_ptr;
+    T * m_ptr = nullptr;
 
-    void inc_ref() { 
+    void inc_ref() {
         if (m_ptr) {
             m_ptr->inc_ref();
         }
     }
 
-    void dec_ref() { 
+    void dec_ref() {
         if (m_ptr) {
             m_ptr->dec_ref();
         }
     }
 
 public:
-    ref():
-        m_ptr(nullptr) {
-    }
+    ref() = default;
 
     ref(T * ptr):
         m_ptr(ptr) {
@@ -50,7 +48,10 @@ public:
         inc_ref();
     }
 
-   ref (ref && r): m_ptr (r.detach ()) {}
+    ref(ref && r) noexcept {
+        std::swap(m_ptr, r.m_ptr);
+    }
+
     ~ref() {
         dec_ref();
     }
@@ -63,8 +64,12 @@ public:
         return m_ptr;
     }
 
-    operator bool() const {
+    explicit operator bool() const {
         return m_ptr != nullptr;
+    }
+
+    bool operator!() const {
+        return m_ptr == nullptr;
     }
 
     const T & operator*() const {
@@ -90,7 +95,7 @@ public:
         return *this;
     }
 
-    ref & operator=(ref &&r) {
+    ref & operator=(ref &&r) noexcept {
         if (this != &r) {
            dec_ref ();
            m_ptr = r.detach ();
@@ -116,7 +121,7 @@ public:
     friend bool operator!=(const ref & r1, const ref & r2) {
         return r1.m_ptr != r2.m_ptr;
     }
-    friend void swap (ref &r1, ref &r2) {
+    friend void swap (ref &r1, ref &r2) noexcept {
         T* tmp = r1.m_ptr;
         r1.m_ptr = r2.m_ptr;
         r2.m_ptr = tmp;
@@ -134,5 +139,4 @@ class unmanged_ref_manager {
     static void dec_ref(T * o) { o->dec_ref(); }
 };
 
-#endif /* REF_H_ */
 

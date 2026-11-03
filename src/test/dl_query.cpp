@@ -9,15 +9,16 @@ Copyright (c) 2015 Microsoft Corporation
 #include "muz/rel/dl_table_relation.h"
 #include "muz/base/dl_context.h"
 #include "muz/fp/dl_register_engine.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "util/stopwatch.h"
 #include "ast/reg_decl_plugins.h"
 #include "muz/rel/dl_relation_manager.h"
+#include <iostream>
 
 using namespace datalog;
 
 void dl_query_ask_ground_query(context & ctx, func_decl * pred, relation_fact & f, bool should_be_successful) {
-    expr * const * q_args = reinterpret_cast<expr * const *>(f.c_ptr());
+    expr * const * q_args = reinterpret_cast<expr * const *>(f.data());
     app * query = ctx.get_manager().mk_app(pred, q_args);
 
     lbool is_sat = ctx.query(query);
@@ -36,7 +37,7 @@ void dl_query_ask_for_last_arg(context & ctx, func_decl * pred, relation_fact & 
     push_into_vector(query_args, f);
     query_args.pop_back();
     query_args.push_back(m.mk_var(0, pred->get_domain(query_args.size())));
-    app * query = ctx.get_manager().mk_app(pred, query_args.c_ptr());
+    app * query = ctx.get_manager().mk_app(pred, query_args.data());
 
     lbool is_sat = ctx.query(query);
     std::cerr << "@@ last arg query should succeed: " << should_be_successful << "\n";
@@ -91,20 +92,21 @@ void dl_query_test(ast_manager & m, smt_params & fparams, params_ref& params,
         std::cerr << "Queries on random facts...\n";
         relation_fact f_b(m);
         relation_fact f_q(m);
-        for(unsigned attempt=0; attempt<test_count; attempt++) {
+        for(unsigned attempt=0; attempt<test_count; ++attempt) {
             f_b.reset();
             f_q.reset();
-            for(unsigned col=0; col<sig_b.size(); col++) {
-                uint64_t sort_sz;
-                if(!decl_util.try_get_size(sig_q[col], sort_sz)) {
+            for(unsigned col=0; col<sig_b.size(); ++col) {
+                if (auto sort_sz = decl_util.try_get_size(sig_q[col])) {
+                    uint64_t num = ran()%(*sort_sz);
+                    app * el_b = decl_util.mk_numeral(num, sig_b[col]);
+                    f_b.push_back(el_b);
+                    app * el_q = decl_util.mk_numeral(num, sig_q[col]);
+                    f_q.push_back(el_q);
+                }
+                else {
                     warning_msg("cannot get sort size");
                     return;
                 }
-                uint64_t num = ran()%sort_sz;
-                app * el_b = decl_util.mk_numeral(num, sig_b[col]);
-                f_b.push_back(el_b);
-                app * el_q = decl_util.mk_numeral(num, sig_q[col]);
-                f_q.push_back(el_q);
             }
 
             bool found_in_b = rel_b.contains_fact(f_b);
@@ -170,7 +172,7 @@ void dl_query_test_wpa(smt_params & fparams, params_ref& params) {
     uint64_t var_sz;
     TRUSTME( ctx.try_get_sort_constant_count(var_sort, var_sz) );
 
-    for(unsigned attempt=0; attempt<attempts; attempt++) {
+    for(unsigned attempt=0; attempt<attempts; ++attempt) {
         unsigned el1 = ran()%var_sz;
         unsigned el2 = ran()%var_sz;
         
@@ -178,7 +180,7 @@ void dl_query_test_wpa(smt_params & fparams, params_ref& params) {
         q_args.push_back(dl_util.mk_numeral(el1, var_sort));
         q_args.push_back(dl_util.mk_numeral(el2, var_sort));
 
-        app_ref query_lit(m.mk_app(v_pred, q_args.c_ptr()), m);
+        app_ref query_lit(m.mk_app(v_pred, q_args.data()), m);
         lbool is_sat = ctx.query(query_lit);
         ENSURE(is_sat != l_undef);
         bool found = is_sat == l_true;
@@ -190,7 +192,7 @@ void dl_query_test_wpa(smt_params & fparams, params_ref& params) {
         q_args.pop_back();
         q_args.push_back(m.mk_var(0, var_sort));
 
-        query_lit = m.mk_app(v_pred, q_args.c_ptr());
+        query_lit = m.mk_app(v_pred, q_args.data());
         is_sat = ctx.query(query_lit.get());
         ENSURE(is_sat != l_false);
         std::cerr<<"non-ground query finished\n";
@@ -237,12 +239,12 @@ void tst_dl_query() {
     }
     ctx_base.get_rel_context()->saturate();
 
-    for(unsigned use_restarts=0; use_restarts<=1; use_restarts++) {
+    for(unsigned use_restarts=0; use_restarts<=1; ++use_restarts) {
         params.set_uint("initial_restart_timeout", use_restarts ? 100 : 0);
-        for(unsigned use_similar=0; use_similar<=1; use_similar++) {
+        for(unsigned use_similar=0; use_similar<=1; ++use_similar) {
             params.set_uint("similarity_compressor", use_similar != 0);
 
-            for(unsigned use_magic_sets=0; use_magic_sets<=1; use_magic_sets++) {
+            for(unsigned use_magic_sets=0; use_magic_sets<=1; ++use_magic_sets) {
                 stopwatch watch;
                 if (!(use_restarts == 1 && use_similar == 0 && use_magic_sets == 1)) {
                     continue;

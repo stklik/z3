@@ -4,7 +4,7 @@ Copyright (c) 2015 Microsoft Corporation
 
 --*/
 
-#include "qe/qe_arith.h"
+#include "qe/mbp/mbp_arith.h"
 #include "qe/qe.h"
 #include "ast/rewriter/th_rewriter.h"
 #include "parsers/smt2/smt2parser.h"
@@ -15,6 +15,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include "smt/smt_context.h"
 #include "ast/expr_abstract.h"
 #include "ast/rewriter/expr_safe_replace.h"
+#include <iostream>
 
 static expr_ref parse_fml(ast_manager& m, char const* str) {
     expr_ref result(m);
@@ -37,9 +38,24 @@ static expr_ref parse_fml(ast_manager& m, char const* str) {
            << "(assert " << str << ")\n";
     std::istringstream is(buffer.str());
     VERIFY(parse_smt2_commands(ctx, is));
-    ENSURE(ctx.begin_assertions() != ctx.end_assertions());
-    result = *ctx.begin_assertions();
+    result = ctx.assertions().get(0);
     return result;
+}
+
+static void test_issue_6946() {
+    ast_manager m;
+    reg_decl_plugins(m);
+    expr_ref fml = parse_fml(m, "(forall ((v Real)) (= (= a v) (= v 0)))");
+    expr_ref expected = parse_fml(m, "(= a 0)");
+    expr_ref result(m);
+    smt_params params;
+    qe::expr_quant_elim qelim(m, params);
+    qelim(m.mk_true(), fml, result);
+    VERIFY(!has_quantifiers(result));
+
+    smt::context ctx(m, params);
+    ctx.assert_expr(m.mk_not(m.mk_iff(result, expected)));
+    VERIFY(l_false == ctx.check());
 }
 
 static char const* example1 = "(and (<= x 3.0) (<= (* 3.0 x) y) (<= z y))";
@@ -67,7 +83,7 @@ static void test(app* var, expr_ref& fml) {
     params.m_model = true;
 
     symbol x_name(var->get_decl()->get_name());   
-    sort* x_sort = m.get_sort(var);
+    sort* x_sort = var->get_sort();
 
     expr_ref pr(m);
     expr_ref_vector lits(m);
@@ -81,7 +97,7 @@ static void test(app* var, expr_ref& fml) {
         if (result != l_true) return;
         ctx.get_model(md);
     }    
-    VERIFY(qe::arith_project(*md, var, lits));
+    VERIFY(mbp::arith_project(*md, var, lits));
     pr = mk_and(lits);
    
     std::cout << "original:  " << mk_pp(fml, m) << "\n";
@@ -193,7 +209,7 @@ static app_ref generate_ineqs(ast_manager& m, sort* s, vector<expr_ref_vector>& 
 static void test_c(app* x, expr_ref_vector const& c) {
     ast_manager& m = c.get_manager();
     expr_ref fml(m);
-    fml = m.mk_and(c.size(), c.c_ptr());
+    fml = m.mk_and(std::span<expr* const>(c.data(), c.size()));
     test(x, fml);
 }
 
@@ -260,13 +276,13 @@ static void test2(char const *ex) {
     for (unsigned i = 0; i < vars.size(); ++i) {
         bound.push_back(vars[i].get());
         names.push_back(vars[i]->get_decl()->get_name());
-        sorts.push_back(m.get_sort(vars[i].get()));
+        sorts.push_back(vars[i]->get_sort());
     }
-    expr_abstract(m, 0, bound.size(), bound.c_ptr(), fml, fml2);
-    fml2 = m.mk_exists(bound.size(), sorts.c_ptr(), names.c_ptr(), fml2);
+    expr_abstract(m, 0, bound.size(), bound.data(), fml, fml2);
+    fml2 = m.mk_exists(bound.size(), sorts.data(), names.data(), fml2);
     qe::expr_quant_elim qe(m, params);
     for (unsigned i = 0; i < vars.size(); ++i) {
-        VERIFY(qe::arith_project(*md, vars[i].get(), lits));
+        VERIFY(mbp::arith_project(*md, vars[i].get(), lits));
     }
     pr1 = mk_and(lits);
     qe(m.mk_true(), fml2, pr2);
@@ -289,7 +305,7 @@ static void mk_var(unsigned x, app_ref& v) {
     arith_util a(m);
     std::ostringstream strm;
     strm << "v" << x;
-    v = m.mk_const(symbol(strm.str().c_str()), a.mk_real());
+    v = m.mk_const(symbol(strm.str()), a.mk_real());
 }
 
 static void mk_term(vector<var_t> const& vars, rational const& coeff, app_ref& term) {
@@ -304,7 +320,7 @@ static void mk_term(vector<var_t> const& vars, rational const& coeff, app_ref& t
         ts.push_back(a.mk_mul(a.mk_numeral(coeff, false), var));
     }
     ts.push_back(a.mk_numeral(coeff, a.mk_real()));
-    term = a.mk_add(ts.size(), ts.c_ptr());    
+    term = a.mk_add(ts.size(), ts.data());    
 }
 
 static void add_random_ineq(
@@ -377,13 +393,16 @@ static void add_random_ineq(
     case opt::t_mod:
         NOT_IMPLEMENTED_YET();        
         break;        
+    default:
+        NOT_IMPLEMENTED_YET();        
+        break;                
     }
     fmls.push_back(fml);
     mbo.add_constraint(vars, rational(coeff), rel);
 }
 
 static void test_maximize(opt::model_based_opt& mbo, ast_manager& m, unsigned num_vars, expr_ref_vector const& fmls, app* t) {
-    qe::arith_project_plugin plugin(m);
+    mbp::arith_project_plugin plugin(m);
     model mdl(m);    
     arith_util a(m);
     for (unsigned i = 0; i < num_vars; ++i) {
@@ -443,7 +462,7 @@ static void check_random_ineqs() {
 static void test_project() {
     ast_manager m;
     reg_decl_plugins(m);    
-    qe::arith_project_plugin plugin(m);    
+    mbp::arith_project_plugin plugin(m);    
     arith_util a(m);
     app_ref_vector vars(m);
     expr_ref_vector lits(m), ds(m);
@@ -467,9 +486,9 @@ static void test_project() {
     nums.push_back(a.mk_int(0));
     nums.push_back(a.mk_int(1));
     nums.push_back(a.mk_int(2));
-    fi->insert_new_entry(nums.c_ptr(),   a.mk_int(1));
-    fi->insert_new_entry(nums.c_ptr()+1, a.mk_int(2));
-    fi->insert_new_entry(nums.c_ptr()+2, a.mk_int(3));
+    fi->insert_new_entry(nums.data(),   a.mk_int(1));
+    fi->insert_new_entry(nums.data()+1, a.mk_int(2));
+    fi->insert_new_entry(nums.data()+2, a.mk_int(3));
     fi->set_else(a.mk_int(10));
     mdl.register_decl(f, fi);
     vars.reset();
@@ -477,7 +496,7 @@ static void test_project() {
     vars.push_back(x);
     lits.push_back(x <= app_ref(m.mk_app(f, (expr*)x), m));
     lits.push_back(x < y);
-    plugin(mdl, vars, lits);
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
     // test not-equals
@@ -485,7 +504,7 @@ static void test_project() {
     lits.reset();
     vars.push_back(x);
     lits.push_back(m.mk_not(m.mk_eq(x, y)));
-    plugin(mdl, vars, lits);
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
     // test negation of distinct using bound variables
@@ -503,8 +522,8 @@ static void test_project() {
     ds.push_back(z + 2);
     ds.push_back(u);
     ds.push_back(z);
-    lits.push_back(m.mk_not(m.mk_distinct(ds.size(), ds.c_ptr())));
-    plugin(mdl, vars, lits);
+    lits.push_back(m.mk_not(m.mk_distinct(ds.size(), ds.data())));
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
     // test negation of distinct, not using bound variables
@@ -523,8 +542,8 @@ static void test_project() {
     ds.push_back(u);
     ds.push_back(z + 10);
     ds.push_back(u + 4);
-    lits.push_back(m.mk_not(m.mk_distinct(ds.size(), ds.c_ptr())));
-    plugin(mdl, vars, lits);
+    lits.push_back(m.mk_not(m.mk_distinct(ds.size(), ds.data())));
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
 
@@ -542,8 +561,8 @@ static void test_project() {
     ds.push_back(y);
     ds.push_back(z + 2);
     ds.push_back(u);
-    lits.push_back(m.mk_distinct(ds.size(), ds.c_ptr()));
-    plugin(mdl, vars, lits);
+    lits.push_back(m.mk_distinct(ds.size(), ds.data()));
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
     // equality over modulus
@@ -552,9 +571,13 @@ static void test_project() {
     lits.reset();
     vars.reset();
     vars.push_back(y);
-    lits.push_back(m.mk_eq(a.mk_mod(y, a.mk_int(3)), a.mk_int(1)));
+    {
+        expr_ref lhs(a.mk_mod(y, a.mk_int(3)), m);
+        expr_ref rhs(a.mk_int(1), m);
+        lits.push_back(m.mk_eq(lhs, rhs));
+    }
     lits.push_back(m.mk_eq(2*y, z));
-    plugin(mdl, vars, lits);
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
     // inequality test
@@ -569,7 +592,7 @@ static void test_project() {
     lits.push_back(z <= (x + (2*y)));
     lits.push_back(2*x < u + 3);
     lits.push_back(2*y <= u);
-    plugin(mdl, vars, lits);
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
     // non-unit equalities
@@ -582,7 +605,7 @@ static void test_project() {
     vars.push_back(x);
     lits.push_back(m.mk_eq(2*x, z));
     lits.push_back(m.mk_eq(3*x, u));
-    plugin(mdl, vars, lits);
+    plugin.project(mdl, vars, lits);
     std::cout << lits << "\n";
 
 
@@ -590,6 +613,7 @@ static void test_project() {
 
 
 void tst_qe_arith() {
+    test_issue_6946();
     test_project();
     return;
     check_random_ineqs();

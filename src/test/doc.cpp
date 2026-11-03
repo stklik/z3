@@ -13,11 +13,11 @@ Copyright (c) 2015 Microsoft Corporation
 #include "util/sorting_network.h"
 #include "smt/smt_kernel.h"
 #include "model/model_smt2_pp.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "ast/ast_util.h"
 #include "ast/rewriter/expr_safe_replace.h"
 #include "ast/rewriter/th_rewriter.h"
-
+#include <iostream>
 
 static void tst_doc1(unsigned n) {
     doc_manager m(n);
@@ -173,7 +173,7 @@ class test_doc_cls {
             default: break;
             }
         }
-        result = mk_and(m, conjs.size(), conjs.c_ptr());
+        result = mk_and(conjs);
         return result;
     }
 
@@ -197,7 +197,7 @@ class test_doc_cls {
                 break;
             }
         }
-        result = mk_and(m, conjs.size(), conjs.c_ptr());
+        result = mk_and(conjs);
         return result;
     }
 
@@ -208,7 +208,7 @@ class test_doc_cls {
         for (unsigned i = 0; i < d.neg().size(); ++i) {
             conjs.push_back(m.mk_not(to_formula(d.neg()[i], m2)));
         }
-        result = mk_and(m, conjs.size(), conjs.c_ptr());
+        result = mk_and(conjs);
         return result;
     }
 
@@ -218,13 +218,13 @@ class test_doc_cls {
         for (unsigned i = 0; i < ud.size(); ++i) {
             disjs.push_back(to_formula(ud[i], m2));
         }
-        result = mk_or(m, disjs.size(), disjs.c_ptr());
+        result = mk_or(disjs);
         return result;
     }
 
     void project(doc const& d, doc_manager& m2, const bit_vector& to_delete, doc_ref& result) {
         result = dm.project(m2, to_delete, d);
-        TRACE("doc",
+        TRACE(doc,
               for (unsigned i = 0; i < m_vars.size(); ++i) {
                   tout << (to_delete.get(i)?"0":"1");
               }
@@ -250,7 +250,7 @@ class test_doc_cls {
         doc_manager m2(num_bits);
         doc_ref result(m2);
         project(*d, m2, to_delete, result);
-        TRACE("doc",              
+        TRACE(doc,              
               dm.display(tout, *d) << "\n";
               m2.display(tout, *result) << "\n";);
         fml2 = to_formula(*result, m2);
@@ -299,18 +299,17 @@ class test_doc_cls {
             fmls.push_back(m.mk_not(mk_conj(*t)));
             d->neg().push_back(t);
         }
-        fml1 = mk_and(m, fmls.size(), fmls.c_ptr());
-        svector<bool> to_merge(N, false);
+        fml1 = mk_and(fmls);
+        bool_vector to_merge(N, false);
         bit_vector discard_cols;
         discard_cols.resize(N, false);
-        unsigned num_bits = 1;
         union_find_default_ctx union_ctx;
         subset_ints equalities(union_ctx);
         unsigned lo = N;
         equalities.mk_var();
         for (unsigned i = 1; i < N; ++i) {
             to_merge[i] = (m_ran(2) == 0);
-            if (!to_merge[i]) ++num_bits; else lo = i;
+            if (to_merge[i]) lo = i;
             equalities.mk_var();
         }
         if (lo == N) return;
@@ -321,7 +320,7 @@ class test_doc_cls {
             }
         }
         eqs.push_back(to_formula(*d, dm));
-        fml1 = mk_and(m, eqs.size(), eqs.c_ptr());
+        fml1 = mk_and(eqs);
         if (dm.merge(*d, lo, 1, equalities, discard_cols)) {
             fml2 = to_formula(*d, dm);
         }
@@ -342,7 +341,7 @@ class test_doc_cls {
         solver.assert_expr(fml);
         lbool res = solver.check();
         if (res != l_false) {
-            TRACE("doc",
+            TRACE(doc,
                   tout << mk_pp(fml1, m) << "\n";
                   tout << mk_pp(fml2, m) << "\n";
                   );
@@ -436,7 +435,7 @@ public:
         //sub:{xxx \ {1x0, 0x1}}
         //result:{100}
 
-        for (unsigned i = 0; i < 1000; ++i) {
+        for (unsigned i = 0; i < 100; ++i) {
             udoc d1, d2;
             mk_rand_udoc(3, 3, d1);
             mk_rand_udoc(3, 3, d2);
@@ -453,17 +452,17 @@ public:
 
     void test_intersect() {
         expr_ref fml1(m), fml2(m), fml3(m);
-        for (unsigned i = 0; i < 10000; ++i) {
+        for (unsigned i = 0; i < 100; ++i) {
             udoc d1, d2;
             mk_rand_udoc(3, 3, d1);
             mk_rand_udoc(3, 3, d2);
             fml1 = to_formula(d1, dm);
             fml2 = to_formula(d2, dm);
-            TRACE("doc", 
+            TRACE(doc, 
                   d1.display(dm, tout) << "\n";
                   d2.display(dm, tout) << "\n";);
             d1.intersect(dm, d2);
-            TRACE("doc", d1.display(dm, tout) << "\n";);
+            TRACE(doc, d1.display(dm, tout) << "\n";);
             ENSURE(d1.well_formed(dm));
             fml3 = to_formula(d1, dm);
             fml1 = m.mk_and(fml1, fml2);

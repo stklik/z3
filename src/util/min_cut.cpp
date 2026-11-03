@@ -32,7 +32,7 @@ unsigned min_cut::new_node() {
 void min_cut::add_edge(unsigned int i, unsigned int j, unsigned capacity) {
     m_edges.reserve(i + 1);
     m_edges[i].push_back(edge(j, capacity));
-    TRACE("spacer.mincut", tout << "adding edge (" << i << "," << j << ")\n";);    
+    TRACE(spacer_mincut, tout << "adding edge (" << i << "," << j << ")\n";);    
 }
 
 void min_cut::compute_min_cut(unsigned_vector& cut_nodes) {
@@ -163,7 +163,7 @@ void min_cut::augment_path() {
             }
         }
         if (!already_exists) {
-            m_edges[k].push_back(edge(1, max));
+            m_edges[k].push_back(edge(l, max));
         }
         k = l;
     }

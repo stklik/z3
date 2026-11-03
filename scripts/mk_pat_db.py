@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -- /usr/bin/env python
 """
 Reads a pattern database and generates the corresponding
 header file.
@@ -10,7 +10,7 @@ import os
 import sys
 
 def main(args):
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARNING)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("db_file", help="pattern database file")
     parser.add_argument("output_file", help="output header file path")
@@ -26,4 +26,3 @@ def main(args):
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
-

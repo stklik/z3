@@ -34,20 +34,21 @@ void expr_abstractor::operator()(unsigned base, unsigned num_bound, expr* const*
 
     for (unsigned i = 0; i < num_bound; ++i) {
         b = bound[i];
-        expr* v = m.mk_var(base + num_bound - i - 1, m.get_sort(b));
+        expr* v = m.mk_var(base + num_bound - i - 1, b->get_sort());
         m_pinned.push_back(v);
         m_map.insert(b, v);
     }
 
     while(!m_stack.empty()) {
         curr = m_stack.back();
-        if (m_map.contains(curr)) {
+        auto &val = m_map.insert_if_not_there(curr, nullptr);
+        if (val) {
             m_stack.pop_back();
             continue;
         }
         switch(curr->get_kind()) {
         case AST_VAR: {
-            m_map.insert(curr, curr);
+            val = curr;
             m_stack.pop_back();
             break;
         }
@@ -56,8 +57,8 @@ void expr_abstractor::operator()(unsigned base, unsigned num_bound, expr* const*
             bool all_visited = true;
             bool changed = false;
             m_args.reset();
-            for (unsigned i = 0; i < a->get_num_args(); ++i) {
-                if (!m_map.find(a->get_arg(i), b)) {
+            for (unsigned i = 0, e = a->get_num_args(); i < e; ++i) {
+                if (!all_visited || !m_map.find(a->get_arg(i), b)) {
                     m_stack.push_back(a->get_arg(i));
                     all_visited = false;
                 }
@@ -68,12 +69,12 @@ void expr_abstractor::operator()(unsigned base, unsigned num_bound, expr* const*
             }
             if (all_visited) {
                 if (changed) {
-                    b = m.mk_app(a->get_decl(), m_args.size(), m_args.c_ptr());
+                    b = m.mk_app(a->get_decl(), m_args.size(), m_args.data());
                     m_pinned.push_back(b);
                 } else {
                     b = curr;
                 }
-                m_map.insert(curr, b);
+                val = b;
                 m_stack.pop_back();
             }
             break;
@@ -84,14 +85,14 @@ void expr_abstractor::operator()(unsigned base, unsigned num_bound, expr* const*
             expr_ref result1(m);
             unsigned new_base = base + q->get_num_decls();
         
-            for (unsigned i = 0; i < q->get_num_patterns(); ++i) {
-                expr_abstract(m, new_base, num_bound, bound, q->get_pattern(i), result1);
+            for (unsigned i = 0, e = q->get_num_patterns(); i < e; ++i) {
+                result1 = expr_abstract(m, new_base, num_bound, bound, q->get_pattern(i));
                 patterns.push_back(result1.get());
             }
-            expr_abstract(m, new_base, num_bound, bound, q->get_expr(), result1);
-            b = m.update_quantifier(q, patterns.size(), patterns.c_ptr(), result1.get());
+            result1 = expr_abstract(m, new_base, num_bound, bound, q->get_expr());
+            b = m.update_quantifier(q, patterns.size(), patterns.data(), result1.get());
             m_pinned.push_back(b);            
-            m_map.insert(curr, b);
+            val = b;
             m_stack.pop_back();            
             break;
         }
@@ -110,24 +111,24 @@ void expr_abstractor::operator()(unsigned base, unsigned num_bound, expr* const*
 void expr_abstract(ast_manager& m, unsigned base, unsigned num_bound, expr* const* bound, expr* n, expr_ref&  result) {
     expr_abstractor abs(m);
     abs(base, num_bound, bound, n, result);
-    TRACE("expr_abstract",
+    TRACE(expr_abstract,
           tout << expr_ref(n, m) << "\n";
           tout << result << "\n";);
 }
 
-expr_ref mk_quantifier(quantifier_kind k, ast_manager& m, unsigned num_bound, app* const* bound, expr* n) {
+static expr_ref mk_quantifier(quantifier_kind k, ast_manager& m, unsigned num_bound, app* const* bound, expr* n) {
     expr_ref result(m);
     expr_abstract(m, 0, num_bound, (expr* const*)bound, n, result);    
     if (num_bound > 0) {
         ptr_vector<sort> sorts;
         svector<symbol> names;
         for (unsigned i = 0; i < num_bound; ++i) {
-            sorts.push_back(m.get_sort(bound[i]));
+            sorts.push_back(bound[i]->get_sort());
             names.push_back(bound[i]->get_decl()->get_name());
         }
-        result = m.mk_quantifier(k, num_bound, sorts.c_ptr(), names.c_ptr(), result);
+        result = m.mk_quantifier(k, num_bound, sorts.data(), names.data(), result);
     }
-    TRACE("expr_abstract",
+    TRACE(expr_abstract,
           tout << expr_ref(n, m) << "\n";
           for (unsigned i = 0; i < num_bound; ++i) tout << expr_ref(bound[i], m) << " ";
           tout << "\n";

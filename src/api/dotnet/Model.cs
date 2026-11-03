@@ -18,7 +18,7 @@ Notes:
 --*/
 
 using System;
-using System.Diagnostics.Contracts;
+using System.Diagnostics;
 using System.Collections.Generic;
 
 namespace Microsoft.Z3
@@ -26,7 +26,6 @@ namespace Microsoft.Z3
     /// <summary>
     /// A Model contains interpretations (assignments) of constants and functions. 
     /// </summary>
-    [ContractVerification(true)]
     public class Model : Z3Object
     {
         /// <summary>
@@ -36,7 +35,7 @@ namespace Microsoft.Z3
         /// <returns>An expression if the constant has an interpretation in the model, null otherwise.</returns>
         public Expr ConstInterp(Expr a)
         {
-            Contract.Requires(a != null);
+            Debug.Assert(a != null);
 
             Context.CheckContextMatch(a);
             return ConstInterp(a.FuncDecl);
@@ -49,12 +48,11 @@ namespace Microsoft.Z3
         /// <returns>An expression if the function has an interpretation in the model, null otherwise.</returns>    
         public Expr ConstInterp(FuncDecl f)
         {
-            Contract.Requires(f != null);
+            Debug.Assert(f != null);
 
             Context.CheckContextMatch(f);
-            if (f.Arity != 0 ||
-                Native.Z3_get_sort_kind(Context.nCtx, Native.Z3_get_range(Context.nCtx, f.NativeObject)) == (uint)Z3_sort_kind.Z3_ARRAY_SORT)
-                throw new Z3Exception("Non-zero arity functions and arrays have FunctionInterpretations as a model. Use FuncInterp.");
+            if (f.Arity != 0) 
+                throw new Z3Exception("Non-zero arity functions have FunctionInterpretations as a model. Use FuncInterp.");
 
             IntPtr n = Native.Z3_model_get_const_interp(Context.nCtx, NativeObject, f.NativeObject);
             if (n == IntPtr.Zero)
@@ -70,7 +68,7 @@ namespace Microsoft.Z3
         /// <returns>A FunctionInterpretation if the function has an interpretation in the model, null otherwise.</returns> 
         public FuncInterp FuncInterp(FuncDecl f)
         {
-            Contract.Requires(f != null);
+            Debug.Assert(f != null);
 
             Context.CheckContextMatch(f);
 
@@ -89,7 +87,8 @@ namespace Microsoft.Z3
                         if (Native.Z3_is_as_array(Context.nCtx, n) == 0)
                             throw new Z3Exception("Argument was not an array constant");
                         IntPtr fd = Native.Z3_get_as_array_func_decl(Context.nCtx, n);
-                        return FuncInterp(new FuncDecl(Context, fd));
+                        using var decl = new FuncDecl(Context, fd);
+                        return FuncInterp(decl);
                     }
                 }
                 else
@@ -122,7 +121,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<FuncDecl[]>() != null);
 
                 uint n = NumConsts;
                 FuncDecl[] res = new FuncDecl[n];
@@ -165,7 +163,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<FuncDecl[]>() != null);
 
                 uint n = NumFuncs;
                 FuncDecl[] res = new FuncDecl[n];
@@ -182,7 +179,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<FuncDecl[]>() != null);
 
                 uint nFuncs = NumFuncs;
                 uint nConsts = NumConsts;
@@ -223,8 +219,7 @@ namespace Microsoft.Z3
         /// <returns>The evaluation of <paramref name="t"/> in the model.</returns>        
         public Expr Eval(Expr t, bool completion = false)
         {
-            Contract.Requires(t != null);
-            Contract.Ensures(Contract.Result<Expr>() != null);
+            Debug.Assert(t != null);
 
             IntPtr v = IntPtr.Zero;
             if (Native.Z3_model_eval(Context.nCtx, NativeObject, t.NativeObject, (byte)(completion ? 1 : 0), ref v) == (byte)0)
@@ -238,10 +233,17 @@ namespace Microsoft.Z3
         /// </summary>        
         public Expr Evaluate(Expr t, bool completion = false)
         {
-            Contract.Requires(t != null);
-            Contract.Ensures(Contract.Result<Expr>() != null);
+            Debug.Assert(t != null);
 
             return Eval(t, completion);
+        }
+
+        /// <summary>
+        /// Evaluate expression to a double, assuming it is a numeral already.
+        /// </summary>
+        public double Double(Expr t) {
+            using var r = Eval(t, true);
+            return Native.Z3_get_numeral_double(Context.nCtx, r.NativeObject);
         }
 
         /// <summary>
@@ -263,7 +265,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<Sort[]>() != null);
 
                 uint n = NumSorts;
                 Sort[] res = new Sort[n];
@@ -281,10 +282,9 @@ namespace Microsoft.Z3
         /// <returns>An array of expressions, where each is an element of the universe of <paramref name="s"/></returns>
         public Expr[] SortUniverse(Sort s)
         {
-            Contract.Requires(s != null);
-            Contract.Ensures(Contract.Result<Expr[]>() != null);
+            Debug.Assert(s != null);
 
-            ASTVector av = new ASTVector(Context, Native.Z3_model_get_sort_universe(Context.nCtx, NativeObject, s.NativeObject));            
+            using ASTVector av = new ASTVector(Context, Native.Z3_model_get_sort_universe(Context.nCtx, NativeObject, s.NativeObject));            
             return av.ToExprArray();
         }
 
@@ -301,34 +301,21 @@ namespace Microsoft.Z3
         internal Model(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
-        }
-
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_model_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_model_dec_ref(ctx.nCtx, obj);
-            }
-        };        
+            Debug.Assert(ctx != null);
+        }      
 
         internal override void IncRef(IntPtr o)
         {
-            Context.Model_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_model_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.Model_DRQ.Add(o);
-            base.DecRef(o);
+            lock (Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_model_dec_ref(Context.nCtx, o);
+            }
         }
         #endregion
     }

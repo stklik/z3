@@ -1,33 +1,42 @@
  /*++
 Copyright (c) 2011 Microsoft Corporation
  
- Module Name:
+Module Name:
  
     bit_blaster_tactic.h
  
- Abstract:
+Author:
  
-    Apply bit-blasting to a given goal.
+   Leonardo (leonardo) 2011-10-25
  
- Author:
- 
-    Leonardo (leonardo) 2011-10-25
- 
- Notes:
- 
+Tactic Documentation:
+
+## Tactic bit-blast
+
+### Short Description
+
+Apply bit-blasting to a given goal.
+
+### Example
+
+```z3
+(declare-const x (_ BitVec 8))
+(declare-const y (_ BitVec 8))
+(assert (bvule x y))
+(apply bit-blast)
+```
+
  --*/
-#ifndef BIT_BLASTER_TACTIC_H_
-#define BIT_BLASTER_TACTIC_H_
+
+#pragma once
  
 #include "util/params.h"
 #include "ast/rewriter/bit_blaster/bit_blaster_rewriter.h"
+#include "tactic/tactic.h"
  class ast_manager;
  class tactic;
  
 tactic * mk_bit_blaster_tactic(ast_manager & m, params_ref const & p = params_ref());
 tactic * mk_bit_blaster_tactic(ast_manager & m, bit_blaster_rewriter* rw, params_ref const & p = params_ref());
- /*
-  ADD_TACTIC("bit-blast", "reduce bit-vector expressions into SAT.", "mk_bit_blaster_tactic(m, p)")
- */
- #endif
+Z3_ADD_TACTIC(bit_blast, "bit-blast", "reduce bit-vector expressions into SAT.", mk_bit_blaster_tactic(m, p));
 

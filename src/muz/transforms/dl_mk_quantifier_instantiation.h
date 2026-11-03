@@ -22,8 +22,7 @@ Revision History:
     "On Solving Universally Quantified Horn Clauses"    
 
 --*/
-#ifndef DL_MK_QUANTIFIER_INSTANTIATION_H_
-#define DL_MK_QUANTIFIER_INSTANTIATION_H_
+#pragma once
 
 
 #include "muz/base/dl_rule_transformer.h"
@@ -61,14 +60,11 @@ namespace datalog {
     public:
         mk_quantifier_instantiation(context & ctx, unsigned priority);
 
-        ~mk_quantifier_instantiation() override;
-        
         rule_set * operator()(rule_set const & source) override;
     };
 
 
 
-};
+}
 
-#endif /* DL_MK_QUANTIFIER_INSTANTIATION_H_ */
 

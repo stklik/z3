@@ -16,24 +16,31 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_NUMERAL_VECTOR_H_
-#define SCOPED_NUMERAL_VECTOR_H_
+#pragma once
 
 #include "util/vector.h"
 
 template<typename Manager>
 class _scoped_numeral_vector : public svector<typename Manager::numeral> {
     Manager & m_manager;
-    _scoped_numeral_vector(_scoped_numeral_vector const & v);
 public:
     _scoped_numeral_vector(Manager & m):m_manager(m) {}
+
+    _scoped_numeral_vector(const _scoped_numeral_vector & other) : m_manager(other.m_manager) {
+        for (unsigned i = 0, e = other.size(); i != e; ++i) {
+            push_back(other[i]);
+        }
+    }
+
+    _scoped_numeral_vector(_scoped_numeral_vector&&) = default;
+
     ~_scoped_numeral_vector() {
         reset();
     }
 
     void reset() {
-        unsigned sz = this->size();
-        for (unsigned i = 0; i < sz; i++) {
+        auto sz = this->size();
+        for (unsigned i = 0; i < sz; ++i) {
             m().del(this->operator[](i));
         }
         svector<typename Manager::numeral>::reset();
@@ -54,7 +61,7 @@ public:
         unsigned old_sz = this->size();
         if (old_sz == sz)
             return;
-        for (unsigned i = sz; i < old_sz; i++)
+        for (unsigned i = sz; i < old_sz; ++i)
             m().del(this->operator[](i));
         svector<typename Manager::numeral>::shrink(sz);
     }
@@ -66,5 +73,3 @@ public:
         svector<typename Manager::numeral>::resize(sz, 0);
     }
 };
-
-#endif

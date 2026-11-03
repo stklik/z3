@@ -18,16 +18,15 @@ Notes:
 --*/
 
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Collections.Generic;
-using System.Diagnostics.Contracts;
 
 namespace Microsoft.Z3
 {
     /// <summary>
     /// Solvers.
     /// </summary>
-    [ContractVerification(true)]
     public class Solver : Z3Object
     {
         /// <summary>
@@ -37,7 +36,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<string>() != null);
 
                 return Native.Z3_solver_get_help(Context.nCtx, NativeObject);
             }
@@ -50,7 +48,7 @@ namespace Microsoft.Z3
         {
             set
             {
-                Contract.Requires(value != null);
+                Debug.Assert(value != null);
 
                 Context.CheckContextMatch(value);
                 Native.Z3_solver_set_params(Context.nCtx, NativeObject, value.NativeObject);
@@ -60,43 +58,92 @@ namespace Microsoft.Z3
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(string name, bool value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(string name, bool value) 
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(string name, uint value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(string name, uint value)
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(string name, double value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(string name, double value)
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(string name, string value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(string name, string value)
+    {
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(string name, Symbol value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(string name, Symbol value)
+    {
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(Symbol name, bool value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(Symbol name, bool value)
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(Symbol name, uint value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(Symbol name, uint value)
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(Symbol name, double value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(Symbol name, double value)
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(Symbol name, string value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(Symbol name, string value)
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
+
 	/// <summary>
 	/// Sets parameter on the solver
 	/// </summary>
-	public void Set(Symbol name, Symbol value) { Parameters = Context.MkParams().Add(name, value); }
+	public void Set(Symbol name, Symbol value) 
+    { 
+        using var parameters = Context.MkParams().Add(name, value);
+        Parameters = parameters; 
+    }
 
 
 
@@ -152,8 +199,8 @@ namespace Microsoft.Z3
         /// </summary>        
         public void Assert(params BoolExpr[] constraints)
         {
-            Contract.Requires(constraints != null);
-            Contract.Requires(Contract.ForAll(constraints, c => c != null));
+            Debug.Assert(constraints != null);
+            Debug.Assert(constraints.All(c => c != null));
 
             Context.CheckContextMatch<BoolExpr>(constraints);
             foreach (BoolExpr a in constraints)
@@ -191,9 +238,9 @@ namespace Microsoft.Z3
         /// </remarks>        
         public void AssertAndTrack(BoolExpr[] constraints, BoolExpr[] ps)
         {
-            Contract.Requires(constraints != null);
-            Contract.Requires(Contract.ForAll(constraints, c => c != null));
-            Contract.Requires(Contract.ForAll(ps, c => c != null));
+            Debug.Assert(constraints != null);
+            Debug.Assert(constraints.All(c => c != null));
+            Debug.Assert(ps.All(c => c != null));
             Context.CheckContextMatch<BoolExpr>(constraints);
             Context.CheckContextMatch<BoolExpr>(ps);
             if (constraints.Length != ps.Length)
@@ -216,8 +263,8 @@ namespace Microsoft.Z3
         /// </remarks>        
         public void AssertAndTrack(BoolExpr constraint, BoolExpr p)
         {
-            Contract.Requires(constraint != null);
-            Contract.Requires(p != null);
+            Debug.Assert(constraint != null);
+            Debug.Assert(p != null);
             Context.CheckContextMatch(constraint);
             Context.CheckContextMatch(p);
                         
@@ -247,7 +294,7 @@ namespace Microsoft.Z3
         {
             get
             {
-                ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_assertions(Context.nCtx, NativeObject));
+                using ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_assertions(Context.nCtx, NativeObject));
                 return assertions.Size;
             }
         }
@@ -259,9 +306,8 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<BoolExpr[]>() != null);
 
-                ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_assertions(Context.nCtx, NativeObject));
+                using ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_assertions(Context.nCtx, NativeObject));
                 return assertions.ToBoolExprArray();
             }
         }
@@ -273,11 +319,70 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<BoolExpr[]>() != null);
 
-                ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_units(Context.nCtx, NativeObject));
+                using ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_units(Context.nCtx, NativeObject));
                 return assertions.ToBoolExprArray();
             }
+        }
+
+        /// <summary>
+        /// Non-unit literals in the solver state.
+        /// </summary>
+        public BoolExpr[] NonUnits
+        {
+            get
+            {
+                using ASTVector assertions = new ASTVector(Context, Native.Z3_solver_get_non_units(Context.nCtx, NativeObject));
+                return assertions.ToBoolExprArray();
+            }
+        }
+
+        /// <summary>
+        /// Trail of the solver state after a check() call.
+        /// </summary>
+        public BoolExpr[] Trail
+        {
+            get
+            {
+                using ASTVector trail = new ASTVector(Context, Native.Z3_solver_get_trail(Context.nCtx, NativeObject));
+                return trail.ToBoolExprArray();
+            }
+        }
+
+        /// <summary>
+        /// Retrieve congruence closure root of the term t relative to the current search state.
+        /// The function primarily works for SimpleSolver.
+        /// Terms and variables that are eliminated during pre-processing are not visible to the congruence closure.
+        /// </summary>
+        public Expr CongruenceRoot(Expr t)
+        {
+            Debug.Assert(t != null);
+            Context.CheckContextMatch(t);
+            return Expr.Create(Context, Native.Z3_solver_congruence_root(Context.nCtx, NativeObject, t.NativeObject));
+        }
+
+        /// <summary>
+        /// Retrieve congruence closure sibling of the term t relative to the current search state.
+        /// The function primarily works for SimpleSolver.
+        /// Terms and variables that are eliminated during pre-processing are not visible to the congruence closure.
+        /// </summary>
+        public Expr CongruenceNext(Expr t)
+        {
+            Debug.Assert(t != null);
+            Context.CheckContextMatch(t);
+            return Expr.Create(Context, Native.Z3_solver_congruence_next(Context.nCtx, NativeObject, t.NativeObject));
+        }
+
+        /// <summary>
+        /// Explain congruence of a and b relative to the current search state.
+        /// </summary>
+        public Expr CongruenceExplain(Expr a, Expr b)
+        {
+            Debug.Assert(a != null);
+            Debug.Assert(b != null);
+            Context.CheckContextMatch(a);
+            Context.CheckContextMatch(b);
+            return Expr.Create(Context, Native.Z3_solver_congruence_explain(Context.nCtx, NativeObject, a.NativeObject, b.NativeObject));
         }
 
         /// <summary>
@@ -334,9 +439,9 @@ namespace Microsoft.Z3
         /// </remarks>    
         public Status Consequences(IEnumerable<BoolExpr> assumptions, IEnumerable<Expr> variables, out BoolExpr[] consequences) 
         {
-            ASTVector result = new ASTVector(Context);
-            ASTVector asms = new ASTVector(Context);
-            ASTVector vars = new ASTVector(Context);
+            using ASTVector result = new ASTVector(Context);
+            using ASTVector asms = new ASTVector(Context);
+            using ASTVector vars = new ASTVector(Context);
             foreach (var asm in assumptions) asms.Push(asm);
             foreach (var v in variables) vars.Push(v);
             Z3_lbool r = (Z3_lbool)Native.Z3_solver_get_consequences(Context.nCtx, NativeObject, asms.NativeObject, vars.NativeObject, result.NativeObject);
@@ -394,9 +499,8 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<Expr[]>() != null);
 
-                ASTVector core = new ASTVector(Context, Native.Z3_solver_get_unsat_core(Context.nCtx, NativeObject));                
+                using ASTVector core = new ASTVector(Context, Native.Z3_solver_get_unsat_core(Context.nCtx, NativeObject));                
                 return core.ToBoolExprArray();
             }
         }
@@ -408,7 +512,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<string>() != null);
 
                 return Native.Z3_solver_get_reason_unknown(Context.nCtx, NativeObject);
             }
@@ -430,14 +533,14 @@ namespace Microsoft.Z3
 	/// </summary>
 	public IEnumerable<BoolExpr[]> Cube()
 	{
-             ASTVector cv = new ASTVector(Context);
+             using ASTVector cv = new ASTVector(Context);
              if (CubeVariables != null) 
                 foreach (var b in CubeVariables) cv.Push(b);
 
 	     while (true) {
                 var lvl = BacktrackLevel;
                 BacktrackLevel = uint.MaxValue;
-                ASTVector r = new ASTVector(Context, Native.Z3_solver_cube(Context.nCtx, NativeObject, cv.NativeObject, lvl));
+                using ASTVector r = new ASTVector(Context, Native.Z3_solver_cube(Context.nCtx, NativeObject, cv.NativeObject, lvl));
                 var v = r.ToBoolExprArray();
                 CubeVariables = cv.ToBoolExprArray();
                 if (v.Length == 1 && v[0].IsFalse) {
@@ -451,12 +554,43 @@ namespace Microsoft.Z3
 	}
 
         /// <summary>
+        /// Retrieve the trail and their associated decision levels after a <c>Check</c> call.
+        /// The trail contains Boolean literals (decisions and propagations), and the levels
+        /// array contains the corresponding decision levels at which each literal was assigned.
+        /// </summary>
+        public uint[] TrailLevels
+        {
+            get
+            {
+                using ASTVector trail = new ASTVector(Context, Native.Z3_solver_get_trail(Context.nCtx, NativeObject));
+                uint[] levels = new uint[trail.Size];
+                Native.Z3_solver_get_levels(Context.nCtx, NativeObject, trail.NativeObject, (uint)trail.Size, levels);
+                return levels;
+            }
+        }
+
+        /// <summary>
+        /// Set an initial value for a variable to guide the solver's search heuristics.
+        /// This can improve performance when good initial values are known for the problem domain.
+        /// </summary>
+        /// <param name="var">The variable to set an initial value for</param>
+        /// <param name="value">The initial value for the variable</param>
+        public void SetInitialValue(Expr var, Expr value)
+        {
+            Debug.Assert(var != null);
+            Debug.Assert(value != null);
+
+            Context.CheckContextMatch(var);
+            Context.CheckContextMatch(value);
+            Native.Z3_solver_set_initial_value(Context.nCtx, NativeObject, var.NativeObject, value.NativeObject);
+        }
+
+        /// <summary>
         /// Create a clone of the current solver with respect to <c>ctx</c>.
         /// </summary>
         public Solver Translate(Context ctx) 
         {
-             Contract.Requires(ctx != null);
-             Contract.Ensures(Contract.Result<Solver>() != null);
+             Debug.Assert(ctx != null);
              return new Solver(ctx, Native.Z3_solver_translate(Context.nCtx, NativeObject, ctx.nCtx));
         }
 
@@ -475,7 +609,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<Statistics>() != null);
 
                 return new Statistics(Context, Native.Z3_solver_get_statistics(Context.nCtx, NativeObject));
             }
@@ -489,39 +622,65 @@ namespace Microsoft.Z3
             return Native.Z3_solver_to_string(Context.nCtx, NativeObject);
         }
 
+        /// <summary>
+        /// Convert the solver assertions to SMT-LIB2 format as a benchmark.
+        /// </summary>
+        /// <param name="status">Status string, such as "sat", "unsat", or "unknown". Default is "unknown".</param>
+        /// <returns>A string representation of the solver's assertions in SMT-LIB2 format.</returns>
+        public string ToSmt2(string status = "unknown")
+        {
+            BoolExpr[] assertions = Assertions;
+            BoolExpr formula;
+            BoolExpr[] assumptions;
+            
+            if (assertions.Length > 0)
+            {
+                // Use last assertion as formula and rest as assumptions
+                assumptions = new BoolExpr[assertions.Length - 1];
+                Array.Copy(assertions, assumptions, assertions.Length - 1);
+                formula = assertions[assertions.Length - 1];
+            }
+            else
+            {
+                // No assertions, use true
+                assumptions = new BoolExpr[0];
+                formula = Context.MkTrue();
+            }
+
+            return Context.BenchmarkToSmtlibString("", "", status, "", assumptions, formula);
+        }
+
+        /// <summary>
+        /// Convert the solver's Boolean formula to DIMACS CNF format.
+        /// </summary>
+        /// <param name="includeNames">If true, include variable names in the DIMACS output. Default is true.</param>
+        /// <returns>A string containing the DIMACS CNF representation.</returns>
+        public string ToDimacs(bool includeNames = true)
+        {
+            byte includeNamesByte = includeNames ? (byte)1 : (byte)0;
+            return Native.Z3_solver_to_dimacs_string(Context.nCtx, NativeObject, includeNamesByte);
+        }
+
         #region Internal
         internal Solver(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
             this.BacktrackLevel = uint.MaxValue;
         }
 
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_solver_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_solver_dec_ref(ctx.nCtx, obj);
-            }
-        };
-
         internal override void IncRef(IntPtr o)
         {
-            Context.Solver_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_solver_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.Solver_DRQ.Add(o);
-            base.DecRef(o);
+            lock (Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_solver_dec_ref(Context.nCtx, o);
+            }
         }
 
         private Status lboolToStatus(Z3_lbool r) 

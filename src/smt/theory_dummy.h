@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef THEORY_DUMMY_H_
-#define THEORY_DUMMY_H_
+#pragma once
 
 #include "smt/smt_theory.h"
 
@@ -39,21 +38,19 @@ namespace smt {
         bool use_diseqs() const override;
         void new_diseq_eh(theory_var v1, theory_var v2) override;
         void reset_eh() override;
-        final_check_status final_check_eh() override;
+        final_check_status final_check_eh(unsigned) override;
         bool build_models() const override {
             return false;
         }
         void display(std::ostream& out) const override {}
 
     public:
-        theory_dummy(family_id fid, char const * name);
-        ~theory_dummy() override {}
+        theory_dummy(context& ctx, family_id fid, char const * name);
 
-        theory * mk_fresh(context * new_ctx) override { return alloc(theory_dummy, get_family_id(), m_name); }
+        theory * mk_fresh(context * new_ctx) override { return alloc(theory_dummy, *new_ctx, get_family_id(), m_name); }
 
         char const * get_name() const override;
     };
-};
+}
 
-#endif /* THEORY_DUMMY_H_ */
 

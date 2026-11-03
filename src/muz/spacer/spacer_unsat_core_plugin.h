@@ -15,8 +15,7 @@ Revision History:
 
 
 --*/
-#ifndef _SPACER_UNSAT_CORE_PLUGIN_H_
-#define _SPACER_UNSAT_CORE_PLUGIN_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/min_cut.h"
@@ -32,16 +31,16 @@ namespace spacer {
         ast_manager& m;
     public:
         unsat_core_plugin(unsat_core_learner& learner);
-        virtual ~unsat_core_plugin() {};
+        virtual ~unsat_core_plugin() = default;
         virtual void compute_partial_core(proof* step) = 0;
-        virtual void finalize(){};
+        virtual void finalize(){}
 
         unsat_core_learner& m_ctx;
     };
 
     class unsat_core_plugin_lemma : public unsat_core_plugin {
     public:
-        unsat_core_plugin_lemma(unsat_core_learner& learner) : unsat_core_plugin(learner){};
+        unsat_core_plugin_lemma(unsat_core_learner& learner) : unsat_core_plugin(learner){}
         void compute_partial_core(proof* step) override;
     private:
         void add_lowest_split_to_core(proof* step) const;
@@ -54,7 +53,7 @@ namespace spacer {
                                        bool use_constant_from_a=true) :
             unsat_core_plugin(learner),
             m_split_literals(split_literals),
-            m_use_constant_from_a(use_constant_from_a) {};
+            m_use_constant_from_a(use_constant_from_a) {}
         void compute_partial_core(proof* step) override;
     private:
         bool m_split_literals;
@@ -67,7 +66,7 @@ namespace spacer {
 
     class unsat_core_plugin_farkas_lemma_optimized : public unsat_core_plugin {
     public:
-        unsat_core_plugin_farkas_lemma_optimized(unsat_core_learner& learner, ast_manager& m) : unsat_core_plugin(learner) {};
+        unsat_core_plugin_farkas_lemma_optimized(unsat_core_learner& learner, ast_manager& m) : unsat_core_plugin(learner) {}
         void compute_partial_core(proof* step) override;
         void finalize() override;
     protected:
@@ -80,7 +79,7 @@ namespace spacer {
 
     class unsat_core_plugin_farkas_lemma_bounded : public unsat_core_plugin_farkas_lemma_optimized {
     public:
-        unsat_core_plugin_farkas_lemma_bounded(unsat_core_learner& learner, ast_manager& m) : unsat_core_plugin_farkas_lemma_optimized(learner, m) {};
+        unsat_core_plugin_farkas_lemma_bounded(unsat_core_learner& learner, ast_manager& m) : unsat_core_plugin_farkas_lemma_optimized(learner, m) {}
         void finalize() override;
     };
 
@@ -102,4 +101,3 @@ namespace spacer {
         min_cut m_min_cut;
     };
 }
-#endif

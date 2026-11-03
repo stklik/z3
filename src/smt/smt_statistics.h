@@ -16,10 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_STATISTICS_H_
-#define SMT_STATISTICS_H_
-
-#include<iostream>
+#pragma once
 
 namespace smt {
 
@@ -46,15 +43,17 @@ namespace smt {
         unsigned m_max_generation;
         unsigned m_num_minimized_lits;
         unsigned m_num_checks;
+        unsigned m_num_simplifications;
+        unsigned m_num_del_clauses;
+        unsigned m_num_assignments;
         statistics() {
             reset();
         }
         
         void reset();
     };
-};
+}
 
 
 
-#endif /* SMT_STATISTICS_H_ */
 

@@ -10,7 +10,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include "ast/reg_decl_plugins.h"
 #include "ast/rewriter/arith_rewriter.h"
 #include "ast/ast_pp.h"
-
+#include <iostream>
 
 static expr_ref parse_fml(ast_manager& m, char const* str) {
     expr_ref result(m);
@@ -25,8 +25,7 @@ static expr_ref parse_fml(ast_manager& m, char const* str) {
            << "(assert " << str << ")\n";
     std::istringstream is(buffer.str());
     VERIFY(parse_smt2_commands(ctx, is));
-    ENSURE(ctx.begin_assertions() != ctx.end_assertions());
-    result = *ctx.begin_assertions();
+    result = ctx.assertions().get(0);
     return result;
 }
 
@@ -136,7 +135,7 @@ private:
 #endif
         }
 
-        TRACE("polynorm",
+        TRACE(polynorm,
               tout << mk_pp(coefficient, m) << "\n";
               for (unsigned i = 0; i < factors.size(); ++i) {
                   tout << mk_pp(factors[i].get(), m) << " * " << mk_pp(coefficients[i].get(), m) << "\n";

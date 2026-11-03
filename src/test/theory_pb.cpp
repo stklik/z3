@@ -10,8 +10,9 @@ Copyright (c) 2015 Microsoft Corporation
 #include "ast/reg_decl_plugins.h"
 #include "smt/theory_pb.h"
 #include "ast/rewriter/th_rewriter.h"
+#include <iostream>
 
-unsigned populate_literals(unsigned k, smt::literal_vector& lits) {
+static unsigned populate_literals(unsigned k, smt::literal_vector& lits) {
     ENSURE(k < (1u << lits.size()));
     unsigned t = 0;
     for (unsigned i = 0; i < lits.size(); ++i) {
@@ -36,19 +37,17 @@ class pb_fuzzer {
 public:
     pb_fuzzer(ast_manager& m): m(m), rand(0), ctx(m, params), vars(m) {
         params.m_model = true;
-        params.m_pb_enable_simplex = true;
         unsigned N = 3;
         for (unsigned i = 0; i < N; ++i) {
             std::stringstream strm;
             strm << "b" << i;
-            vars.push_back(m.mk_const(symbol(strm.str().c_str()), m.mk_bool_sort()));
+            vars.push_back(m.mk_const(symbol(strm.str()), m.mk_bool_sort()));
             std::cout << "(declare-const " << strm.str() << " Bool)\n";
         }
     }
 
     void fuzz() {
-        enable_trace("pb");
-        enable_trace("simplex");
+        // enable_trace("pb");
         unsigned nr = 0;
         for (unsigned i = 0; i < 100000; ++i) {
             fuzz_round(nr, 2);
@@ -74,7 +73,7 @@ private:
                     k += coeffs[i];
                 }
             }       
-            fml = pb.mk_ge(args.size(), coeffs.c_ptr(), args.c_ptr(), k);
+            fml = pb.mk_ge(args.size(), coeffs.data(), args.data(), k);
             rw(fml, tmp);
             rw(tmp, tmp);
             if (pb.is_ge(tmp)) {
@@ -84,6 +83,7 @@ private:
         }
         std::cout << "(assert " << fml << ")\n";
         ctx.assert_expr(fml);
+        std::cout << ";asserted\n";
     }
 
     
@@ -91,7 +91,7 @@ private:
     void fuzz_round(unsigned& num_rounds, unsigned lvl) {
         unsigned num_rounds2 = 0;
         lbool is_sat = l_true;    
-        std::cout << "(push)\n";
+        std::cout << "(push 1)\n";
         ctx.push();
         unsigned r = 0;
         while (is_sat == l_true && r <= num_rounds + 1) {
@@ -106,7 +106,7 @@ private:
         num_rounds = r;
         std::cout << "; number of rounds: " << num_rounds << " level: " << lvl << "\n";
         ctx.pop(1);
-        std::cout << "(pop)\n";
+        std::cout << "(pop 1)\n";
     }
 
 };
@@ -138,18 +138,15 @@ void tst_theory_pb() {
             unsigned k = populate_literals(i, lits);        
             std::cout << "k:" << k << " " << N << "\n";
             std::cout.flush();
-            TRACE("pb", tout << "k " << k << ": ";
-                  for (unsigned j = 0; j < lits.size(); ++j) {
-                      tout << lits[j] << " ";
-                  }
-                  tout << "\n";);
+            TRACE(pb, tout << "k " << k << ": " << lits << "\n";);
+
             {
                 smt::context ctx(m, params);
                 ctx.push();
-                smt::literal l = smt::theory_pb::assert_ge(ctx, k+1, lits.size(), lits.c_ptr());
+                smt::literal l = smt::theory_pb::assert_ge(ctx, k+1, lits.size(), lits.data());
                 if (l != smt::false_literal) {
                     ctx.assign(l, nullptr, false);
-                    TRACE("pb", tout << "assign: " << l << "\n";
+                    TRACE(pb, tout << "assign: " << l << "\n";
                           ctx.display(tout););
                     VERIFY(l_false == ctx.check());
                 }
@@ -158,10 +155,10 @@ void tst_theory_pb() {
             {
                 smt::context ctx(m, params);            
                 ctx.push();
-                smt::literal l = smt::theory_pb::assert_ge(ctx, k, lits.size(), lits.c_ptr());
+                smt::literal l = smt::theory_pb::assert_ge(ctx, k, lits.size(), lits.data());
                 ENSURE(l != smt::false_literal);
                 ctx.assign(l, nullptr, false);
-                TRACE("pb", ctx.display(tout););
+                TRACE(pb, ctx.display(tout););
                 VERIFY(l_true == ctx.check());
                 ctx.pop(1);
             }

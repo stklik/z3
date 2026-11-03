@@ -44,51 +44,42 @@ namespace opt {
         }
 
     public:
-        wmax(maxsat_context& c, weights_t& ws, expr_ref_vector const& soft): 
-            maxsmt_solver_base(c, ws, soft),
+        wmax(maxsat_context& c, vector<soft>& s, unsigned index): 
+            maxsmt_solver_base(c, s, index),
             m_trail(m),
             m_defs(m) {}
 
-        virtual ~wmax() {}
-
-        lbool operator()() {
-            TRACE("opt", tout << "weighted maxsat\n";);
+        lbool operator()() override {
+            TRACE(opt, tout << "weighted maxsat\n";);
             scoped_ensure_theory wth(*this);
-            obj_map<expr, rational> soft;            
             reset();
-            lbool is_sat = find_mutexes(soft);
-            if (is_sat != l_true) {
-                return is_sat;
-            }
-            m_upper = m_lower;
+            if (!init())
+                return l_undef;
+            
+            lbool is_sat = l_true;
+            
             expr_ref_vector asms(m);
             vector<expr_ref_vector> cores;
 
-            obj_map<expr, rational>::iterator it = soft.begin(), end = soft.end();
-            for (; it != end; ++it) {
-                assert_weighted(wth(), it->m_key, it->m_value);
-                if (!is_true(it->m_key)) {
-                    m_upper += it->m_value;
-                }
-            }
+            for (auto const& [k, w, t] : m_soft) 
+                assert_weighted(wth(), k, w);
+            
             wth().init_min_cost(m_upper - m_lower);
             trace_bounds("wmax");
-            
-            TRACE("opt", 
-                  s().display(tout); tout << "\n";
-                  tout << "lower: " << m_lower << " upper: " << m_upper << "\n";);
-            while (!m.canceled() && m_lower < m_upper) {
-                //mk_assumptions(asms);
-                //is_sat = s().preferred_sat(asms, cores);
+
+            TRACE(opt,
+                s().display(tout) << "\n";
+            tout << "lower: " << m_lower << " upper: " << m_upper << "\n";);
+            while (m.inc() && m_lower < m_upper) {
                 is_sat = s().check_sat(0, nullptr);
-                if (m.canceled()) {
+                if (!m.inc()) {
                     is_sat = l_undef;
                 }
                 if (is_sat == l_undef) {
                     break;
                 }
                 if (is_sat == l_false) {
-                    TRACE("opt", tout << "Unsat\n";);
+                    TRACE(opt, tout << "Unsat\n";);
                     break;
                 }
                 if (is_sat == l_true) {
@@ -106,16 +97,17 @@ namespace opt {
                 SASSERT(m_lower <= m_upper);
             }
 
-            update_assignment();
-            
-            if (!m.canceled() && is_sat == l_undef && m_lower == m_upper) {
+            if (m_model) 
+                update_assignment();
+        
+            if (m.inc() && is_sat == l_undef && m_lower == m_upper) {
                 is_sat = l_true;
             }
             if (is_sat == l_false) {
                 is_sat = l_true;
                 m_lower = m_upper;
             }
-            TRACE("opt", tout << "min cost: " << m_upper << "\n";);
+            TRACE(opt, tout << "min cost: " << m_upper << "\n";);
             return is_sat;
         }
 
@@ -124,7 +116,7 @@ namespace opt {
         }
 
         void update_assignment() {
-            for (soft& s : m_soft) s.is_true = is_true(s.s);
+            for (soft& s : m_soft) s.set_value(is_true(s.s));
         }
 
         struct compare_asm {
@@ -137,9 +129,8 @@ namespace opt {
 
         void mk_assumptions(expr_ref_vector& asms) {
             ptr_vector<expr> _asms;
-            obj_map<expr, rational>::iterator it = m_weights.begin(), end = m_weights.end();
-            for (; it != end; ++it) {
-                _asms.push_back(it->m_key);
+            for (auto const& kv : m_weights) {
+                _asms.push_back(kv.m_key);
             }
             compare_asm comp(*this);
             std::sort(_asms.begin(),_asms.end(), comp); 
@@ -310,8 +301,8 @@ namespace opt {
                 
     };
 
-    maxsmt_solver_base* mk_wmax(maxsat_context& c, weights_t& ws, expr_ref_vector const& soft) {
-        return alloc(wmax, c, ws, soft);
+    maxsmt_solver_base* mk_wmax(maxsat_context& c, vector<soft> & s, unsigned index) {
+        return alloc(wmax, c, s, index);
     }
 
 }

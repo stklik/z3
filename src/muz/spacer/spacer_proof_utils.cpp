@@ -124,7 +124,7 @@ namespace spacer {
                 return false;
             }
             SASSERT(lit->get_num_args() == 2);
-            sort* s = m.get_sort(lit->get_arg(0));
+            sort* s = lit->get_arg(0)->get_sort();
             bool is_int = m_arith.is_int(s);
             if (!is_int && m_arith.is_int_expr(lit->get_arg(0))) {
                 is_int = true;
@@ -209,18 +209,14 @@ namespace spacer {
 
     static proof_ref  mk_th_lemma(ast_manager &m, ptr_buffer<proof> const &parents,
                                   unsigned num_params, parameter const *params) {
-        buffer<parameter> v;
-        for (unsigned i = 1; i < num_params; ++i)
-            v.push_back(params[i]);
-
         SASSERT(params[0].is_symbol());
         family_id tid = m.mk_family_id(params[0].get_symbol());
         SASSERT(tid != null_family_id);
 
         proof_ref pf(m);
         pf =  m.mk_th_lemma(tid, m.mk_false(),
-                            parents.size(), parents.c_ptr(),
-                            v.size(), v.c_ptr());
+                            parents.size(), parents.data(),
+                            num_params - 1, params + 1);
         return pf;
     }
 
@@ -230,7 +226,7 @@ namespace spacer {
             if (a.is_numeral(e)) return false;
             if (!var || var == e) {
                 var = e;
-                val = a.mk_numeral(rational(1), get_sort(e));
+                val = a.mk_numeral(rational(1), e->get_sort());
                 return true;
             }
             return false;
@@ -284,6 +280,11 @@ namespace spacer {
                                    ptr_buffer<proof> const &parents,
                                    unsigned num_params,
                                    parameter const *params) {
+        if(num_params != parents.size() + 1) {
+            //TODO: fix bug
+            TRACE(spacer_fkab, tout << "UNEXPECTED INPUT TO FUNCTION. Bailing out\n";);
+            return proof_ref(m);
+        }
         SASSERT(num_params == parents.size() + 1 /* one param is missing */);
         arith_util a(m);
         th_rewriter rw(m);
@@ -293,37 +294,41 @@ namespace spacer {
         for (unsigned i = 1, sz = parents.size(); i < sz; ++i) {
             app *p = to_app(m.get_fact(parents.get(i)));
             rational const &r = params[i+1].get_rational();
+            TRACE(spacer_fkab, tout << "Adding to LCB: " << mk_pp(p, m) << "\n";);
             lcb.add_lit(p, r);
         }
 
         expr_ref lit0(m);
         lit0 = m.get_fact(parents.get(0));
+
         // put lit0 into canonical form
-        rw(lit0);
-        TRACE("spacer.fkab",
+        // XXX this might simplify a coefficient of a variable leading to unsoundness.
+        // XXX For example, it will simplify 4*x >= 0 into x >= 0
+        //rw(lit0);
+        TRACE(spacer_fkab,
               tout << "lit0 is: " << lit0 << "\n"
               << "LCB is: " << lcb() << "\n";);
 
         expr_ref var(m), val1(m), val2(m);
         val1 = get_coeff(lit0, var);
         val2 = get_coeff(lcb(), var);
-        TRACE("spacer.fkab",
+        TRACE(spacer_fkab,
               tout << "var: " << var
               << " val1: " << val1 << " val2: "  << val2 << "\n";);
 
         rational rat1, rat2, coeff0;
-        CTRACE("spacer.fkab", !(val1 && val2),
+        CTRACE(spacer_fkab, !(val1 && val2),
                tout << "Failed to match variables\n";);
         if (val1 && val2 &&
             a.is_numeral(val1, rat1) && a.is_numeral(val2, rat2)) {
             coeff0 = abs(rat2/rat1);
             coeff0 = coeff0 / lcb.lc();
-            TRACE("spacer.fkab", tout << "coeff0: " << coeff0 << "\n";);
+            TRACE(spacer_fkab, tout << "coeff0: " << coeff0 << "\n";);
         }
         else {
             IF_VERBOSE(1, verbose_stream()
                        << "\n\n\nFAILED TO FIND COEFFICIENT\n\n\n";);
-            TRACE("spacer.fkab", tout << "FAILED TO FIND COEFFICIENT\n";);
+            TRACE(spacer_fkab, tout << "FAILED TO FIND COEFFICIENT\n";);
             // failed to find a coefficient
             return proof_ref(m);
         }
@@ -341,15 +346,17 @@ namespace spacer {
 
         proof_ref pf(m);
         pf = m.mk_th_lemma(tid, m.mk_false(),
-                           parents.size(), parents.c_ptr(),
-                           v.size(), v.c_ptr());
+                           parents.size(), parents.data(),
+                           v.size(), v.data());
 
         SASSERT(is_arith_lemma(m, pf));
+        TRACE(spacer_fkab, tout << mk_pp(pf, m) << "\n";);
 
         DEBUG_CODE(
             proof_checker pc(m);
             expr_ref_vector side(m);
             ENSURE(pc.check(pf, side)););
+
         return pf;
 
     }
@@ -396,6 +403,7 @@ namespace spacer {
                 func_decl *d = p->get_decl();
                 if (is_assign_bounds_lemma(m, p)) {
 
+                    TRACE(spacer_fkab, tout << mk_pp(p, m) << "\n";);
                     th_lemma = mk_fk_from_ab(m, hyps,
                                              d->get_num_parameters(),
                                              d->get_parameters());
@@ -424,8 +432,8 @@ namespace spacer {
 
                 ptr_buffer<expr> args;
                 for (unsigned i = 0, sz = m.get_num_parents(p); i < sz; ++i) {
-                    proof *pp, *tmp;
-                    pp = m.get_parent(p, i);
+                    proof *tmp = nullptr;
+                    proof* pp = m.get_parent(p, i);
                     VERIFY(m_cache.find(pp, tmp));
                     args.push_back(tmp);
                     dirty |= (pp != tmp);
@@ -440,15 +448,15 @@ namespace spacer {
                     SASSERT(p->get_decl()->get_arity() == args.size());
 
                     proof* res = m.mk_app(p->get_decl(),
-                                          args.size(), (expr * const*)args.c_ptr());
+                                          args.size(), (expr * const*)args.data());
                     m_pinned.push_back(res);
                     m_cache.insert(p, res);
                 }
             }
         }
 
-        proof* res;
-        VERIFY(m_cache.find(pr,res));
+        proof* res = nullptr;
+        VERIFY(m_cache.find(pr, res));
         DEBUG_CODE(
             proof_checker pc(m);
             expr_ref_vector side(m);
@@ -600,20 +608,21 @@ namespace spacer {
     proof* hypothesis_reducer::reduce_core(proof* pf) {
         SASSERT(m.is_false(m.get_fact(pf)));
 
-        proof *res = NULL;
+        proof *res = nullptr;
 
         ptr_vector<proof> todo;
         todo.push_back(pf);
         ptr_buffer<proof> args;
         bool dirty = false;
 
-        while (true) {
+        while (!todo.empty()) {
             proof *p, *tmp, *pp;
             unsigned todo_sz;
 
             p = todo.back();
             if (m_cache.find(p, tmp)) {
                 todo.pop_back();
+                res = tmp;
                 continue;
             }
 
@@ -695,8 +704,12 @@ namespace spacer {
             if (!m_open_mark.is_marked(res) && m.has_fact(res) && m.is_false(m.get_fact(res)))
                 return res;
         }
-        UNREACHABLE();
-        return nullptr;
+        // The loop above normally returns when it reaches a hypothesis-free
+        // sub-proof of false (the reduced root). If hypothesis reduction could
+        // not close all hypotheses on the root, todo drains without hitting
+        // that early return; return the reduced root instead of reading past
+        // the end of todo (which is a use-after-free).
+        return res;
     }
 
     proof* hypothesis_reducer::mk_lemma_core(proof* premise, expr *fact) {
@@ -727,7 +740,7 @@ namespace spacer {
         }
 
         expr_ref lemma(m);
-        lemma = mk_or(m, args.size(), args.c_ptr());
+        lemma = mk_or(m, args.size(), args.data());
 
         proof* res;
         res = m.mk_lemma(premise, lemma);
@@ -807,9 +820,9 @@ namespace spacer {
 
         // make unit resolution proof step
         // expr_ref tmp(m);
-        // tmp = mk_or(m, pf_fact.size(), pf_fact.c_ptr());
+        // tmp = mk_or(m, pf_fact);
         // proof* res = m.mk_unit_resolution(pf_args.size(), pf_args.c_ptr(), tmp);
-        proof *res = m.mk_unit_resolution(pf_args.size(), pf_args.c_ptr());
+        proof *res = m.mk_unit_resolution(pf_args.size(), pf_args.data());
         m_pinned.push_back(res);
 
         return res;
@@ -832,9 +845,9 @@ namespace spacer {
         SASSERT(old->get_decl()->get_arity() == args.size());
 
         proof* res = m.mk_app(old->get_decl(), args.size(),
-                              (expr * const*)args.c_ptr());
+                              (expr * const*)args.data());
         m_pinned.push_back(res);
         return res;
     }
 
-};
+}

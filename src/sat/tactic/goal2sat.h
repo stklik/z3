@@ -26,31 +26,34 @@ Author:
 Notes:
 
 --*/
-#ifndef GOAL2SAT_H_
-#define GOAL2SAT_H_
+#pragma once
 
 #include "tactic/goal.h"
-#include "sat/sat_solver.h"
-#include "tactic/model_converter.h"
-#include "tactic/generic_model_converter.h"
-#include "sat/tactic/atom2bool_var.h"
+#include "sat/sat_solver_core.h"
+#include "sat/smt/atom2bool_var.h"
+#include "sat/smt/sat_internalizer.h"
+
+namespace euf {
+    class solver;
+}
 
 class goal2sat {
+public:
+    typedef obj_map<expr, sat::literal> dep2asm_map;
+private:
     struct imp;
     imp *  m_imp;
-    struct scoped_set_imp;
-    expr_ref_vector* m_interpreted_atoms;
+    unsigned m_scopes = 0;
+
 
 public:
     goal2sat();
-    ~goal2sat() { dealloc(m_interpreted_atoms); }
+    ~goal2sat();
 
-    typedef obj_map<expr, sat::literal> dep2asm_map;
 
     static void collect_param_descrs(param_descrs & r);
 
     static bool has_unsupported_bool(goal const & s);
-
 
     /**
        \brief "Compile" the goal into the given sat solver.
@@ -62,59 +65,30 @@ public:
        \warning conversion throws a tactic_exception, if it is interrupted (by set_cancel),
        an unsupported operator is found, or memory consumption limit is reached (set with param :max-memory).
     */
-    void operator()(goal const & g, params_ref const & p, sat::solver & t, atom2bool_var & m, dep2asm_map& dep2asm, bool default_external = false, bool is_lemma = false);
+    void operator()(goal const & g, params_ref const & p, sat::solver_core & t, atom2bool_var & m, dep2asm_map& dep2asm, bool default_external = false);
 
-    void get_interpreted_atoms(expr_ref_vector& atoms);
+    void operator()(unsigned n, expr* const* fmls);
 
-};
+    void init(ast_manager& m, params_ref const & p, sat::solver_core & t, atom2bool_var & map, dep2asm_map& dep2asm, bool default_external);
 
+    void assumptions(unsigned n, expr* const* fmls);
 
-class sat2goal {
-    struct imp;
-    imp *  m_imp;
-    struct scoped_set_imp;
-public:
+    sat::literal internalize(expr* a);
 
-    class mc : public model_converter {
-        ast_manager&            m;
-        sat::model_converter    m_smc;
-        generic_model_converter_ref m_gmc;
-        app_ref_vector         m_var2expr;
+    void get_interpreted_funs(func_decl_ref_vector& funs);
 
-        // flushes from m_smc to m_gmc;
-        void flush_gmc();
-        
-    public:
-        mc(ast_manager& m);
-        virtual ~mc() {}
-        // flush model converter from SAT solver to this structure.
-        void flush_smc(sat::solver& s, atom2bool_var const& map);         
-        void operator()(model_ref& md) override;
-        void operator()(expr_ref& fml) override; 
-        model_converter* translate(ast_translation& translator) override;
-        void set_env(ast_pp_util* visitor) override;
-        void display(std::ostream& out) override;
-        void get_units(obj_map<expr, bool>& units) override;
-        app* var2expr(sat::bool_var v) const { return m_var2expr.get(v, nullptr); }
-        expr_ref lit2expr(sat::literal l);
-        void insert(sat::bool_var v, app * atom, bool aux);
-    };
+    bool has_interpreted_funs() const;
 
-    sat2goal();
+    bool has_euf() const;
 
+    sat::sat_internalizer& si(ast_manager& m, params_ref const& p, sat::solver_core& t, atom2bool_var& a2b, dep2asm_map& dep2asm, bool default_external = false);
 
-    static void collect_param_descrs(param_descrs & r);
+    void update_model(model_ref& mdl);
 
-    /**
-       \brief Translate the state of the SAT engine back into a goal.
-       The SAT solver may use variables that are not in \c m. The translator
-       creates fresh boolean AST variables for them. They are stored in fvars.
-       
-       \warning conversion throws a tactic_exception, if it is interrupted (by set_cancel),
-       or memory consumption limit is reached (set with param :max-memory).
-    */
-    void operator()(sat::solver & t, atom2bool_var const & m, params_ref const & p, goal & s, ref<mc> & mc);
+    void user_push();
     
-};
+    void user_pop(unsigned n);
 
-#endif
+    euf::solver* ensure_euf();
+
+};

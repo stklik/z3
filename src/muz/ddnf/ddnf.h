@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DDNF_H_
-#define DDNF_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/lbool.h"
@@ -66,6 +65,5 @@ namespace datalog {
         void display(std::ostream& out) const;
         void display_statistics(std::ostream& out) const;
     };
-};
+}
 
-#endif

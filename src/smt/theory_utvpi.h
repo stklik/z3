@@ -19,8 +19,7 @@ Revision History:
 
 --*/
 
-#ifndef THEORY_UTVPI_H_
-#define THEORY_UTVPI_H_
+#pragma once
 
 #include "smt/theory_diff_logic.h"
 
@@ -78,7 +77,6 @@ namespace smt {
             atom(bool_var bv, int pos, int neg) : 
                 m_bvar(bv), m_true(false),
                 m_pos(pos), m_neg(neg) {}
-            ~atom() {}
             bool_var get_bool_var() const { return m_bvar; }
             void assign_eh(bool is_true) { m_true = is_true; }
             int get_asserted_edge() const { return this->m_true?m_pos:m_neg; }
@@ -138,7 +136,8 @@ namespace smt {
         smt_params              m_params;
         arith_util              a;
         arith_eq_adapter        m_arith_eq_adapter;
-        th_var                  m_zero; //cache the variable representing the zero variable.
+        bool                    m_consistent;
+        th_var                  m_izero, m_rzero; //cache the variable representing the zero variable.
 
         dl_graph<GExt>          m_graph;
         nc_functor              m_nc_functor;
@@ -159,6 +158,25 @@ namespace smt {
         arith_factory *         m_factory;
         rational                m_delta;
         
+        struct var_value_hash;
+        friend struct var_value_hash;
+        struct var_value_hash {
+            theory_utvpi & m_th;
+            var_value_hash(theory_utvpi & th):m_th(th) {}
+            unsigned operator()(theory_var v) const { return m_th.mk_value(v, false).hash(); }
+        };
+
+        struct var_value_eq;
+        friend struct var_value_eq;
+        struct var_value_eq {
+            theory_utvpi & m_th;
+            var_value_eq(theory_utvpi & th):m_th(th) {}
+            bool operator()(theory_var v1, theory_var v2) const { return m_th.mk_value(v1, false) == m_th.mk_value(v2, false) && m_th.is_int(v1) == m_th.is_int(v2); }
+        };
+
+        typedef int_hashtable<var_value_hash, var_value_eq> var_value_table;
+        var_value_table             m_var_value_table;
+
 
         // Set a conflict due to a negative cycle.
         void set_conflict();
@@ -179,20 +197,20 @@ namespace smt {
         }
 
     public:    
-        theory_utvpi(ast_manager& m);
+        theory_utvpi(context& ctx);
 
         ~theory_utvpi() override;
 
         theory * mk_fresh(context * new_ctx) override;
 
         char const * get_name() const override { return "utvpi-logic"; }
+        
+        void init() override {  init_zero(); }
 
         /**
            \brief See comment in theory::mk_eq_atom
         */
         app * mk_eq_atom(expr * lhs, expr * rhs) override { return a.mk_eq(lhs, rhs); }
-
-        void init(context * ctx) override;
 
         bool internalize_atom(app * atom, bool gate_ctx) override;
                                                      
@@ -221,13 +239,13 @@ namespace smt {
             m_arith_eq_adapter.restart_eh();
         }
 
-        void relevant_eh(app* e) override {}
+        void relevant_eh(expr* e) override {}
 
         void init_search_eh() override {
             m_arith_eq_adapter.init_search_eh();
         }
 
-        final_check_status final_check_eh() override;
+        final_check_status final_check_eh(unsigned level) override;
 
         bool is_shared(th_var v) const override {
             return false;
@@ -250,10 +268,6 @@ namespace smt {
         void init_model(model_generator & m) override;
         
         model_value_proc * mk_value(enode * n, model_generator & mg) override;
-
-        bool validate_eq_in_model(th_var v1, th_var v2, bool is_true) const override {
-            return true;
-        }
                 
         void display(std::ostream & out) const override;
         
@@ -261,19 +275,25 @@ namespace smt {
 
     private:        
 
+        void init_model();
+
+        bool assume_eqs_core();
+
         rational mk_value(theory_var v, bool is_int);
 
         bool is_parity_ok(unsigned v) const;
 
         void enforce_parity();
 
-        void validate_model();
-
         bool eval(expr* e);
+
+        void model_validate();
 
         rational eval_num(expr* e);
 
         bool check_z_consistency();
+
+        bool has_shared();
 
         virtual void new_eq_eh(th_var v1, th_var v2, justification& j) {
             m_stats.m_num_core2th_eqs++;
@@ -303,9 +323,13 @@ namespace smt {
 
         void new_eq_or_diseq(bool is_eq, th_var v1, th_var v2, justification& eq_just);
         
-        th_var get_zero(sort* s) const { return m_zero; }
+        bool is_int(theory_var v) const { return a.is_int(get_expr(v)); }
 
-        th_var get_zero(expr* e) const { return get_zero(get_manager().get_sort(e)); }
+        th_var get_zero(sort* s) { return a.is_int(s) ? m_izero : m_rzero; }
+
+        th_var get_zero(expr* e) { return get_zero(e->get_sort()); }
+
+        void init_zero();
 
         void inc_conflicts();
 
@@ -334,9 +358,8 @@ namespace smt {
 
     typedef theory_utvpi<rdl_ext>  theory_rutvpi;
     typedef theory_utvpi<idl_ext>  theory_iutvpi;
-};
+}
 
 
 
 
-#endif /* THEORY_UTVPI_H_ */

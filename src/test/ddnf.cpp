@@ -4,7 +4,7 @@ Copyright (c) 2015 Microsoft Corporation
 --*/
 
 #include "muz/ddnf/ddnf.h"
-#include "muz/rel/tbv.h"
+#include "util/tbv.h"
 #include <iostream>
 #include <fstream>
 #include <list>
@@ -15,7 +15,7 @@ Copyright (c) 2015 Microsoft Corporation
 #include <map>
 
 /*
-TBD: count number of nodes, number of operations accross all insertions
+TBD: count number of nodes, number of operations across all insertions
 */
 
 void read_nums(std::istream& is, unsigned & x, unsigned& y) {
@@ -201,7 +201,7 @@ void tst_ddnf(char ** argv, int argc, int& i) {
 }
 
 void tst_ddnf1() {
-    enable_trace("ddnf");
+    // enable_trace("ddnf");
     unsigned W = 2;
     datalog::ddnf_core ddnf(W);
     tbv_manager& tbvm = ddnf.get_tbv_manager();

@@ -93,11 +93,11 @@ static void tst1() {
     ENSURE(rational(3,4) >= rational(3,4));
     ENSURE(rational(3,4) >  rational(2,8));
     ENSURE(rational(3,4) <  rational(7,8));
-    TRACE("rational", tout << rational(3,4) << "\n";);
-    TRACE("rational", tout << rational(7,9) << "\n";);
-    TRACE("rational", tout << rational(-3,7) << "\n";);
-    TRACE("rational", tout << rational(5,8) << "\n";);
-    TRACE("rational", tout << rational(4,2) << "\n";);
+    TRACE(rational, tout << rational(3,4) << "\n";);
+    TRACE(rational, tout << rational(7,9) << "\n";);
+    TRACE(rational, tout << rational(-3,7) << "\n";);
+    TRACE(rational, tout << rational(5,8) << "\n";);
+    TRACE(rational, tout << rational(4,2) << "\n";);
     ENSURE(rational(3) + rational(2) == rational(5));
     ENSURE(rational(3) - rational(2) == rational(1));
     ENSURE(rational(3) * rational(2) == rational(6));
@@ -112,9 +112,9 @@ static void tst2() {
     rational r1("10000000000000000000000000000000000");
     rational r2("10000000000000000000000000000000000/3");
     rational r3("20000000000000000000000000000000000/6");
-    TRACE("rational", tout << r1 << std::endl;);
-    TRACE("rational", tout << r2 << std::endl;);
-    TRACE("rational", tout << r3 << std::endl;);
+    TRACE(rational, tout << r1 << std::endl;);
+    TRACE(rational, tout << r2 << std::endl;);
+    TRACE(rational, tout << r3 << std::endl;);
 
     ENSURE(r2 == r3);
     ENSURE(r1 != r2);
@@ -207,16 +207,16 @@ static void tst2() {
 
 void tst3() {
     rational n1 = power(rational(2), 32);
-    TRACE("rational", tout << "n1: " << n1 << "\n";);
+    TRACE(rational, tout << "n1: " << n1 << "\n";);
     rational n2 = div(n1, rational(2));
     rational n3 = div(rational(2), n2);
-    TRACE("rational", 
+    TRACE(rational, 
           tout << "n1: " << n1 << "\n";
           tout << "n2: " << n2 << "\n";
           tout << "n3: " << n3 << "\n";);
     rational n4 = n1 - rational(3);
     rational n5 = div(n4, rational(2));
-    TRACE("rational", 
+    TRACE(rational, 
           tout << "n4: " << n4 << "\n";
           tout << "n5: " << n5 << "\n";);
     ENSURE(n5 == rational("2147483646"));
@@ -224,7 +224,7 @@ void tst3() {
 
 void tst4() {
     rational n1("4294967293");
-    TRACE("rational", tout << "n1: " << n1 << "\n";);
+    TRACE(rational, tout << "n1: " << n1 << "\n";);
     rational n2 = div(n1, rational(2));
 }
 
@@ -233,9 +233,9 @@ void tst5() {
     n1.neg();
     rational n2("4294967295");
     n1 /= n2;
-    TRACE("rational", tout << n1 << " " << n2 << " " << n1.is_big() << " " << n2.is_big() << "\n";);
+    TRACE(rational, tout << n1 << " " << n2 << " " << n1.is_big() << " " << n2.is_big() << "\n";);
     n1 *= n2;
-    TRACE("rational", tout << "after: " << n1 << " " << n2 << "\n";);
+    TRACE(rational, tout << "after: " << n1 << " " << n2 << "\n";);
     ENSURE(n1.is_minus_one());
 }
 
@@ -288,7 +288,7 @@ public:
 
     static void tst2() {
         tst_hash(0);
-        for (int i = 0; i <= 10000; i++) {
+        for (int i = 0; i <= 10000; ++i) {
             int r = rand() % INT_MAX;
             if (rand()%2 == 1) r = -r;
             tst_hash(r);
@@ -299,50 +299,50 @@ public:
 static void tst7() {
     rational p;
     p = power(rational(2), 32);
-    for (unsigned i = 1; i < 1000; i++) {
+    for (unsigned i = 1; i < 1000; ++i) {
         rational n(i);
         rational x;
         rational y;
         rational gcd;
         extended_gcd(n, p, gcd, x, y);
-        TRACE("gcd", tout << n << " " << p << ": " << gcd << " " << x << " " << y << "\n";);
+        TRACE(gcd, tout << n << " " << p << ": " << gcd << " " << x << " " << y << "\n";);
         ENSURE(!mod(n, rational(2)).is_one() || mod(n * x, p).is_one()); 
     }
 }
 
 static void tst8() {
     rational r;
-    ENSURE(!rational(-4).is_int_perfect_square(r) && r.is_zero());
-    ENSURE(!rational(-3).is_int_perfect_square(r) && r.is_zero());
-    ENSURE(!rational(-2).is_int_perfect_square(r) && r.is_zero());
-    ENSURE(!rational(-1).is_int_perfect_square(r) && r.is_zero());
+    ENSURE(!rational(-4).is_int_perfect_square(r));
+    ENSURE(!rational(-3).is_int_perfect_square(r));
+    ENSURE(!rational(-2).is_int_perfect_square(r));
+    ENSURE(!rational(-1).is_int_perfect_square(r));
     ENSURE(rational(0).is_int_perfect_square(r) && r.is_zero());
     ENSURE(rational(1).is_int_perfect_square(r) && r.is_one());
-    ENSURE(!rational(2).is_int_perfect_square(r) && r == rational(2));
-    ENSURE(!rational(3).is_int_perfect_square(r) && r == rational(2));
+    ENSURE(!rational(2).is_int_perfect_square(r));
+    ENSURE(!rational(3).is_int_perfect_square(r));
     ENSURE(rational(4).is_int_perfect_square(r) && r == rational(2));
-    ENSURE(!rational(5).is_int_perfect_square(r) && r == rational(3));
-    ENSURE(!rational(6).is_int_perfect_square(r) && r == rational(3));
-    ENSURE(!rational(7).is_int_perfect_square(r) && r == rational(3));
-    ENSURE(!rational(8).is_int_perfect_square(r) && r == rational(3));
+    ENSURE(!rational(5).is_int_perfect_square(r));
+    ENSURE(!rational(6).is_int_perfect_square(r));
+    ENSURE(!rational(7).is_int_perfect_square(r));
+    ENSURE(!rational(8).is_int_perfect_square(r));
     ENSURE(rational(9).is_int_perfect_square(r) && r == rational(3));
-    ENSURE(!rational(10).is_int_perfect_square(r) && r == rational(4));
-    ENSURE(!rational(11).is_int_perfect_square(r) && r == rational(4));
-    ENSURE(!rational(12).is_int_perfect_square(r) && r == rational(4));
-    ENSURE(!rational(13).is_int_perfect_square(r) && r == rational(4));
-    ENSURE(!rational(14).is_int_perfect_square(r) && r == rational(4));
-    ENSURE(!rational(15).is_int_perfect_square(r) && r == rational(4));
+    ENSURE(!rational(10).is_int_perfect_square(r));
+    ENSURE(!rational(11).is_int_perfect_square(r));
+    ENSURE(!rational(12).is_int_perfect_square(r));
+    ENSURE(!rational(13).is_int_perfect_square(r));
+    ENSURE(!rational(14).is_int_perfect_square(r));
+    ENSURE(!rational(15).is_int_perfect_square(r));
     ENSURE(rational(16).is_int_perfect_square(r) && r == rational(4));
-    ENSURE(!rational(17).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(18).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(19).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(20).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(21).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(22).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(23).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(24).is_int_perfect_square(r) && r == rational(5));
+    ENSURE(!rational(17).is_int_perfect_square(r));
+    ENSURE(!rational(18).is_int_perfect_square(r));
+    ENSURE(!rational(19).is_int_perfect_square(r));
+    ENSURE(!rational(20).is_int_perfect_square(r));
+    ENSURE(!rational(21).is_int_perfect_square(r));
+    ENSURE(!rational(22).is_int_perfect_square(r));
+    ENSURE(!rational(23).is_int_perfect_square(r));
+    ENSURE(!rational(24).is_int_perfect_square(r));
     ENSURE(rational(25).is_int_perfect_square(r) && r == rational(5));
-    ENSURE(!rational(26).is_int_perfect_square(r) && r == rational(6));
+    ENSURE(!rational(26).is_int_perfect_square(r));
     ENSURE(rational(36).is_int_perfect_square(r) && r == rational(6));
 
     ENSURE(rational(1,9).is_perfect_square(r) && r == rational(1,3));
@@ -396,7 +396,7 @@ static void tst10(bool use_ints) {
     vals.resize(NUM_RATIONALS);
     vals2.resize(NUM_RATIONALS);
     fvals.resize(NUM_RATIONALS);
-    for (unsigned i = 0; i < NUM_RATIONALS; i++) {
+    for (unsigned i = 0; i < NUM_RATIONALS; ++i) {
         int r1 = rand() % MAGNITUDE;
         int r2 = use_ints ? 1 : rand() % MAGNITUDE;
         if (r2 == 0) r2 = 1;
@@ -407,13 +407,13 @@ static void tst10(bool use_ints) {
     }
     {
         timeit t(true, "multiplication with rationals");
-        for (unsigned i = 0; i < NUM_RATIONALS - 1; i++) {
+        for (unsigned i = 0; i < NUM_RATIONALS - 1; ++i) {
             vals[i] *= vals[i+1];
         }
     }
     {
         timeit t(true, "multiplication with floats: ");
-        for (unsigned i = 0; i < NUM_RATIONALS - 1; i++) {
+        for (unsigned i = 0; i < NUM_RATIONALS - 1; ++i) {
             fvals[i] *= fvals[i+1];
         }
     }
@@ -428,7 +428,7 @@ static void tst11(bool use_ints) {
     vector<float>    fvals;
     vals.resize(NUM_RATIONALS2);
     fvals.resize(NUM_RATIONALS2);
-    for (unsigned i = 0; i < NUM_RATIONALS2; i++) {
+    for (unsigned i = 0; i < NUM_RATIONALS2; ++i) {
         int r1 = rand() % MAGNITUDE2;
         int r2 = use_ints ? 1 : rand() % MAGNITUDE2;
         if (r2 == 0) r2 = 1;
@@ -438,24 +438,59 @@ static void tst11(bool use_ints) {
     }
     {
         timeit t(true, "multiplication with big rationals");
-        for (unsigned j = 0; j < 10; j++)
-            for (unsigned i = 0; i < NUM_RATIONALS2-1; i++) {
+        for (unsigned j = 0; j < 10; ++j)
+            for (unsigned i = 0; i < NUM_RATIONALS2-1; ++i) {
                 vals[i] *= vals[i+1];
             }
     }
     {
         timeit t(true, "multiplication with floats: ");
-        for (unsigned j = 0; j < 10; j++)
-            for (unsigned i = 0; i < NUM_RATIONALS2-1; i++) {
+        for (unsigned j = 0; j < 10; ++j)
+            for (unsigned i = 0; i < NUM_RATIONALS2-1; ++i) {
                 fvals[i] *= fvals[i+1];
             }
     }
     std::cout << "\n";
 }
 
+static void tst12() {
+    std::cout << "test12\n";
+    rational r;
+    r = 5;
+    ENSURE(r.get_bit(0));
+    ENSURE(!r.get_bit(1));
+    ENSURE(r.get_bit(2));
+    ENSURE(!r.get_bit(3));
+    r = rational("10000000000000000000000000000000001");
+    for (unsigned i = 0; i < r.get_num_bits(); ++i)
+        std::cout << i << ": " << r.get_bit(i) << "\n";
+}
+
+static void tst13() {
+    std::cout << "test13\n";
+    rational const step = rational(1) / rational(3);
+    for (rational r; r < 5000; r += step) {
+        {
+            unsigned k = r.prev_power_of_two();
+            if (r >= 1) {
+                VERIFY(rational::power_of_two(k) <= r);
+                VERIFY(r < rational::power_of_two(k + 1));
+            }
+            else {
+                VERIFY_EQ(k, 0);
+            }
+        }
+        {
+            unsigned k = r.next_power_of_two();
+            VERIFY(r <= rational::power_of_two(k));
+            VERIFY(k == 0 || rational::power_of_two(k - 1) < r);
+        }
+    }
+}
+
 
 void tst_rational() {
-    TRACE("rational", tout << "starting rational test...\n";);
+    TRACE(rational, tout << "starting rational test...\n";);
     std::cout << "sizeof(rational): " << sizeof(rational) << "\n";
     rational r1("10000000000000000000000000000000001");
     r1.hash();
@@ -475,6 +510,14 @@ void tst_rational() {
     std::cout << "running rational_tester::tst1" << std::endl;
     rational_tester::tst1();
     rational_tester::tst2();
+    tst12();
+    tst13();
+}
+
+// Multiplication micro-benchmarks against floats. They only print timings and
+// assert nothing, so they are not part of `test-z3 -a`; run as
+// `test-z3 rational_perf`.
+void tst_rational_perf() {
     tst11(true);
     tst10(true);
     tst10(false);

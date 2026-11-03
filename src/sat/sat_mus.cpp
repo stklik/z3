@@ -24,8 +24,6 @@ Notes:
 namespace sat {
 
     mus::mus(solver& s):s(s), m_is_active(false), m_max_num_restarts(UINT_MAX) {}
-
-    mus::~mus() {}
    
     void mus::reset() {
         m_core.reset();
@@ -37,7 +35,7 @@ namespace sat {
         m_mus.append(m_core);
         s.m_core.reset();
         s.m_core.append(m_mus);
-        TRACE("sat", tout << "new core: " << s.m_core << "\n";);
+        TRACE(sat, tout << "new core: " << s.m_core << "\n";);
     }
 
     void mus::update_model() {
@@ -58,7 +56,7 @@ namespace sat {
 
     lbool mus::mus1() {
         bool minimize_partial = s.m_config.m_core_minimize_partial;
-        TRACE("sat", tout << "old core: " << s.get_core() << "\n";);
+        TRACE(sat, tout << "old core: " << s.get_core() << "\n";);
         literal_vector& core = get_core();
         literal_vector& mus = m_mus;
         if (!minimize_partial && core.size() > 64) {
@@ -68,7 +66,7 @@ namespace sat {
             IF_VERBOSE(1, verbose_stream() << "(sat.mus num-to-process: " << core.size() << " mus: " << mus.size();
                        if (minimize_partial) verbose_stream() << " max-restarts: " << m_max_num_restarts;
                        verbose_stream() << ")\n";);
-            TRACE("sat", 
+            TRACE(sat, 
                   tout << "core: " << core << "\n";
                   tout << "mus:  " << mus  << "\n";);
 
@@ -89,8 +87,8 @@ namespace sat {
                 flet<unsigned> _restart_bound(s.m_config.m_restart_max, m_max_num_restarts);
                 scoped_append _sa(mus, core);
                 mus.push_back(~lit); 
-                is_sat = s.check(mus.size(), mus.c_ptr());
-                TRACE("sat", tout << "mus: " << mus << "\n";);
+                is_sat = s.check(mus.size(), mus.data());
+                TRACE(sat, tout << "mus: " << mus << "\n";);
             }
             IF_VERBOSE(1, verbose_stream() << "(sat.mus " << is_sat << ")\n";);
             switch (is_sat) {
@@ -117,7 +115,7 @@ namespace sat {
                     IF_VERBOSE(3, verbose_stream() << "(sat.mus unit reduction, literal is in both cores " << lit << ")\n";);
                 }
                 else {
-                    TRACE("sat", tout << "core: " << new_core << " mus: " << mus << "\n";);
+                    TRACE(sat, tout << "core: " << new_core << " mus: " << mus << "\n";);
                     core.reset();
                     for (unsigned i = 0; i < new_core.size(); ++i) {
                         literal lit = new_core[i];
@@ -150,7 +148,7 @@ namespace sat {
         lbool is_sat = l_true;
         if (has_support) {
             scoped_append _sa(m_mus, support.to_vector());
-            is_sat = s.check(m_mus.size(), m_mus.c_ptr());            
+            is_sat = s.check(m_mus.size(), m_mus.data());            
             switch (is_sat) {
             case l_false: {
                 literal_set core(s.get_core());
@@ -162,8 +160,6 @@ namespace sat {
                 return l_undef;
             case l_true:
                 update_model();
-                break;
-            default:
                 break;
             }
         }
@@ -210,7 +206,7 @@ namespace sat {
                 lits2.insert(*it);
             }
         }
-        lits1 = lits3;
+        lits1 = std::move(lits3);
     }
 
     literal_vector& mus::get_core() {
@@ -230,7 +226,7 @@ namespace sat {
     }
 
     void mus::verify_core(literal_vector const& core) {
-        lbool is_sat = s.check(core.size(), core.c_ptr());
+        lbool is_sat = s.check(core.size(), core.data());
         IF_VERBOSE(3, verbose_stream() << "core verification: " << is_sat << " " << core << "\n";);
     }
 

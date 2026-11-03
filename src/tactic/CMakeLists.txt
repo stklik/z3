@@ -1,25 +1,28 @@
 z3_add_component(tactic
   SOURCES
     dependency_converter.cpp
-    equiv_proof_converter.cpp
-    generic_model_converter.cpp
     goal.cpp
     goal_num_occurs.cpp
     goal_shared_occs.cpp
     goal_util.cpp
-    horn_subsume_model_converter.cpp
-    model_converter.cpp
     probe.cpp
-    proof_converter.cpp
-    replace_proof_converter.cpp
-    sine_filter.cpp
     tactical.cpp
     tactic.cpp
   COMPONENT_DEPENDENCIES
     ast
     model
-  TACTIC_HEADERS
-    probe.h
-    sine_filter.h
-    tactic.h
+    simplifiers
+    converters
 )
+
+add_subdirectory(aig)
+add_subdirectory(arith)
+add_subdirectory(bv)
+add_subdirectory(core)
+add_subdirectory(fd_solver)
+add_subdirectory(ff)
+add_subdirectory(fpa)
+add_subdirectory(portfolio)
+add_subdirectory(sls)
+add_subdirectory(smtlogics)
+add_subdirectory(ufbv)

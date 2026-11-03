@@ -1,0 +1,649 @@
+/*++
+Copyright (c) 2022 Microsoft Corporation
+
+Module Name:
+
+    extract_eqs.cpp
+
+Abstract:
+
+    simplifier for solving equations
+
+Author:
+
+    Nikolaj Bjorner (nbjorner) 2022-11-2.
+
+--*/
+
+
+#include "ast/ast_util.h"
+#include "ast/for_each_expr.h"
+#include "ast/ast_pp.h"
+#include "ast/arith_decl_plugin.h"
+#include "ast/bv_decl_plugin.h"
+#include "ast/array_decl_plugin.h"
+#include "ast/ff_decl_plugin.h"
+#include "ast/simplifiers/extract_eqs.h"
+#include "ast/simplifiers/bound_manager.h"
+#include "params/tactic_params.hpp"
+
+
+namespace euf {
+
+    class basic_extract_eq : public extract_eq {
+        ast_manager& m;
+        bool m_ite_solver = true;
+        bool m_allow_bool = true;
+
+        bool is_eq_of(expr* x, expr* y, expr*& z, expr*& s, expr*& t) {
+            expr* x1 = nullptr, *x2 = nullptr, *y1 = nullptr, *y2 = nullptr;
+            if (!m.is_eq(x, x1, x2))
+                return false;
+            if (!m.is_eq(y, y1, y2))
+                return false;
+            if (x1 == y1) {
+                z = x1;
+                s = x2;
+                t = y2;
+                return true;
+            }
+            if (x1 == y2) {
+                z = x1;
+                s = x2;
+                t = y1;
+                return true;
+            }
+            if (x2 == y1) {
+                z = x2;
+                s = x1;
+                t = y2;
+                return true;
+            }
+            return false;
+        }
+        bool is_complementary(expr* x, expr* y) {
+            expr* z = nullptr;
+            if (m.is_not(x, z) && z == y)
+                return true;
+            if (m.is_not(y, z) && z == x)
+                return true;
+            return false;
+        }
+    public:
+        basic_extract_eq(ast_manager& m) : m(m) {}
+
+        bool supports_proofs() const override { return true; }
+
+        void set_allow_booleans(bool f) override {
+            m_allow_bool = f;
+        }
+
+        void get_eqs(dependent_expr const& e, dep_eq_vector& eqs) override {
+            auto [f, p, d] = e();
+            expr* x = nullptr, * y = nullptr;
+            if (m.is_eq(f, x, y)) {
+                if (x == y)
+                    return;
+                if (!m_allow_bool && m.is_bool(x))
+                    return;
+                if (is_uninterp_const(x))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(x), expr_ref(y, m), d, p));
+                if (is_uninterp_const(y))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(y), expr_ref(x, m), d, m.mk_symmetry(p)));
+            }
+            if (m_allow_bool) {
+                if (is_uninterp_const(f))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(f), expr_ref(m.mk_true(), m), d, m.mk_iff_true(p)));
+                if (m.is_not(f, x) && is_uninterp_const(x))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(x), expr_ref(m.mk_false(), m), d, m.mk_iff_false(p)));
+            }
+            // Conditional extraction needs additional evidence beyond the input proof.
+            if (p)
+                return;
+            expr* c = nullptr, * th = nullptr, * el = nullptr, * x1, * y1 = nullptr, * x2 = nullptr, * y2 = nullptr;
+            if (m_ite_solver && m.is_ite(f, c, th, el)) {
+                if (m.is_eq(th, x1, y1) && m.is_eq(el, x2, y2)) {
+                    if (!m_allow_bool && m.is_bool(x1))
+                        return;
+                    if (x1 == y2 && is_uninterp_const(x1))
+                        std::swap(x2, y2);
+                    if (x2 == y2 && is_uninterp_const(x2))
+                        std::swap(x2, y2), std::swap(x1, y1);
+                    if (x2 == y1 && is_uninterp_const(x2))
+                        std::swap(x1, y1);
+                    if (x1 == x2 && is_uninterp_const(x1)) 
+                        eqs.push_back(dependent_eq(e.fml(), to_app(x1), expr_ref(m.mk_ite(c, y1, y2), m), d));
+                }
+            }
+            // (or (and a (= x t)) (and (not a) (= x s)))
+            // -> x = if a s t
+            if (m.is_or(f, x1, y1) && m.is_and(x1, x1, x2) && m.is_and(y1, y1, y2)) {
+                expr* z = nullptr, *t = nullptr, *s = nullptr;
+                if (is_eq_of(x1, y1, z, s, t) && is_complementary(x2, y2)) 
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(x2, s, t), m), d));
+                if (is_eq_of(x1, y2, z, s, t) && is_complementary(x2, y1))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(x2, s, t), m), d));
+                if (is_eq_of(x2, y2, z, s, t) && is_complementary(x1, y1))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(x1, s, t), m), d));
+                if (is_eq_of(x2, y1, z, s, t) && is_complementary(x1, y2))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(x1, s, t), m), d));
+            }
+            if (m.is_and(f, x1, y1) && m.is_or(x1, x1, x2) && m.is_or(y1, y1, y2)) {
+                expr* z = nullptr, *t = nullptr, *s = nullptr;
+                if (is_eq_of(x1, y1, z, s, t) && is_complementary(x2, y2)) 
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(y2, s, t), m), d));
+                if (is_eq_of(x1, y2, z, s, t) && is_complementary(x2, y1))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(y1, s, t), m), d));
+                if (is_eq_of(x2, y2, z, s, t) && is_complementary(x1, y1))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(y1, s, t), m), d));
+                if (is_eq_of(x2, y1, z, s, t) && is_complementary(x1, y2))
+                    eqs.push_back(dependent_eq(e.fml(), to_app(z), expr_ref(m.mk_ite(y2, s, t), m), d));
+            }
+        }
+
+        void updt_params(params_ref const& p) override {
+            tactic_params tp(p);
+            m_ite_solver = p.get_bool("ite_solver", tp.solve_eqs_ite_solver());
+        }
+    };
+
+    class bv_extract_eq : public extract_eq {
+        ast_manager&       m;
+        bv_util            bv;
+        bool               m_enabled = true;
+
+        
+        void solve_add(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            if (!bv.is_bv_add(x))
+                return;
+            expr_ref term(m);
+            auto mk_term = [&](unsigned i) {
+                term = y;
+                unsigned j = 0;
+                for (expr* arg2 : *to_app(x)) {
+                    if (i != j)
+                        term = bv.mk_bv_sub(term, arg2);
+                    ++j;
+                }
+            };
+            expr* u = nullptr, *z = nullptr;
+            rational r;
+            unsigned i = 0;
+            for (expr* arg : *to_app(x)) {
+                if (is_uninterp_const(arg)) {
+                    mk_term(i);
+                    eqs.push_back(dependent_eq(orig, to_app(arg), term, d));
+                }
+                else if (bv.is_bv_mul(arg, u, z) && bv.is_numeral(u, r) && is_uninterp_const(z) && r.is_odd()) {
+                    mk_term(i);
+                    unsigned sz = bv.get_bv_size(z);
+                    rational inv_r;
+                    VERIFY(r.mult_inverse(sz, inv_r));
+                    term = bv.mk_bv_mul(bv.mk_numeral(inv_r, sz), term);
+                    eqs.push_back(dependent_eq(orig, to_app(z), term, d));
+                }
+                ++i;
+            }
+        }
+
+        void solve_mul(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            expr* u = nullptr, *z = nullptr;
+            rational r, inv_r;
+            if (bv.is_bv_mul(x, u, z) && bv.is_numeral(u, r) && is_uninterp_const(z) && r.is_odd()) {
+                unsigned sz = bv.get_bv_size(z);
+                VERIFY(r.mult_inverse(sz, inv_r));
+                auto term = expr_ref(bv.mk_bv_mul(bv.mk_numeral(inv_r, sz), y), m);
+                eqs.push_back(dependent_eq(orig, to_app(z), term, d));                
+            }
+        }
+
+        void solve_eq(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            solve_add(orig, x, y, d, eqs);
+            solve_mul(orig, x, y, d, eqs);
+        }
+
+        
+    public:
+        bv_extract_eq(ast_manager& m) : m(m), bv(m) {}
+
+        void get_eqs(dependent_expr const& e, dep_eq_vector& eqs) override {
+            if (!m_enabled)
+                return;
+            auto [f, p, d] = e();
+            expr* x = nullptr, * y = nullptr;
+            if (m.is_eq(f, x, y) && bv.is_bv(x)) {
+                solve_eq(f, x, y, d, eqs);
+                solve_eq(f, y, x, d, eqs);
+            }
+
+        }
+
+        void pre_process(dependent_expr_state& fmls) override {
+        }
+
+        void updt_params(params_ref const& p) override {
+        }
+        
+    };
+
+    class arith_extract_eq : public extract_eq {
+        ast_manager&       m;
+        arith_util         a;
+        bound_manager      m_bm;
+        expr_ref_vector    m_args, m_trail;
+        expr_sparse_mark   m_nonzero;
+        bool               m_enabled = true;
+        bool               m_eliminate_mod = true;
+
+
+        // solve u mod r1 = y -> u = r1*mod!1 + y
+        void solve_mod(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            if (!m_eliminate_mod)
+                return;
+            expr* u = nullptr, * z = nullptr;
+            rational r1, r2;
+            if (!a.is_mod(x, u, z))
+                return;
+            if (!a.is_numeral(z, r1))
+                return;
+            if (r1 <= 0)
+                return;
+            expr_ref term(m);
+            term = a.mk_add(a.mk_mul(z, m.mk_fresh_const("mod", a.mk_int())), y);
+
+            if (is_uninterp_const(u))
+                eqs.push_back(dependent_eq(orig, to_app(u), term, d));
+            else
+                solve_eq(orig, u, term, d, eqs);
+        }
+
+        void solve_to_real(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            expr* z = nullptr, *u = nullptr;
+            rational r;            
+            if (!a.is_to_real(x, z) || !is_uninterp_const(z))
+                return;
+            if (a.is_to_real(y, u)) 
+                eqs.push_back(dependent_eq(orig, to_app(z), expr_ref(u, m), d));
+            else if (a.is_numeral(y, r) && r.is_int())
+                eqs.push_back(dependent_eq(orig, to_app(z), expr_ref(a.mk_int(r), m), d));
+        }
+
+        /***
+        * Solve
+        *    x + Y = Z    -> x = Z - Y
+        *    -1*x + Y = Z -> x = Y - Z
+        *    a*x + Y = Z  -> x = (Z - Y)/a for is-real(x)        
+        */
+        void solve_add(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            if (!a.is_add(x))
+                return;
+            expr* u = nullptr, * z = nullptr;
+            rational r;
+            expr_ref term(m);
+            unsigned i = 0;
+            auto mk_term = [&](unsigned i) {
+                term = y;
+                unsigned j = 0;
+                for (expr* arg2 : *to_app(x)) {
+                    if (i != j)
+                        term = a.mk_sub(term, arg2);
+                    ++j;
+                }
+            };
+            for (expr* arg : *to_app(x)) {
+                if (is_uninterp_const(arg)) {
+                    mk_term(i);
+                    eqs.push_back(dependent_eq(orig, to_app(arg), term, d));
+                }
+                else if (a.is_mul(arg, u, z) && a.is_numeral(u, r) && is_uninterp_const(z)) {
+                    if (r == -1) {
+                        mk_term(i);
+                        term = a.mk_uminus(term);
+                        eqs.push_back(dependent_eq(orig, to_app(z), term, d));
+                    }
+                    else if (a.is_real(arg) && r != 0) {
+                        mk_term(i);
+                        term = a.mk_div(term, u);
+                        eqs.push_back(dependent_eq(orig, to_app(z), term, d));
+                    }
+                }
+                else if (a.is_real(arg) && a.is_mul(arg)) {
+                    unsigned j = 0;
+                    for (expr* xarg : *to_app(arg)) {
+                        ++j;
+                        if (!is_uninterp_const(xarg))
+                            continue;
+                        unsigned k = 0;
+                        bool nonzero = true;
+                        for (expr* yarg : *to_app(arg)) {
+                            ++k;
+                            nonzero = k == j || m_nonzero.is_marked(yarg) || (a.is_numeral(yarg, r) && r != 0);                           
+if (!nonzero)
+break;
+                        }
+                        if (!nonzero)
+                            continue;
+
+                        k = 0;
+                        ptr_buffer<expr> args;
+                        for (expr* yarg : *to_app(arg)) {
+                            ++k;
+                            if (k != j)
+                                args.push_back(yarg);
+                        }
+                        mk_term(i);
+                        term = a.mk_div(term, a.mk_mul(args.size(), args.data()));
+                        eqs.push_back(dependent_eq(orig, to_app(xarg), term, d));
+                    }
+                }
+                ++i;
+            }
+        }
+
+        /***
+        * Solve for x * Y = Z, where Y != 0 -> x = Z / Y
+        */
+        void solve_mul(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            if (!a.is_mul(x))
+                return;
+            rational r;
+            expr_ref term(m);
+            unsigned i = 0;
+            for (expr* arg : *to_app(x)) {
+                ++i;
+                if (!is_uninterp_const(arg))
+                    continue;
+                if (!a.is_real(arg))
+                    continue;
+                unsigned j = 0;
+                bool nonzero = true;
+                for (expr* arg2 : *to_app(x)) {
+                    ++j;
+                    nonzero = j == i || m_nonzero.is_marked(arg2) || (a.is_numeral(arg2, r) && r != 0);
+                    if (!nonzero)
+                        break;
+                }
+                if (!nonzero)
+                    continue;
+                ptr_buffer<expr> args;
+                j = 0;
+                for (expr* arg2 : *to_app(x)) {
+                    ++j;
+                    if (j != i)
+                        args.push_back(arg2);
+                }
+                term = a.mk_div(y, a.mk_mul(args));
+                eqs.push_back(dependent_eq(orig, to_app(arg), term, d));
+            }
+        }
+
+        void mark_nonzero(expr* e) {
+            m_trail.push_back(e);
+            m_nonzero.mark(e);
+        }
+
+        void add_pos(expr* f) {
+            expr* lhs = nullptr, * rhs = nullptr;
+            rational val;
+            if (a.is_le(f, lhs, rhs) && a.is_numeral(rhs, val) && val.is_neg())
+                mark_nonzero(lhs);
+            else if (a.is_ge(f, lhs, rhs) && a.is_numeral(rhs, val) && val.is_pos())
+                mark_nonzero(lhs);
+            else if (m.is_not(f, f)) {
+                if (a.is_le(f, lhs, rhs) && a.is_numeral(rhs, val) && !val.is_neg())
+                    mark_nonzero(lhs);
+                else if (a.is_ge(f, lhs, rhs) && a.is_numeral(rhs, val) && !val.is_pos())
+                    mark_nonzero(lhs);
+                else if (m.is_eq(f, lhs, rhs) && a.is_numeral(rhs, val) && val.is_zero())
+                    mark_nonzero(lhs);
+            }
+        }
+
+        void solve_eq(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            solve_add(orig, x, y, d, eqs);
+            solve_mod(orig, x, y, d, eqs);
+            solve_mul(orig, x, y, d, eqs);
+            solve_to_real(orig, x, y, d, eqs);
+        }
+
+    public:
+
+        arith_extract_eq(ast_manager& m) : m(m), a(m), m_bm(m), m_args(m), m_trail(m) {}
+
+        void get_eqs(dependent_expr const& e, dep_eq_vector& eqs) override {
+            if (!m_enabled)
+                return;
+            auto [f, p, d] = e();
+            expr* x = nullptr, * y = nullptr;
+            if (m.is_eq(f, x, y) && a.is_int_real(x)) {
+                solve_eq(f, x, y, d, eqs);
+                solve_eq(f, y, x, d, eqs);
+            }
+            bool str;
+            rational lo, hi;
+            if (a.is_le(f, x, y) && a.is_numeral(y, hi) && m_bm.has_lower(x, lo, str) && !str && lo == hi) {
+                expr_dependency_ref d2(m);
+                d2 = m.mk_join(d, m_bm.lower_dep(x));
+                if (is_uninterp_const(x)) 
+                    eqs.push_back(dependent_eq(f, to_app(x), expr_ref(y, m), d2));
+                else {
+                    solve_eq(f, x, y, d2, eqs);                
+                    solve_eq(f, y, x, d2, eqs);                
+                }
+            }
+        }
+
+        void pre_process(dependent_expr_state& fmls) override {
+            if (!m_enabled)
+                return;
+            m_nonzero.reset();
+            m_trail.reset();
+            m_bm.reset();
+            for (unsigned i = 0; i < fmls.qtail(); ++i) {
+                auto [f, p, d] = fmls[i]();
+                add_pos(f);
+                m_bm(f, d, p);
+            }
+        }
+
+        void updt_params(params_ref const& p) override {
+            tactic_params tp(p);
+            m_enabled = p.get_bool("theory_solver", tp.solve_eqs_ite_solver());
+            m_eliminate_mod = p.get_bool("eliminate_mod", true);
+        }
+    };
+
+
+    // Guarded pointwise definitions of array constants:
+    //   (forall (x) (= (select A x) t))            ==>  A := (lambda (x) t)
+    //   (forall (x) (=> G (= (select A x) t)))     ==>  A := (lambda (x) (ite G t (select A' x)))   with A' fresh
+    // where A is an uninterpreted constant not occurring in G or t, and the select
+    // arguments are exactly the bound variables in binder order.
+    class array_extract_eq : public extract_eq {
+        ast_manager& m;
+        array_util   a;
+
+        bool is_select_of_vars(expr* e, unsigned n, app*& sel) {
+            if (!a.is_select(e)) return false;
+            sel = to_app(e);
+            if (sel->get_num_args() != n + 1) return false;
+            for (unsigned i = 0; i < n; ++i) {
+                expr* arg = sel->get_arg(i + 1);
+                if (!is_var(arg) || to_var(arg)->get_idx() != n - i - 1) return false;
+            }
+            return true;
+        }
+
+        bool occurs_in(expr* A, expr* e) {
+            for (expr* t : subterms::all(expr_ref(e, m)))
+                if (t == A) return true;
+            return false;
+        }
+
+    public:
+        array_extract_eq(ast_manager& m): m(m), a(m) {}
+
+        void get_eqs(dependent_expr const& e, dep_eq_vector& eqs) override {
+            auto [f, p, d] = e();
+            if (!is_forall(f)) return;
+            quantifier* q = to_quantifier(f);
+            unsigned n = q->get_num_decls();
+            expr* body = q->get_expr();
+            expr* guard = nullptr, *eq = body, *g = nullptr, *c = nullptr;
+            expr_ref guard_ref(m);
+            if (m.is_implies(body, g, c)) {
+                guard = g; eq = c;
+            }
+            else if (m.is_or(body) && to_app(body)->get_num_args() == 2) {
+                expr* a0 = to_app(body)->get_arg(0), *a1 = to_app(body)->get_arg(1);
+                if (m.is_eq(a1)) { guard_ref = mk_not(m, a0); guard = guard_ref; eq = a1; }
+                else if (m.is_eq(a0)) { guard_ref = mk_not(m, a1); guard = guard_ref; eq = a0; }
+                else return;
+            }
+            expr* lhs = nullptr, *rhs = nullptr;
+            if (!m.is_eq(eq, lhs, rhs)) return;
+            // (= (ite G (select A x) s) (ite G t s))  ==  (=> G (= (select A x) t))
+            expr *c1 = nullptr, *t1 = nullptr, *e1 = nullptr, *c2 = nullptr, *t2 = nullptr, *e2 = nullptr;
+            if (!guard && m.is_ite(lhs, c1, t1, e1) && m.is_ite(rhs, c2, t2, e2) && c1 == c2 && e1 == e2) {
+                guard = c1; lhs = t1; rhs = t2;
+            }
+            app* sel = nullptr; expr* def = nullptr;
+            if (is_select_of_vars(lhs, n, sel)) def = rhs;
+            else if (is_select_of_vars(rhs, n, sel)) def = lhs;
+            else return;
+            expr* A = sel->get_arg(0);
+            if (!is_uninterp_const(A)) return;
+            if (occurs_in(A, def) || (guard && occurs_in(A, guard))) return;
+            if (has_quantifiers(def) || (guard && has_quantifiers(guard))) return;
+            expr_ref lam_body(def, m);
+            if (guard) {
+                app* Ap = m.mk_fresh_const("array-def", A->get_sort());
+                ptr_buffer<expr> args;
+                args.push_back(Ap);
+                for (unsigned i = 0; i < n; ++i) args.push_back(sel->get_arg(i + 1));
+                expr_ref selp(a.mk_select(args.size(), args.data()), m);
+                lam_body = m.mk_ite(guard, def, selp);
+            }
+            expr_ref lam(m.mk_lambda(n, q->get_decl_sorts(), q->get_decl_names(), lam_body), m);
+            eqs.push_back(dependent_eq(f, to_app(A), lam, d));
+        }
+    };
+
+    // Isolate a variable from a linear finite-field combination:
+    //   x + Y = Z            -> x = Z - Y
+    //   (ff.neg x) + Y = Z   -> x = Y - Z
+    //   c*x + Y = Z          -> x = (Z - Y) * inverse(c), c a nonzero numeral
+    //   c*x = Y              -> x = Y * inverse(c), c a nonzero numeral
+    // Every nonzero element of a (prime) field is invertible, so unlike the
+    // arith/bv plugins no side condition on sign, parity, or realness is
+    // needed: it suffices that the coefficient is a literal nonzero numeral.
+    class ff_extract_eq : public extract_eq {
+        ast_manager& m;
+        ff_util      ff;
+
+        rational inverse(rational const& r, rational const& p) const {
+            rational a, b;
+            VERIFY(gcd(r, p, a, b).is_one());
+            return mod(a, p);
+        }
+
+        void solve_add(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            if (!ff.is_add(x))
+                return;
+            sort* s = x->get_sort();
+            rational const& p = ff.modulus(s);
+            expr_ref term(m);
+            unsigned i = 0;
+            auto mk_term = [&](unsigned i) {
+                term = y;
+                unsigned j = 0;
+                for (expr* arg2 : *to_app(x)) {
+                    if (i != j)
+                        term = ff.mk_add(term, ff.mk_neg(arg2));
+                    ++j;
+                }
+            };
+            for (expr* arg : *to_app(x)) {
+                expr* u = nullptr, * z = nullptr;
+                rational r;
+                if (is_uninterp_const(arg)) {
+                    mk_term(i);
+                    eqs.push_back(dependent_eq(orig, to_app(arg), term, d));
+                }
+                else if (ff.is_neg(arg, z) && is_uninterp_const(z)) {
+                    mk_term(i);
+                    term = ff.mk_neg(term);
+                    eqs.push_back(dependent_eq(orig, to_app(z), term, d));
+                }
+                else if (ff.is_mul(arg, u, z) && ff.is_numeral(u, r) && is_uninterp_const(z) && !r.is_zero()) {
+                    mk_term(i);
+                    term = ff.mk_mul(term, ff.mk_numeral(inverse(r, p), s));
+                    eqs.push_back(dependent_eq(orig, to_app(z), term, d));
+                }
+                ++i;
+            }
+        }
+
+        void solve_mul(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            if (!ff.is_mul(x))
+                return;
+            sort* s = x->get_sort();
+            rational const& p = ff.modulus(s);
+            unsigned i = 0;
+            for (expr* arg : *to_app(x)) {
+                ++i;
+                if (!is_uninterp_const(arg))
+                    continue;
+                unsigned j = 0;
+                bool ok = true;
+                ptr_buffer<expr> args;
+                for (expr* arg2 : *to_app(x)) {
+                    ++j;
+                    if (j == i)
+                        continue;
+                    rational c;
+                    if (!ff.is_numeral(arg2, c) || c.is_zero()) {
+                        ok = false;
+                        break;
+                    }
+                    args.push_back(arg2);
+                }
+                if (!ok)
+                    continue;
+                rational c(1);
+                for (expr* a2 : args) {
+                    rational c2;
+                    VERIFY(ff.is_numeral(a2, c2));
+                    c = mod(c * c2, p);
+                }
+                expr_ref term(ff.mk_mul(y, ff.mk_numeral(inverse(c, p), s)), m);
+                eqs.push_back(dependent_eq(orig, to_app(arg), term, d));
+            }
+        }
+
+        void solve_eq(expr* orig, expr* x, expr* y, expr_dependency* d, dep_eq_vector& eqs) {
+            solve_add(orig, x, y, d, eqs);
+            solve_mul(orig, x, y, d, eqs);
+        }
+
+    public:
+        ff_extract_eq(ast_manager& m) : m(m), ff(m) {}
+
+        void get_eqs(dependent_expr const& e, dep_eq_vector& eqs) override {
+            auto [f, pr, d] = e();
+            expr* x = nullptr, * y = nullptr;
+            if (!m.is_eq(f, x, y) || !ff.is_ff(x))
+                return;
+            solve_eq(e.fml(), x, y, d, eqs);
+            solve_eq(e.fml(), y, x, d, eqs);
+        }
+    };
+
+    void register_extract_eqs(ast_manager& m, scoped_ptr_vector<extract_eq>& ex) {
+        ex.push_back(alloc(arith_extract_eq, m));
+        ex.push_back(alloc(basic_extract_eq, m));
+        ex.push_back(alloc(bv_extract_eq, m));
+        ex.push_back(alloc(array_extract_eq, m));
+        ex.push_back(alloc(ff_extract_eq, m));
+    }
+}

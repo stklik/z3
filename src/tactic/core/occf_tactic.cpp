@@ -23,8 +23,7 @@ Revision History:
 --*/
 #include "tactic/tactical.h"
 #include "tactic/core/occf_tactic.h"
-#include "tactic/generic_model_converter.h"
-#include "util/cooperate.h"
+#include "ast/converters/generic_model_converter.h"
 
 class occf_tactic : public tactic {
     struct     imp {
@@ -36,9 +35,7 @@ class occf_tactic : public tactic {
         }
 
         void checkpoint() {
-            if (m.canceled())
-                throw tactic_exception(TACTIC_CANCELED_MSG);
-            cooperate("occf");
+            tactic::checkpoint(m);
         }
 
         bool is_literal(expr * t) const {
@@ -54,7 +51,7 @@ class occf_tactic : public tactic {
             SASSERT(m.is_or(cls));
             bool found = false;
             unsigned num = cls->get_num_args();
-            for (unsigned i = 0; i < num; i++) {
+            for (unsigned i = 0; i < num; ++i) {
                 if (is_constraint(cls->get_arg(i))) {
                     if (found)
                         return true;
@@ -129,7 +126,6 @@ class occf_tactic : public tactic {
         
         void operator()(goal_ref const & g, 
                         goal_ref_buffer & result) {
-            SASSERT(g->is_well_sorted());
             fail_if_proof_generation("occf", g);
 
             bool produce_models = g->models_enabled();
@@ -142,7 +138,7 @@ class occf_tactic : public tactic {
             cnstr2bvar c2b;
             
             unsigned sz = g->size();
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < sz; ++i) {
                 checkpoint();
                 expr * f = g->form(i);
                 expr_dependency * d = g->dep(i);
@@ -158,7 +154,7 @@ class occf_tactic : public tactic {
                 expr * keep = nullptr;
                 new_lits.reset();
                 unsigned num = cls->get_num_args();
-                for (unsigned j = 0; j < num; j++) {
+                for (unsigned j = 0; j < num; ++j) {
                     expr * l = cls->get_arg(j);
                     if (is_constraint(l)) {
                         expr * new_l = get_aux_lit(c2b, l, g);
@@ -179,12 +175,10 @@ class occf_tactic : public tactic {
                 }
                 if (keep != nullptr)
                     new_lits.push_back(keep);
-                g->update(i, m.mk_or(new_lits.size(), new_lits.c_ptr()), nullptr, d);
+                g->update(i, m.mk_or(new_lits), nullptr, d);
             }
             g->inc_depth();
             result.push_back(g.get());
-            TRACE("occf", g->display(tout););
-            SASSERT(g->is_well_sorted());
         }
     };
     
@@ -201,6 +195,8 @@ public:
     ~occf_tactic() override {
         dealloc(m_imp);
     }
+
+    char const* name() const override { return "occf"; }
 
     void updt_params(params_ref const & p) override {}
     void collect_param_descrs(param_descrs & r) override {}

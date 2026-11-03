@@ -17,11 +17,8 @@ Revision History:
 
 --*/
 
-#ifdef _WINDOWS
-#include <windows.h>
-#endif
-#include <thread>
 #include "util/util.h"
+#include <iostream>
 
 static unsigned g_verbosity_level = 0;
 
@@ -33,30 +30,22 @@ unsigned get_verbosity_level() {
     return g_verbosity_level;
 }
 
+static bool g_suppress_platform_verbose = false;
+
+void set_suppress_platform_verbose(bool suppress) {
+    g_suppress_platform_verbose = suppress;
+}
+
+bool get_suppress_platform_verbose() {
+    return g_suppress_platform_verbose;
+}
+
 static std::ostream* g_verbose_stream = &std::cerr;
 
 void set_verbose_stream(std::ostream& str) {
     g_verbose_stream = &str;
 }
 
-#ifdef _WINDOWS
-static int g_thread_id = 0;
-#else
-static std::thread::id g_thread_id = std::this_thread::get_id();
-#endif
-static bool g_is_threaded = false;
-
-bool is_threaded() {
-    if (g_is_threaded) return true;
-#ifdef _WINDOWS
-    int thid = GetCurrentThreadId();
-    g_is_threaded = g_thread_id != thid && g_thread_id != 0;
-    g_thread_id = thid;
-#else
-    g_is_threaded = std::this_thread::get_id() != g_thread_id;
-#endif
-    return g_is_threaded;
-}
 
 std::ostream& verbose_stream() {
     return *g_verbose_stream;
@@ -78,62 +67,18 @@ void set_fatal_error_handler(void (*pfn)(int error_code)) {
     g_fatal_error_handler = pfn;
 }
 
-unsigned log2(unsigned v) {
-    unsigned r = 0;
-    if (v & 0xFFFF0000) {
-        v >>= 16;
-        r |=  16;
-    }
-    if (v & 0xFF00) {
-        v >>= 8;
-        r |=  8;
-    }
-    if (v & 0xF0) {
-        v >>= 4;
-        r |=  4;
-    }
-    if (v & 0xC) {
-        v >>= 2;
-        r |=  2;
-    }
-    if (v & 0x2) {
-        v >>= 1;
-        r |=  1;
-    }
-    return r;
+unsigned mul_truncate(unsigned a, unsigned b) {
+    auto r = (uint64_t)a * (uint64_t)b;
+    return r > UINT_MAX ? UINT_MAX : (unsigned)r;
 }
 
-unsigned uint64_log2(uint64_t v) {
-    unsigned r = 0;
-    if (v & 0xFFFFFFFF00000000ull) {
-        v >>= 32;
-        r |=  32;
-    }
-    if (v & 0xFFFF0000) {
-        v >>= 16;
-        r |=  16;
-    }
-    if (v & 0xFF00) {
-        v >>= 8;
-        r |=  8;
-    }
-    if (v & 0xF0) {
-        v >>= 4;
-        r |=  4;
-    }
-    if (v & 0xC) {
-        v >>= 2;
-        r |=  2;
-    }
-    if (v & 0x2) {
-        v >>= 1;
-        r |=  1;
-    }
-    return r;
+unsigned add_truncate(unsigned a, unsigned b) {
+    auto r = (uint64_t)a + (uint64_t)b;
+    return r > UINT_MAX ? UINT_MAX : (unsigned)r;
 }
 
 bool product_iterator_next(unsigned n, unsigned const * sz, unsigned * it) {
-    for (unsigned i = 0; i < n; i++) {
+    for (unsigned i = 0; i < n; ++i) {
         it[i]++;
         if (it[i] < sz[i])
             return true;
@@ -168,9 +113,8 @@ void escaped::display(std::ostream & out) const {
         }
         out << c;
         if (c == '\n') {
-            for (unsigned i = 0; i < m_indent; i++)
+            for (unsigned i = 0; i < m_indent; ++i)
                 out << " ";
         }
     }
 }
-

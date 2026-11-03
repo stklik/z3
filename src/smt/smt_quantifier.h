@@ -16,13 +16,14 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_QUANTIFIER_H_
-#define SMT_QUANTIFIER_H_
+#pragma once
 
 #include "ast/ast.h"
+#include "ast/quantifier_stat.h"
 #include "util/statistics.h"
 #include "util/params.h"
 #include "smt/smt_types.h"
+#include "tactic/user_propagator_base.h"
 #include <tuple>
 
 class proto_model;
@@ -31,17 +32,19 @@ struct smt_params;
 namespace smt {
     class quantifier_manager_plugin;
     class quantifier_stat;
+    class context;
 
     class quantifier_manager {
         struct imp;
         imp *                       m_imp;
+        unsigned                    m_lazy_scopes;
+        bool                        m_lazy;
+        void flush();
     public:
         quantifier_manager(context & ctx, smt_params & fp, params_ref const & p);
         ~quantifier_manager();
 
         context & get_context() const;
-
-        void set_plugin(quantifier_manager_plugin * plugin);
 
         void add(quantifier * q, unsigned generation);
         void del(quantifier * q);
@@ -49,18 +52,20 @@ namespace smt {
 
         bool is_shared(enode * n) const;
 
-        quantifier_stat * get_stat(quantifier * q) const;
+        q::quantifier_stat * get_stat(quantifier * q) const;
         unsigned get_generation(quantifier * q) const;
+
+        static void log_justification_to_root(std::ostream & log, enode *en, obj_hashtable<enode> &already_visited, context &ctx, ast_manager &m);
 
         bool add_instance(quantifier * q, app * pat,
                           unsigned num_bindings,
                           enode * const * bindings,
-                          expr* def,
                           unsigned max_generation,
                           unsigned min_top_generation,
                           unsigned max_top_generation,
-                          vector<std::tuple<enode *, enode *>> & used_enodes /*gives the equalities used for the pattern match, see mam.cpp for more info*/);
-        bool add_instance(quantifier * q, unsigned num_bindings, enode * const * bindings, expr* def, unsigned generation = 0);
+                          vector<std::tuple<enode *, enode *>> & used_enodes /*gives the equalities used for the pattern match, see mam.cpp for more info*/,
+                          bool mbqi_instance = false);
+        bool add_instance(quantifier * q, unsigned num_bindings, enode * const * bindings, unsigned generation = 0);
 
         void init_search_eh();
         void assign_eh(quantifier * q);
@@ -77,6 +82,7 @@ namespace smt {
         };
 
         bool model_based() const;
+        bool has_quantifiers() const;
         bool mbqi_enabled(quantifier *q) const; // can mbqi instantiate this quantifier?
         void adjust_model(proto_model * m);
         check_model_result check_model(proto_model * m, obj_map<enode, app *> const & root2value);
@@ -89,7 +95,10 @@ namespace smt {
         void display_stats(std::ostream & out, quantifier * q) const;
 
         void collect_statistics(::statistics & st) const;
+        void collect_instances(vector<std::pair<expr_ref, app_ref>> & out);
         void reset_statistics();
+
+        void register_on_binding(std::function<bool(quantifier*, expr*)> & f);
 
         ptr_vector<quantifier>::const_iterator begin_quantifiers() const;
         ptr_vector<quantifier>::const_iterator end_quantifiers() const;
@@ -101,8 +110,7 @@ namespace smt {
 
     class quantifier_manager_plugin {
     public:
-        quantifier_manager_plugin() {}
-        virtual ~quantifier_manager_plugin() {}
+        virtual ~quantifier_manager_plugin() = default;
 
         virtual void set_manager(quantifier_manager & qm) = 0;
 
@@ -171,9 +179,16 @@ namespace smt {
         virtual void push() = 0;
         virtual void pop(unsigned num_scopes) = 0;
 
+        /**
+           \brief Try to refine a match using higher-order matching.
+           Returns true if the pattern was an HO pattern and refinement was attempted.
+           In that case, the plugin handles adding instances via the refined bindings.
+        */
+        virtual bool refine_instance(quantifier* q, app* pat, unsigned num_bindings, enode* const* bindings,
+                                     unsigned max_generation, unsigned min_top_generation, unsigned max_top_generation,
+                                     vector<std::tuple<enode*, enode*>>& used_enodes) { return false; }
 
+        virtual void collect_statistics(::statistics & st) const {}
 
     };
-};
-
-#endif
+}

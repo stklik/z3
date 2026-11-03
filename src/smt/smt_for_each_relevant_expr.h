@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_FOR_EACH_RELEVANT_EXPR_H_
-#define SMT_FOR_EACH_RELEVANT_EXPR_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -36,7 +35,7 @@ namespace smt {
         unsigned count_at_labels_lit(expr* n, bool polarity);
 
     public:
-        check_at_labels(ast_manager& m) : m_manager(m) {};
+        check_at_labels(ast_manager& m) : m_manager(m), m_first(false) {}
 
         /**
            \brief Check that 'n' as a formula contains at most one @ label within each and-or path.
@@ -66,7 +65,7 @@ namespace smt {
 
     public:
         for_each_relevant_expr(context & ctx);
-        virtual ~for_each_relevant_expr() {}
+        virtual ~for_each_relevant_expr() = default;
         /**
            \brief Visit the relevant sub-expressions of n.
            That is, only subexpressions m of n, such that m_context.is_relevant(m).
@@ -93,7 +92,6 @@ namespace smt {
             for_each_relevant_expr(ctx),
             m_buffer(b) {
         }
-        ~collect_relevant_label_lits() override {}
         void operator()(expr * n) override;
     };
 
@@ -104,11 +102,8 @@ namespace smt {
             for_each_relevant_expr(ctx),
             m_buffer(b) {
         }
-        ~collect_relevant_labels() override {}
         void operator()(expr * n) override;
     };
 
-};
-
-#endif /* SMT_FOR_EACH_RELEVANT_EXPR_H_ */
+}
 

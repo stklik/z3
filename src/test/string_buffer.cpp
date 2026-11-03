@@ -29,11 +29,11 @@ static void tst1() {
 
 static void tst2() {
   string_buffer<> b;
-  for (unsigned i = 0; i < 10000; i++) {
+  for (unsigned i = 0; i < 10000; ++i) {
     int r = rand() % 10;
     b << r;
   }
-  TRACE("string_buffer", tout << b.c_str() << "\n";);
+  TRACE(string_buffer, tout << b.c_str() << "\n";);
   ENSURE(strlen(b.c_str()) == 10000);
 }
 

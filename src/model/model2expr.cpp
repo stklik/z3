@@ -52,7 +52,7 @@ symbol mk_fresh_name::next() {
             _name << m_char;
             if (m_num > 0) _name << m_num;
             ++m_char;
-            symbol name(_name.str().c_str());
+            symbol name(_name.str());
             if (!m_symbols.contains(name)) {
                 return name;
             }                
@@ -70,10 +70,10 @@ static void mk_entry_cond(unsigned arity, func_entry const* entry, expr_ref& res
             // no-op
         }
         else {
-            conjs.push_back(m.mk_eq(m.mk_var(i, m.get_sort(e)), e));
+            conjs.push_back(m.mk_eq(m.mk_var(i, e->get_sort()), e));
         }
     }
-    bool_rewriter(m).mk_and(conjs.size(), conjs.c_ptr(), result);        
+    bool_rewriter(m).mk_and(conjs.size(), conjs.data(), result);        
 }
 
 void model2expr(model& md, expr_ref& result) {
@@ -113,7 +113,7 @@ void model2expr(model& md, expr_ref& result) {
         for (unsigned j = 0; j < f->get_arity(); ++j) {
             args.push_back(m.mk_var(j, f->get_domain(j)));
         }
-        func = m.mk_app(f, args.size(), args.c_ptr());
+        func = m.mk_app(f, args.size(), args.data());
         if (fi->is_partial()) {
             if (num_entries == 0) {
                 continue;
@@ -147,11 +147,11 @@ void model2expr(model& md, expr_ref& result) {
         }
         if (f->get_arity() > 0) {
             var_subst vs(m, false);
-            tmp = vs(tmp, rev_vars.size(), rev_vars.c_ptr());
-            tmp = m.mk_forall(sorts.size(), sorts.c_ptr(), names.c_ptr(), tmp);
+            tmp = vs(tmp, rev_vars.size(), rev_vars.data());
+            tmp = m.mk_forall(sorts.size(), sorts.data(), names.data(), tmp);
         }
         conjs.push_back(tmp);
     }
 
-    bool_rewriter(m).mk_and(conjs.size(), conjs.c_ptr(), result);
+    bool_rewriter(m).mk_and(conjs.size(), conjs.data(), result);
 }

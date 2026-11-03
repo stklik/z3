@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SUBSTITUTION_TREE_H_
-#define SUBSTITUTION_TREE_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/substitution/substitution.h"
@@ -30,7 +29,7 @@ protected:
     substitution & m_subst;
 public:
     st_visitor(substitution & s):m_subst(s) {}
-    virtual ~st_visitor() {}
+    virtual ~st_visitor() = default;
     substitution & get_substitution() { return m_subst; }
     virtual bool operator()(expr * e) { return true; }
 };
@@ -146,5 +145,4 @@ public:
     void display(std::ostream & out) const;
 };
 
-#endif /* SUBSTITUTION_TREE_H_ */
 

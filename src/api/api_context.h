@@ -17,83 +17,107 @@ Author:
 Revision History:
 
 --*/
-#ifndef API_CONTEXT_H_
-#define API_CONTEXT_H_
+#pragma once
 
-#include "api/z3.h"
+#include <mutex>
+#include <vector>
+
+#include "util/hashtable.h"
+#include "util/mutex.h"
+#include "util/event_handler.h"
 #include "ast/ast.h"
-#include "api/api_util.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
 #include "ast/datatype_decl_plugin.h"
 #include "ast/dl_decl_plugin.h"
 #include "ast/fpa_decl_plugin.h"
+#include "ast/recfun_decl_plugin.h"
+#include "ast/special_relations_decl_plugin.h"
+#include "ast/finite_set_decl_plugin.h"
+#include "ast/rewriter/seq_rewriter.h"
+#include "params/smt_params.h"
 #include "smt/smt_kernel.h"
-#include "smt/params/smt_params.h"
-#include "util/event_handler.h"
+#include "smt/smt_solver.h"
 #include "cmd_context/tactic_manager.h"
-#include "cmd_context/context_params.h"
 #include "cmd_context/cmd_context.h"
+#include "solver/solver.h"
+#include "api/z3.h"
+#include "api/api_util.h"
 #include "api/api_polynomial.h"
-#include "util/hashtable.h"
 
 namespace smtlib {
     class parser;
-};
+}
 
 namespace realclosure {
     class manager;
-};
+}
+
+namespace smt2 {
+    class parser;
+    void free_parser(parser*);
+}
 
 namespace api {
        
 
+
     class context : public tactic_manager {
         struct add_plugins {  add_plugins(ast_manager & m); };
-        context_params             m_params;
+        ast_context_params                m_params;
         bool                       m_user_ref_count; //!< if true, the user is responsible for managing reference counters.
+        bool                       m_concurrent_dec_ref = false;
         scoped_ptr<ast_manager>    m_manager;
         scoped_ptr<cmd_context>    m_cmd;
         add_plugins                m_plugins;
+        mutex                      m_mux;
+        // These queues are appended to by GC threads in SINGLE_THREAD builds too.
+        std::mutex                 m_dec_ref_mux;
 
         arith_util                 m_arith_util;
         bv_util                    m_bv_util;
         datalog::dl_decl_util      m_datalog_util;
         fpa_util                   m_fpa_util;
         seq_util                   m_sutil;
+        recfun::util               m_recfun;
+        finite_set_util            m_finite_set_util;
 
         // Support for old solver API
         smt_params                 m_fparams;
         // -------------------------------
 
-        ast_ref_vector             m_last_result; //!< used when m_user_ref_count == true
-        ast_ref_vector             m_ast_trail;   //!< used when m_user_ref_count == false
+        // Use the system allocator rather than Z3's non-thread-safe memory manager.
+        std::vector<ast*>          m_asts_to_flush;
+        std::vector<api::object*>  m_objects_to_flush;
 
+        ast_ref_vector             m_ast_trail;        
         ref<api::object>           m_last_obj; //!< reference to the last API object returned by the APIs
         u_map<api::object*>        m_allocated_objects; // !< table containing current set of allocated API objects
         unsigned_vector            m_free_object_ids;   // !< free list of identifiers available for allocated objects.
 
-        family_id                  m_basic_fid;
         family_id                  m_array_fid;
-        family_id                  m_arith_fid;
         family_id                  m_bv_fid;
         family_id                  m_dt_fid;
         family_id                  m_datalog_fid;
         family_id                  m_pb_fid;
         family_id                  m_fpa_fid;
         family_id                  m_seq_fid;
+        family_id                  m_char_fid;
+        family_id                  m_special_relations_fid;
+        family_id                  m_ff_fid;
         datatype_decl_plugin *     m_dt_plugin;
         
         std::string                m_string_buffer; // temporary buffer used to cache strings sent to the "external" world.
+        Z3_proof_check_eh*          m_proof_check_callback = nullptr;
+        void*                      m_proof_check_user_context = nullptr;
 
         Z3_error_code              m_error_code;
         Z3_error_handler *         m_error_handler;
         std::string                m_exception_msg; // catch the message associated with a Z3 exception
-        bool                       m_searching;
         Z3_ast_print_mode          m_print_mode;
 
-        event_handler *            m_interruptable; // Reference to an object that can be interrupted by Z3_interrupt
+        ptr_vector<event_handler>  m_interruptable; // Reference to an object that can be interrupted by Z3_interrupt
 
      public:
         // Scoped obj for setting m_interruptable
@@ -110,12 +134,15 @@ namespace api {
         //
         // ------------------------
         
-        context(context_params * p, bool user_ref_count = false);
+        context(ast_context_params * p, bool user_ref_count = false);
         ~context();
         ast_manager & m() const { return *(m_manager.get()); }
 
-        context_params & params() { m_params.updt_params(); return m_params; }
+        ast_context_params & params() { m_params.updt_params(); return m_params; }
         scoped_ptr<cmd_context>& cmd() { return m_cmd; }
+        void set_proof_check_callback(void* user_context, Z3_proof_check_eh callback);
+        cmd_context::proof_check_callback get_proof_check_callback();
+        std::string check_proof(proof* pr, Z3_ast_vector assertions);
         bool produce_proofs() const { return m().proofs_enabled(); }
         bool produce_models() const { return m_params.m_model; }
         bool produce_unsat_cores() const { return m_params.m_unsat_core; }
@@ -128,34 +155,51 @@ namespace api {
         fpa_util & fpautil() { return m_fpa_util; }
         datatype_util& dtutil() { return m_dt_plugin->u(); }
         seq_util& sutil() { return m_sutil; }
-        family_id get_basic_fid() const { return m_basic_fid; }
+        recfun::util& recfun() { return m_recfun; }
+        finite_set_util& fsutil() { return m_finite_set_util; }
+        family_id get_basic_fid() const { return basic_family_id; }
         family_id get_array_fid() const { return m_array_fid; }
-        family_id get_arith_fid() const { return m_arith_fid; }
+        family_id get_arith_fid() const { return arith_family_id; }
         family_id get_bv_fid() const { return m_bv_fid; }
         family_id get_dt_fid() const { return m_dt_fid; }
         family_id get_datalog_fid() const { return m_datalog_fid; }
         family_id get_pb_fid() const { return m_pb_fid; }
         family_id get_fpa_fid() const { return m_fpa_fid; }
         family_id get_seq_fid() const { return m_seq_fid; }
+        family_id get_char_fid() const { return m_char_fid; }
         datatype_decl_plugin * get_dt_plugin() const { return m_dt_plugin; }
+        family_id get_special_relations_fid() const { return m_special_relations_fid; }
+        family_id get_ff_fid() const { return m_ff_fid; }
 
         Z3_error_code get_error_code() const { return m_error_code; }
-        void reset_error_code();
+        void reset_error_code() { m_error_code = Z3_OK; }
         void set_error_code(Z3_error_code err, char const* opt_msg);
+        void set_error_code(Z3_error_code err, std::string &&opt_msg);
         void set_error_handler(Z3_error_handler h) { m_error_handler = h; }
-        // Sign an error if solver is searching
-        void check_searching();
-
+        
+        void enable_concurrent_dec_ref() {
+            m_concurrent_dec_ref = true;
+        }
+        bool should_check_dec_ref_count() const {
+#ifdef SINGLE_THREAD
+            return !m_concurrent_dec_ref;
+#else
+            return true;
+#endif
+        }
         unsigned add_object(api::object* o);
         void del_object(api::object* o);
+        void dec_ref(ast* a);
+        void flush_objects();
 
         Z3_ast_print_mode get_print_mode() const { return m_print_mode; }
         void set_print_mode(Z3_ast_print_mode m) { m_print_mode = m; }
 
         // Store a copy of str in m_string_buffer, and return a reference to it.
         // This method is used to communicate local/internal strings with the "external world"
-        char * mk_external_string(char const * str);
-        char * mk_external_string(std::string const & str);
+        const char * mk_external_string(std::string && str);
+        sbuffer<char>              m_char_buffer;
+
 
         // Create a numeral of the given sort
         expr * mk_numeral_core(rational const & n, sort * s);
@@ -183,12 +227,25 @@ namespace api {
         void handle_exception(z3_exception & ex);
         char const * get_exception_msg() const { return m_exception_msg.c_str(); }
 
-        // Interrupt the current interruptable object
+        // Interrupt the current interruptible object
         void interrupt();
 
         void invoke_error_handler(Z3_error_code c);
 
         void check_sorts(ast * n);
+
+
+        // ------------------------------------------------
+        //
+        // State reused by calls to Z3_eval_smtlib2_string
+        //
+        // ------------------------------------------------
+        //
+        // The m_parser field is reused by all calls of Z3_eval_smtlib2_string using this context.
+        // It is an optimization to save the cost of recreating these objects on each invocation.
+        //
+        // See https://github.com/Z3Prover/z3/pull/6422 for the motivation
+        smt2::parser*                m_parser = nullptr;
 
         // ------------------------
         //
@@ -222,18 +279,18 @@ namespace api {
         
     };
     
-};
+}
 
 inline api::context * mk_c(Z3_context c) { return reinterpret_cast<api::context*>(c); }
 #define RESET_ERROR_CODE() { mk_c(c)->reset_error_code(); }
 #define SET_ERROR_CODE(ERR, MSG) { mk_c(c)->set_error_code(ERR, MSG); }
-#define CHECK_NON_NULL(_p_,_ret_) { if (_p_ == 0) { SET_ERROR_CODE(Z3_INVALID_ARG, "ast is null"); return _ret_; } }
-#define CHECK_VALID_AST(_a_, _ret_) { if (_a_ == 0 || !CHECK_REF_COUNT(_a_)) { SET_ERROR_CODE(Z3_INVALID_ARG, "not a valid ast"); return _ret_; } }
-#define CHECK_SEARCHING(c) mk_c(c)->check_searching();
+#define CHECK_NON_NULL(_p_,_ret_) { if (_p_ == nullptr) { SET_ERROR_CODE(Z3_INVALID_ARG, "ast is null"); return _ret_; } }
+#define CHECK_VALID_AST(_a_, _ret_) { if (_a_ == nullptr || !CHECK_REF_COUNT(_a_)) { SET_ERROR_CODE(Z3_INVALID_ARG, "not a valid ast"); return _ret_; } }
 inline bool is_expr(Z3_ast a) { return is_expr(to_ast(a)); }
-#define CHECK_IS_EXPR(_p_, _ret_) { if (_p_ == 0 || !is_expr(_p_)) { SET_ERROR_CODE(Z3_INVALID_ARG, "ast is not an expression"); return _ret_; } }
-inline bool is_bool_expr(Z3_context c, Z3_ast a) { return is_expr(a) && mk_c(c)->m().is_bool(to_expr(a)); }
-#define CHECK_FORMULA(_a_, _ret_) { if (_a_ == 0 || !CHECK_REF_COUNT(_a_) || !is_bool_expr(c, _a_)) { SET_ERROR_CODE(Z3_INVALID_ARG, nullptr); return _ret_; } }
-inline void check_sorts(Z3_context c, ast * n) { mk_c(c)->check_sorts(n); }
+#define CHECK_IS_EXPR(_p_, _ret_) { if (_p_ == nullptr || !is_expr(_p_)) { SET_ERROR_CODE(Z3_INVALID_ARG, "ast is not an expression"); return _ret_; } }
+#define CHECK_IS_SORT(_p_, _ret_) { if (_p_ == nullptr || !is_sort(_p_)) { SET_ERROR_CODE(Z3_INVALID_ARG, "ast is not a sort"); return _ret_; } }
+#define CHECK_SORTS(_n_, _ps_, _ret_) { for (unsigned i = 0; i < _n_; ++i) if (!is_sort(_ps_[i])) { SET_ERROR_CODE(Z3_INVALID_ARG, "ast is not a sort"); return _ret_; } }
 
-#endif
+inline bool is_bool_expr(Z3_context c, Z3_ast a) { return is_expr(a) && mk_c(c)->m().is_bool(to_expr(a)); }
+#define CHECK_FORMULA(_a_, _ret_) { if (_a_ == nullptr || !CHECK_REF_COUNT(_a_) || !is_bool_expr(c, _a_)) { SET_ERROR_CODE(Z3_INVALID_ARG, nullptr); return _ret_; } }
+inline void check_sorts(Z3_context c, ast * n) { mk_c(c)->check_sorts(n); }

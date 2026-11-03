@@ -153,7 +153,7 @@ class diff_neq_tactic : public tactic {
         // throws exception if contains unbounded variable
         void check_unbounded() {
             unsigned num = num_vars();
-            for (var x = 0; x < num; x++) {
+            for (var x = 0; x < num; ++x) {
                 if (m_lower[x] == INT_MIN || m_upper[x] == INT_MAX)
                     throw_not_supported();
                 // possible extension: support bound normalization here
@@ -166,9 +166,9 @@ class diff_neq_tactic : public tactic {
             expr * lhs;
             expr * rhs;
             unsigned sz = g.size();
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < sz; ++i) {
                 expr * f = g.form(i);
-                TRACE("diff_neq_tactic", tout << "processing: " << mk_ismt2_pp(f, m) << "\n";);
+                TRACE(diff_neq_tactic, tout << "processing: " << mk_ismt2_pp(f, m) << "\n";);
                 if (u.is_le(f, lhs, rhs))
                     process_le(lhs, rhs);
                 else if (u.is_ge(f, lhs, rhs))
@@ -183,10 +183,10 @@ class diff_neq_tactic : public tactic {
         
         void display(std::ostream & out) {
             unsigned num = num_vars();
-            for (var x = 0; x < num; x++) {
+            for (var x = 0; x < num; ++x) {
                 out << m_lower[x] << " <= " << mk_ismt2_pp(m_var2expr.get(x), m) << " <= " << m_upper[x] << "\n";
             }
-            for (var x = 0; x < num; x++) {
+            for (var x = 0; x < num; ++x) {
                 diseqs::iterator it  = m_var_diseqs[x].begin();
                 diseqs::iterator end = m_var_diseqs[x].end();
                 for (; it != end; ++it) {
@@ -197,18 +197,18 @@ class diff_neq_tactic : public tactic {
         
         void display_model(std::ostream & out) {
             unsigned num = m_stack.size();
-            for (var x = 0; x < num; x++) {
+            for (var x = 0; x < num; ++x) {
                 out << mk_ismt2_pp(m_var2expr.get(x), m) << " := " << m_stack[x] << "\n";
             }
         }
         
-        svector<bool>  m_forbidden;
+        bool_vector  m_forbidden;
         
         // make sure m_forbidden.size() > max upper bound
         void init_forbidden() {
             int max = 0;
             unsigned num = num_vars();
-            for (var x = 0; x < num; x++) {
+            for (var x = 0; x < num; ++x) {
                 if (m_upper[x] > max)
                     max = m_upper[x];
             }
@@ -250,10 +250,10 @@ class diff_neq_tactic : public tactic {
                     max = bad_v;
             }
             // reset forbidden
-            for (int i = starting_at + 1; i <= max; i++)
+            for (int i = starting_at + 1; i <= max; ++i)
                 m_forbidden[i] = false;
             DEBUG_CODE({
-                for (unsigned i = 0; i < m_forbidden.size(); i++) {
+                for (unsigned i = 0; i < m_forbidden.size(); ++i) {
                     SASSERT(!m_forbidden[i]);
                 }
             });
@@ -288,16 +288,16 @@ class diff_neq_tactic : public tactic {
             init_forbidden();
             unsigned nvars = num_vars();
             while (m_stack.size() < nvars) {
-                if (m.canceled())
+                if (!m.inc())
                     throw tactic_exception(m.limit().get_cancel_msg());
-                TRACE("diff_neq_tactic", display_model(tout););
+                TRACE(diff_neq_tactic, display_model(tout););
                 var x = m_stack.size();
                 if (extend_model(x))
                     continue;
                 if (!resolve_conflict())
                     return false;
             }
-            TRACE("diff_neq_tactic", display_model(tout););
+            TRACE(diff_neq_tactic, display_model(tout););
             return true;
         }
 
@@ -305,7 +305,7 @@ class diff_neq_tactic : public tactic {
             model * md = alloc(model, m);
             unsigned num = num_vars();
             SASSERT(m_stack.size() == num);
-            for (var x = 0; x < num; x++) {
+            for (var x = 0; x < num; ++x) {
                 func_decl * d = to_app(m_var2expr.get(x))->get_decl();
                 md->register_decl(d, u.mk_numeral(rational(m_stack[x]), true));
             }
@@ -314,7 +314,6 @@ class diff_neq_tactic : public tactic {
 
         void operator()(goal_ref const & g, 
                         goal_ref_buffer & result) {
-            SASSERT(g->is_well_sorted());
             m_produce_models = g->models_enabled();
             result.reset();
             tactic_report report("diff-neq", *g);
@@ -325,7 +324,7 @@ class diff_neq_tactic : public tactic {
                 return;
             }
             compile(*g);
-            TRACE("diff_neq_tactic", g->display(tout); display(tout););
+            TRACE(diff_neq_tactic, g->display(tout); display(tout););
             bool r = search();
             report_tactic_progress(":conflicts", m_num_conflicts);
             if (r) {
@@ -339,8 +338,6 @@ class diff_neq_tactic : public tactic {
             }
             g->inc_depth();
             result.push_back(g.get());
-            TRACE("diff_neq", g->display(tout););
-            SASSERT(g->is_well_sorted());
         }
     };
 
@@ -360,13 +357,15 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "diff_neq"; }
+
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {
-        r.insert("diff_neq_max_k", CPK_UINT, "(default: 1024) maximum variable upper bound for diff neq solver.");
+        r.insert("diff_neq_max_k", CPK_UINT, "maximum variable upper bound for diff neq solver.", "1024");
     }
 
     void collect_statistics(statistics & st) const override {

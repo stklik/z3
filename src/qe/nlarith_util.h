@@ -17,8 +17,7 @@ Author:
 Notes:
 
 --*/
-#ifndef NLARITH_UTIL_H_
-#define NLARITH_UTIL_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/lbool.h"
@@ -97,8 +96,6 @@ namespace nlarith {
         bool create_branches(app* x, unsigned nl, expr* const* lits, branch_conditions& bc);
         /**
            \brief Extract non-linear variables from ground formula.
-           
-           \requires a ground formula.
         */
         void extract_non_linear(expr* e, ptr_vector<app>& nl_vars);
 
@@ -119,7 +116,7 @@ namespace nlarith {
 
         class eval {
         public:
-            virtual ~eval() {}
+            virtual ~eval() = default;
             virtual lbool operator()(app* a) = 0;
         };
 
@@ -127,7 +124,7 @@ namespace nlarith {
         
         class branch {
         public:
-            virtual ~branch() {}
+            virtual ~branch() = default;
             virtual app* get_constraint() = 0;
             virtual void get_updates(ptr_vector<app>& atoms, svector<atom_update>& updates) = 0;
         };
@@ -146,6 +143,5 @@ namespace nlarith {
 
     };
 
-};
+}
 
-#endif

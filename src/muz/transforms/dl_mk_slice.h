@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_SLICE_H_
-#define DL_MK_SLICE_H_
+#pragma once
 
 #include "muz/base/dl_context.h"
 #include "muz/base/dl_rule_set.h"
@@ -35,10 +34,10 @@ namespace datalog {
         context&      m_ctx;
         ast_manager&  m;
         rule_manager& rm;
-        svector<bool>   m_input;
-        svector<bool>   m_output;
+        bool_vector   m_input;
+        bool_vector   m_output;
         expr_ref_vector m_solved_vars;
-        svector<bool>   m_var_is_sliceable;
+        bool_vector   m_var_is_sliceable;
         obj_map<func_decl, func_decl*>  m_predicates;        
         obj_map<func_decl, bit_vector> m_sliceable;
         ast_ref_vector  m_pinned;
@@ -100,8 +99,6 @@ namespace datalog {
          */
         mk_slice(context & ctx);
 
-        ~mk_slice() override { }
-        
         rule_set * operator()(rule_set const & source) override;
 
         func_decl* get_predicate(func_decl* p) { func_decl* q = p; m_predicates.find(p, q); return q; }
@@ -109,7 +106,6 @@ namespace datalog {
         obj_map<func_decl, func_decl*> const& get_predicates() { return m_predicates; }
     };
 
-};
+}
 
-#endif /* DL_MK_SLICE_H_ */
 

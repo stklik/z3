@@ -21,6 +21,9 @@ Revision History:
 #include "api/api_util.h"
 #include "ast/arith_decl_plugin.h"
 #include "math/polynomial/algebraic_numbers.h"
+#include "util/manage_warnings.h"
+
+#include <iostream>
 
 #define MK_ARITH_OP(NAME, OP) MK_NARY(NAME, mk_c(c)->get_arith_fid(), OP, SKIP)
 #define MK_BINARY_ARITH_OP(NAME, OP) MK_BINARY(NAME, mk_c(c)->get_arith_fid(), OP, SKIP)
@@ -46,6 +49,29 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
+    Z3_sort Z3_API Z3_mk_complex_sort(Z3_context c) {
+        Z3_TRY;
+        LOG_Z3_mk_complex_sort(c);
+        RESET_ERROR_CODE();
+        Z3_sort r = of_sort(mk_c(c)->m().mk_sort(mk_c(c)->get_arith_fid(), COMPLEX_SORT));
+        RETURN_Z3(r);
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    Z3_ast Z3_API Z3_mk_real_int64(Z3_context c, int64_t num, int64_t den) {
+        Z3_TRY;
+        LOG_Z3_mk_real_int64(c, num, den);
+        RESET_ERROR_CODE();
+        if (den == 0) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            RETURN_Z3(nullptr);
+        }
+        sort* s = mk_c(c)->m().mk_sort(mk_c(c)->get_arith_fid(), REAL_SORT);
+        ast* a = mk_c(c)->mk_numeral_core(rational(num, rational::i64())/rational(den, rational::i64()), s);
+        RETURN_Z3(of_ast(a));
+        Z3_CATCH_RETURN(nullptr);
+    }
+
     Z3_ast Z3_API Z3_mk_real(Z3_context c, int num, int den) {
         Z3_TRY;
         LOG_Z3_mk_real(c, num, den);
@@ -60,20 +86,26 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
+    START_DISABLE_EXTRA_SEMI_WARNING;
     MK_ARITH_OP(Z3_mk_add, OP_ADD);
     MK_ARITH_OP(Z3_mk_mul, OP_MUL);
+    MK_BINARY_ARITH_OP(Z3_mk_complex, OP_COMPLEX);
+    MK_UNARY(Z3_mk_real_part, mk_c(c)->get_arith_fid(), OP_REAL_PART, SKIP);
+    MK_UNARY(Z3_mk_imag_part, mk_c(c)->get_arith_fid(), OP_IMAG_PART, SKIP);
     MK_BINARY_ARITH_OP(Z3_mk_power, OP_POWER);
     MK_BINARY_ARITH_OP(Z3_mk_mod, OP_MOD);
     MK_BINARY_ARITH_OP(Z3_mk_rem, OP_REM);
+    END_DISABLE_WARNING;
 
     Z3_ast Z3_API Z3_mk_div(Z3_context c, Z3_ast n1, Z3_ast n2) {
         Z3_TRY;
         LOG_Z3_mk_div(c, n1, n2);
         RESET_ERROR_CODE();
         decl_kind k = OP_IDIV;
-        sort* ty = mk_c(c)->m().get_sort(to_expr(n1));
+        sort* ty = to_expr(n1)->get_sort();
         sort* real_ty = mk_c(c)->m().mk_sort(mk_c(c)->get_arith_fid(), REAL_SORT);
-        if (ty == real_ty) {
+        if (ty == real_ty || arith_util(mk_c(c)->m()).is_complex(ty) ||
+            arith_util(mk_c(c)->m()).is_complex(to_expr(n2))) {
             k = OP_DIV;
         }
         expr * args[2] = { to_expr(n1), to_expr(n2) };
@@ -84,13 +116,37 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
+    START_DISABLE_EXTRA_SEMI_WARNING;
     MK_ARITH_PRED(Z3_mk_lt,  OP_LT);
     MK_ARITH_PRED(Z3_mk_gt,  OP_GT);
     MK_ARITH_PRED(Z3_mk_le,  OP_LE);
     MK_ARITH_PRED(Z3_mk_ge,  OP_GE);
+    END_DISABLE_WARNING;
+
+    Z3_ast Z3_API Z3_mk_divides(Z3_context c, Z3_ast n1, Z3_ast n2) {
+        Z3_TRY;
+        LOG_Z3_mk_divides(c, n1, n2);
+        RESET_ERROR_CODE();
+        rational val;
+        if (!is_expr(n1) || !mk_c(c)->autil().is_numeral(to_expr(n1), val) || !val.is_unsigned()) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            RETURN_Z3(nullptr);
+        }
+        parameter p(val.get_unsigned());
+        expr* arg = to_expr(n2);
+        expr* a = mk_c(c)->m().mk_app(mk_c(c)->get_arith_fid(), OP_IDIVIDES, 1, &p, 1, &arg);
+        mk_c(c)->save_ast_trail(a);
+        check_sorts(c, a);
+        RETURN_Z3(of_ast(a));
+        Z3_CATCH_RETURN(nullptr);
+    }
+
+    START_DISABLE_EXTRA_SEMI_WARNING;
+    MK_UNARY(Z3_mk_abs, mk_c(c)->get_arith_fid(), OP_ABS, SKIP);
     MK_UNARY(Z3_mk_int2real, mk_c(c)->get_arith_fid(), OP_TO_REAL, SKIP);
     MK_UNARY(Z3_mk_real2int, mk_c(c)->get_arith_fid(), OP_TO_INT, SKIP);
     MK_UNARY(Z3_mk_is_int,   mk_c(c)->get_arith_fid(), OP_IS_INT, SKIP);
+    END_DISABLE_WARNING;
 
     Z3_ast Z3_API Z3_mk_sub(Z3_context c, unsigned num_args, Z3_ast const args[]) {
         Z3_TRY;
@@ -119,9 +175,16 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
-    Z3_bool Z3_API Z3_is_algebraic_number(Z3_context c, Z3_ast a) {
+    bool Z3_API Z3_is_algebraic_number(Z3_context c, Z3_ast a) {
+        Z3_TRY;
         LOG_Z3_is_algebraic_number(c, a);
-        return mk_c(c)->autil().is_irrational_algebraic_numeral(to_expr(a)) ? Z3_TRUE : Z3_FALSE;
+        RESET_ERROR_CODE();
+        if (!is_expr(a)) {
+            SET_ERROR_CODE(Z3_INVALID_ARG, nullptr);
+            return false;
+        }
+        return mk_c(c)->autil().is_irrational_algebraic_numeral(to_expr(a));
+        Z3_CATCH_RETURN(false);
     }
 
     Z3_ast Z3_API Z3_get_algebraic_number_lower(Z3_context c, Z3_ast a, unsigned precision) {
@@ -192,4 +255,4 @@ extern "C" {
         Z3_CATCH_RETURN(nullptr);
     }
 
-};
+}

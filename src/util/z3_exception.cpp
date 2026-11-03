@@ -16,7 +16,6 @@ Author:
 Notes:
 
 --*/
-#include<sstream>
 #include<stdarg.h>
 #include<sstream>
 #include "util/z3_exception.h"
@@ -36,7 +35,7 @@ z3_error::z3_error(unsigned error_code):m_error_code(error_code) {
     SASSERT(error_code != 0); 
 }
 
-char const * z3_error::msg() const {
+char const * z3_error::what() const noexcept {
     switch (m_error_code) {
     case ERR_MEMOUT: return "out of memory";
     case ERR_TIMEOUT: return "timeout";
@@ -50,6 +49,7 @@ char const * z3_error::msg() const {
     case ERR_INTERNAL_FATAL: return "internal error";
     case ERR_TYPE_CHECK: return "type error";
     case ERR_ALLOC_EXCEEDED: return "number of configured allocations exceeded";
+    case ERR_UNREACHABLE: return "unreachable code was reached";
     default: return "unknown error";
     }
 }
@@ -67,6 +67,6 @@ default_exception::default_exception(fmt, char const* msg, ...) {
     m_msg = out.str();
 }
 
-char const * default_exception::msg() const { 
+char const * default_exception::what() const noexcept { 
     return m_msg.c_str(); 
 }

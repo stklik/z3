@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef PARRAY_H_
-#define PARRAY_H_
+#pragma once
 
 #include "util/vector.h"
 #include "util/trace.h"
@@ -39,7 +38,7 @@ private:
         ++mem;
         value * r = reinterpret_cast<value*>(mem);
         SASSERT(capacity(r) == c);
-        TRACE("parray_mem", tout << "allocated values[" << c << "]: " << r << "\n";);
+        TRACE(parray_mem, tout << "allocated values[" << c << "]: " << r << "\n";);
         return r;
     }
 
@@ -47,7 +46,7 @@ private:
         if (vs == nullptr)
             return;
         size_t c     = capacity(vs);
-        TRACE("parray_mem", tout << "deallocated values[" << c << "]: " << vs << "\n";);
+        TRACE(parray_mem, tout << "deallocated values[" << c << "]: " << vs << "\n";);
         size_t * mem = reinterpret_cast<size_t*>(vs);
         --mem;
         m_allocator.deallocate(sizeof(value)*c + sizeof(size_t), mem);
@@ -67,13 +66,13 @@ private:
             value * m_values;
         };
 
-        ckind kind() const { return static_cast<ckind>(m_kind); }
+        enum ckind kind() const { return static_cast<enum ckind>(m_kind); }
 
         unsigned idx() const { SASSERT(kind() != ROOT); return m_idx; }
         unsigned size() const { SASSERT(kind() == ROOT); return m_size; }
         cell * next() const { SASSERT(kind() != ROOT); return m_next; }
         value const & elem() const { SASSERT(kind() == SET || kind() == PUSH_BACK); return m_elem; }
-        cell(ckind k):m_ref_count(1), m_kind(k), m_size(0), m_values(nullptr) {}
+        cell(enum ckind k):m_ref_count(1), m_kind(k), m_size(0), m_elem(), m_values(nullptr) {}
     };
 
     value_manager &  m_vmanager;
@@ -92,14 +91,14 @@ private:
     }
 
     void dec_ref(unsigned sz, value * vs) {
-        if (C::ref_count) 
-            for (unsigned i = 0; i < sz; i++)
+        if (C::ref_count)
+            for (unsigned i = 0; i < sz; ++i)
                 m_vmanager.dec_ref(vs[i]);
     }
 
     cell * mk(ckind k) {
         cell * r = new (m_allocator.allocate(sizeof(cell))) cell(k);
-        TRACE("parray_mem", tout << "allocated cell: " << r << "\n";);
+        TRACE(parray_mem, tout << "allocated cell: " << r << "\n";);
         return r;
     }
 
@@ -120,7 +119,7 @@ private:
                 deallocate_values(c->m_values);
                 break;
             }
-            TRACE("parray_mem", tout << "deallocated cell: " << c << "\n";);
+            TRACE(parray_mem, tout << "deallocated cell: " << c << "\n";);
             c->~cell();
             m_allocator.deallocate(sizeof(cell), c);
             if (next == nullptr)
@@ -140,7 +139,7 @@ private:
 
     void dec_ref(cell * c) {
         if (!c) return;
-        TRACE("parray_mem", tout << "dec_ref(" << c << "), ref_count: " << c->m_ref_count << "\n";);
+        TRACE(parray_mem, tout << "dec_ref(" << c << "), ref_count: " << c->m_ref_count << "\n";);
         SASSERT(c->m_ref_count > 0);
         c->m_ref_count--;
         if (c->m_ref_count == 0)
@@ -152,7 +151,7 @@ private:
         size_t new_capacity  = curr_capacity == 0 ? 2 : (3 * curr_capacity + 1) >> 1;
         value * new_vs       = allocate_values(new_capacity);
         if (curr_capacity > 0) {
-            for (size_t i = 0; i < curr_capacity; i++) 
+            for (size_t i = 0; i < curr_capacity; ++i)
                 new_vs[i] = vs[i];
             deallocate_values(vs);
         }
@@ -178,7 +177,7 @@ private:
         inc_ref(v);
         vs[sz] = v;
         sz++;
-    }     
+    }
 
     void rpush_back(cell * c, value const & v) {
         SASSERT(c->kind() == ROOT);
@@ -198,7 +197,7 @@ private:
     void copy_values(value * s, unsigned sz, value * & t) {
         SASSERT(t == 0);
         t = allocate_values(capacity(s));
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             t[i] = s[i];
             inc_ref(t[i]);
         }
@@ -216,9 +215,7 @@ private:
         unsigned sz = r->m_size;
         vs = nullptr;
         copy_values(r->m_values, sz, vs);
-        unsigned i = cs.size();
-        while (i > 0) {
-            --i;
+        for (unsigned i = cs.size(); i-- > 0; ) {
             cell * curr = cs[i];
             switch (curr->kind()) {
             case SET:
@@ -272,7 +269,7 @@ public:
     }
 
     value_manager & manager() { return m_vmanager; }
-    
+
     void mk(ref & r) {
         dec_ref(r.m_ref);
         cell * new_c = mk(ROOT);
@@ -286,12 +283,12 @@ public:
         r.m_ref          = nullptr;
         r.m_updt_counter = 0;
     }
-    
+
     void copy(ref const & s, ref & t) {
         inc_ref(s.m_ref);
         dec_ref(t.m_ref);
         t.m_ref = s.m_ref;
-        t.m_updt_counter = 0; 
+        t.m_updt_counter = 0;
     }
 
     unsigned size(ref const & r) const {
@@ -312,11 +309,29 @@ public:
         }
     }
 
+    void check_size(cell* c) const {
+        while (c) {
+            switch (c->kind()) {
+            case SET:
+                break;
+            case PUSH_BACK:
+                // ? SASSERT(c->idx() == size(c->next()));
+                break;
+            case POP_BACK:
+                SASSERT(c->idx() == size(c->next()));
+                break;
+            case ROOT:
+                return;
+            }
+            c = c->next();
+        }
+    }
+
     bool empty(ref const & r) const { return size(r) == 0; }
 
     value const & get(ref const & r, unsigned i) const {
         SASSERT(i < size(r));
-        
+
         unsigned trail_sz = 0;
         cell * c = r.m_ref;
 
@@ -399,6 +414,7 @@ public:
     void push_back(ref & r, value const & v) {
         if (r.m_ref == nullptr)
             mk(r);
+        SASSERT(r.m_ref);
         if (r.root()) {
             if (r.unshared()) {
                 rpush_back(r.m_ref, v);
@@ -434,7 +450,7 @@ public:
         inc_ref(v);
         new_c->m_elem      = v;
         new_c->m_next      = r.m_ref;
-        r.m_ref            = new_c; 
+        r.m_ref            = new_c;
         SASSERT(new_c->m_ref_count == 1);
     }
 
@@ -519,7 +535,7 @@ public:
         r.m_updt_counter = 0;
         SASSERT(r.root());
     }
-    
+
     void reroot(ref & r) {
         if (r.root())
             return;
@@ -538,10 +554,9 @@ public:
             // root is too far away.
             unfold(c);
         }
+        DEBUG_CODE(check_size(c););
         SASSERT(c->kind() == ROOT);
-        i = cs.size();
-        while (i > 0) {
-            --i;
+        for (i = cs.size(); i-- > 0; ) {
             cell * p = cs[i];
             SASSERT(c->m_kind == ROOT);
             unsigned sz = c->m_size;
@@ -559,9 +574,9 @@ public:
                 c->m_kind = POP_BACK;
                 if (sz == capacity(vs))
                     expand(vs);
-                c->m_idx  = sz;
-                vs[sz]    = p->m_elem;
-                sz++;
+                vs[sz] = p->m_elem;
+                ++sz;
+                c->m_idx = sz;
                 break;
             case POP_BACK:
                 c->m_kind = PUSH_BACK;
@@ -575,11 +590,12 @@ public:
             }
             inc_ref(p);
             c->m_next   = p;
-            // p does not point to c anymore
-            dec_ref(c);
+
             p->m_kind   = ROOT;
             p->m_size   = sz;
             p->m_values = vs;
+            // p does not point to c anymore
+            dec_ref(c);
             c = p;
         }
         SASSERT(c == r.m_ref);
@@ -604,9 +620,11 @@ public:
             case ROOT: out << "root, " << c->m_size << ", " << capacity(c->m_values); break;
             }
             out << "]#" << c->m_ref_count;
-            if (c->kind() == ROOT)
+            if (c->kind() == ROOT) {
+                out << "\n";
                 break;
-            out << " -> ";
+            }
+            out << " -> \n";
             c = c->next();
         }
     }
@@ -618,4 +636,3 @@ struct dummy_value_manager {
     void dec_ref(T const &) {}
 };
 
-#endif

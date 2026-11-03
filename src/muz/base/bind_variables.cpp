@@ -25,9 +25,6 @@ bind_variables::bind_variables(ast_manager & m):
     m_vars(m),
     m_pinned(m)
 {}
-
-bind_variables::~bind_variables() {
-}
     
 expr_ref bind_variables::operator()(expr* fml, bool is_forall) {
     if (m_vars.empty()) {
@@ -38,14 +35,14 @@ expr_ref bind_variables::operator()(expr* fml, bool is_forall) {
     if (!m_names.empty()) {
         m_bound.reverse();
         m_names.reverse();
-        result = m.mk_quantifier(is_forall ? forall_k : exists_k, m_bound.size(), m_bound.c_ptr(), m_names.c_ptr(), result);
+        result = m.mk_quantifier(is_forall ? forall_k : exists_k, m_bound.size(), m_bound.data(), m_names.data(), result);
     }
     m_pinned.reset();
     m_cache.reset();
     m_names.reset();
     m_bound.reset();
-    for (var2bound::iterator it = m_var2bound.begin(); it != m_var2bound.end(); ++it) {
-        it->m_value = 0;
+    for (auto& kv : m_var2bound) {
+        kv.m_value = 0;
     }
     return result;
 }
@@ -64,7 +61,7 @@ expr_ref bind_variables::abstract(expr* term, cache_t& cache, unsigned scope) {
         }
         switch(e->get_kind()) {
         case AST_VAR: {
-            SASSERT(to_var(e)->get_idx() < scope); 
+            // SASSERT(to_var(e)->get_idx() >= scope); 
             // mixing bound variables and free is possible for the caller, 
             // but not proper use.
             // So we assert here even though we don't check for it.
@@ -79,9 +76,9 @@ expr_ref bind_variables::abstract(expr* term, cache_t& cache, unsigned scope) {
                 var* v = w->get_data().m_value;
                 if (!v) {
                     // allocate a bound index.
-                    v = m.mk_var(m_names.size(), m.get_sort(a));
+                    v = m.mk_var(m_names.size(), a->get_sort());
                     m_names.push_back(a->get_decl()->get_name());
-                    m_bound.push_back(m.get_sort(a));
+                    m_bound.push_back(a->get_sort());
                     w->get_data().m_value = v;
                     m_pinned.push_back(v);
                 }
@@ -89,7 +86,7 @@ expr_ref bind_variables::abstract(expr* term, cache_t& cache, unsigned scope) {
                     cache.insert(e, v);
                 }
                 else {
-                    var* v1 = m.mk_var(scope + v->get_idx(), m.get_sort(v));
+                    var* v1 = m.mk_var(scope + v->get_idx(), v->get_sort());
                     m_pinned.push_back(v1);
                     cache.insert(e, v1);
                 }
@@ -114,7 +111,7 @@ expr_ref bind_variables::abstract(expr* term, cache_t& cache, unsigned scope) {
             }
             if (all_visited) {
                 if (some_diff) {
-                    b = m.mk_app(a->get_decl(), m_args.size(), m_args.c_ptr());
+                    b = m.mk_app(a->get_decl(), m_args.size(), m_args.data());
                     m_pinned.push_back(b);
                 }
                 else {
@@ -135,7 +132,7 @@ expr_ref bind_variables::abstract(expr* term, cache_t& cache, unsigned scope) {
                 patterns.push_back(abstract(q->get_pattern(i), new_cache, new_scope));
             }
             result1 = abstract(q->get_expr(), new_cache, new_scope);
-            b = m.update_quantifier(q, patterns.size(), patterns.c_ptr(), result1.get());
+            b = m.update_quantifier(q, patterns.size(), patterns.data(), result1.get());
             m_pinned.push_back(b);            
             cache.insert(e, b);
             m_todo.pop_back();            

@@ -17,11 +17,10 @@ Revision History:
 
 --*/
 
-#ifndef ELIM_BOUNDS_H_
-#define ELIM_BOUNDS_H_
 
 #include "ast/used_vars.h"
 #include "util/obj_hashtable.h"
+#include "ast/rewriter/rewriter_def.h"
 #include "ast/rewriter/var_subst.h"
 #include "ast/rewriter/elim_bounds.h"
 #include "ast/ast_pp.h"
@@ -152,14 +151,14 @@ bool elim_bounds_cfg::reduce_quantifier(quantifier * q,
             }
         }
     }
-    TRACE("elim_bounds", tout << "candidates:\n"; for (unsigned i = 0; i < candidates.size(); i++) tout << mk_pp(candidates[i], m) << "\n";);
+    TRACE(elim_bounds, tout << "candidates:\n"; for (unsigned i = 0; i < candidates.size(); ++i) tout << mk_pp(candidates[i], m) << "\n";);
     // remove candidates that have lower and upper bounds
 
     for (var * v : candidates) {
         if (lowers.contains(v) && uppers.contains(v))
             candidate_set.erase(v);
     }
-    TRACE("elim_bounds", tout << "candidates after filter:\n"; for (unsigned i = 0; i < candidates.size(); i++) tout << mk_pp(candidates[i], m) << "\n";);
+    TRACE(elim_bounds, tout << "candidates after filter:\n"; for (unsigned i = 0; i < candidates.size(); ++i) tout << mk_pp(candidates[i], m) << "\n";);
     if (candidate_set.empty()) {
         return false;
     }
@@ -183,21 +182,20 @@ bool elim_bounds_cfg::reduce_quantifier(quantifier * q,
     case 0:
         result = m.mk_false();
         result_pr = m.mk_rewrite(q, result);
-        TRACE("elim_bounds", tout << mk_pp(q, m) << "\n" << result << "\n";);
+        TRACE(elim_bounds, tout << mk_pp(q, m) << "\n" << result << "\n";);
         return true;
     case 1:
         new_body = atoms[0];
         break;
     default:
-        new_body = m.mk_or(atoms.size(), atoms.c_ptr());
+        new_body = m.mk_or(atoms);
         break;
     }
     quantifier_ref new_q(m);
     new_q = m.update_quantifier(q, new_body);
     result = elim_unused_vars(m, new_q, params_ref());
     result_pr = m.mk_rewrite(q, result);
-    TRACE("elim_bounds", tout << mk_pp(q, m) << "\n" << result << "\n";);
+    TRACE(elim_bounds, tout << mk_pp(q, m) << "\n" << result << "\n";);
     return true;
 }
 
-#endif /* ELIM_BOUNDS_H_ */

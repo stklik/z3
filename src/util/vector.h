@@ -17,20 +17,24 @@ Abstract:
 Author:
 
     Leonardo de Moura (leonardo) 2006-09-11.
+    Daniel Schemmel 2019-2-23
 
 Revision History:
 
+
 --*/
-#ifndef VECTOR_H_
-#define VECTOR_H_
+#pragma once
 
 #include "util/debug.h"
-#include<algorithm>
-#include<type_traits>
-#include<memory.h>
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <type_traits>
+#include <utility>
 #include "util/memory_manager.h"
 #include "util/hash.h"
 #include "util/z3_exception.h"
+#include <vector>
 
 // disable warning for constant 'if' expressions.
 // these are used heavily in templates.
@@ -38,18 +42,20 @@ Revision History:
 #pragma warning(disable:4127)
 #endif
 
+template <typename T>
+using std_vector = std::vector<T, std_allocator<T>>;
+
+template <typename T>
+inline unsigned usize(std_vector<T> const& v) { return static_cast<unsigned>(v.size()); }
+
 template<typename T, bool CallDestructors=true, typename SZ = unsigned>
 class vector {
 #define SIZE_IDX     -1
 #define CAPACITY_IDX -2
-    T * m_data;
+    T * m_data = nullptr;
 
     void destroy_elements() {
-        iterator it = begin();
-        iterator e  = end();
-        for (; it != e; ++it) {
-            it->~T();
-        }
+        std::destroy_n(m_data, size());
     }
 
     void free_memory() { 
@@ -57,16 +63,21 @@ class vector {
     }
 
     void expand_vector() {
+        // ensure that the data is sufficiently aligned
+        // better fail to compile than produce code that may crash
+        static_assert((sizeof(SZ) * 2) % alignof(T) == 0);
+
         if (m_data == nullptr) {
             SZ capacity = 2;
             SZ * mem    = reinterpret_cast<SZ*>(memory::allocate(sizeof(T) * capacity + sizeof(SZ) * 2));
-            *mem              = capacity; 
+            *mem        = capacity;
             mem++;
-            *mem              = 0;        
+            *mem        = 0;
             mem++;
-            m_data            = reinterpret_cast<T *>(mem);
+            m_data      = reinterpret_cast<T *>(mem);
         }
         else {
+            static_assert(std::is_nothrow_move_constructible<T>::value);
             SASSERT(capacity() > 0);
             SZ old_capacity = reinterpret_cast<SZ *>(m_data)[CAPACITY_IDX];
             SZ old_capacity_T = sizeof(T) * old_capacity + sizeof(SZ) * 2;
@@ -76,24 +87,17 @@ class vector {
                 throw default_exception("Overflow encountered when expanding vector");
             }
             SZ *mem, *old_mem = reinterpret_cast<SZ*>(m_data) - 2;
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 5
-            if (__has_trivial_copy(T)) {
-#else
             if (std::is_trivially_copyable<T>::value) {
-#endif
                 mem = (SZ*)memory::reallocate(old_mem, new_capacity_T);
                 m_data = reinterpret_cast<T *>(mem + 2);
             } else {
                 mem = (SZ*)memory::allocate(new_capacity_T);
-                auto old_data = m_data;
                 auto old_size = size();
                 mem[1] = old_size;
-                m_data  = reinterpret_cast<T *>(mem + 2);
-                for (unsigned i = 0; i < old_size; ++i) {
-                    new (&m_data[i]) T(std::move(old_data[i]));
-                    old_data[i].~T();
-                }
-                memory::deallocate(old_mem);
+                auto new_data = reinterpret_cast<T *>(mem + 2);
+                std::uninitialized_move_n(m_data, old_size, new_data);
+                destroy();
+                m_data = new_data;
             }
             *mem = new_capacity;
         }
@@ -107,14 +111,8 @@ class vector {
         mem++;
         *mem = size; 
         mem++;
-        m_data             = reinterpret_cast<T *>(mem);
-        const_iterator it  = source.begin();
-        iterator it2       = begin();
-        SASSERT(it2 == m_data);
-        const_iterator e   = source.end();
-        for (; it != e; ++it, ++it2) {
-            new (it2) T(*it); 
-        }
+        m_data = reinterpret_cast<T *>(mem);
+        std::uninitialized_copy(source.begin(), source.end(), begin());
     }
 
     void destroy() {
@@ -127,17 +125,19 @@ class vector {
     }
 
 public:
-    typedef T data;
+    typedef T data_t;
     typedef T * iterator;
     typedef const T * const_iterator;
 
-    vector():
-        m_data(nullptr) {
-    }
+    vector() = default;
 
     vector(SZ s) {
+        init(s);
+    }
+
+    void init(SZ s) {
+        SASSERT(m_data == nullptr);
         if (s == 0) {
-            m_data = nullptr;
             return;
         }
         SZ * mem = reinterpret_cast<SZ*>(memory::allocate(sizeof(T) * s + sizeof(SZ) * 2));
@@ -154,30 +154,31 @@ public:
         }
     }
 
-    vector(SZ s, T const & elem):
-        m_data(nullptr) {
+    vector(SZ s, T const & elem) {
         resize(s, elem);
     }
 
-    vector(vector const & source):
-        m_data(nullptr) {
+    vector(vector const & source) {
         if (source.m_data) {
             copy_core(source);
         }
         SASSERT(size() == source.size());
     }
 
-    vector(vector&& other) : m_data(nullptr) {
-        std::swap(m_data, other.m_data);
+    vector(vector&& other) noexcept : m_data(other.m_data) {
+        other.m_data = nullptr;
     }
 
-    vector(SZ s, T const * data):
-        m_data(nullptr) {
-        for (SZ i = 0; i < s; i++) {
+    vector(SZ s, T const * data) {
+        for (SZ i = 0; i < s; ++i) {
             push_back(data[i]);
         }
     }
 
+    vector(std::initializer_list<T> const& l) {
+        for (auto const& t : l) 
+            push_back(t);        
+    }
  
     ~vector() { 
         destroy();
@@ -194,7 +195,7 @@ public:
         }
         if (size() != other.size())
             return false;
-        for (unsigned i = 0; i < size(); i++) {
+        for (unsigned i = 0; i < size(); ++i) {
             if ((*this)[i] != other[i])
                 return false;
         }
@@ -204,7 +205,6 @@ public:
     bool operator!=(vector const & other) const {
         return !(*this == other);
     }
-
     
     vector & operator=(vector const & source) {
         if (this == &source) {
@@ -220,13 +220,58 @@ public:
         return *this;
     }
 
-    vector & operator=(vector && source) {
+    vector & operator=(vector && source) noexcept {
         if (this == &source) {
             return *this;
         }
         destroy();
-        m_data = nullptr;
-        std::swap(m_data, source.m_data);
+        m_data = source.m_data;
+        source.m_data = nullptr;
+        return *this;
+    }
+
+    bool containsp(std::function<bool(T)>& predicate) const {
+        for (auto const& t : *this)
+            if (predicate(t)) 
+                return true;
+        return false;
+    }
+
+    /**
+     * retain elements that satisfy predicate. aka 'where'.
+     */
+    vector filter_pure(std::function<bool(T)>& predicate) const {
+        vector result;
+        for (auto& t : *this)
+            if (predicate(t)) 
+                result.push_back(t);
+        return result;
+    }
+
+    vector& filter_update(std::function<bool(T)>& predicate) {
+        unsigned j = 0;
+        for (auto& t : *this)
+            if (predicate(t)) 
+                set(j++, t);
+        shrink(j);
+        return *this;
+    }
+
+    /**
+     * update elements using f, aka 'select'
+     */
+    template <typename S>
+    vector<S> map_pure(std::function<S(T)>& f) const {
+        vector<S> result;
+        for (auto& t : *this)
+            result.push_back(f(t));
+        return result;
+    }
+
+    vector& map_update(std::function<T(T)>& f) {
+        unsigned j = 0;
+        for (auto& t : *this)
+            set(j++, f(t));
         return *this;
     }
 
@@ -291,9 +336,6 @@ public:
             return *this;
         }
 
-        bool operator==(reverse_iterator const& other) const {
-            return other.v == v;
-        }
         bool operator!=(reverse_iterator const& other) const {
             return other.v != v;
         }
@@ -363,23 +405,39 @@ public:
         if (CallDestructors) {
             back().~T(); 
         }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
         reinterpret_cast<SZ *>(m_data)[SIZE_IDX]--; 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
     }
 
-    void push_back(T const & elem) {
+    vector& push_back(T const & elem) {
         if (m_data == nullptr || reinterpret_cast<SZ *>(m_data)[SIZE_IDX] == reinterpret_cast<SZ *>(m_data)[CAPACITY_IDX]) {
             expand_vector();
         }
         new (m_data + reinterpret_cast<SZ *>(m_data)[SIZE_IDX]) T(elem); 
         reinterpret_cast<SZ *>(m_data)[SIZE_IDX]++;
+        return *this;
     }
 
-    void push_back(T && elem) {
+    template <typename ...Args> 
+    vector& push_back(T const& elem, T elem2, Args ... elems) {
+        push_back(elem);
+        push_back(elem2, elems ...);
+        return *this;
+    }
+
+    vector& push_back(T && elem) {
         if (m_data == nullptr || reinterpret_cast<SZ *>(m_data)[SIZE_IDX] == reinterpret_cast<SZ *>(m_data)[CAPACITY_IDX]) {
             expand_vector();
         }
         new (m_data + reinterpret_cast<SZ *>(m_data)[SIZE_IDX]) T(std::move(elem));
         reinterpret_cast<SZ *>(m_data)[SIZE_IDX]++;
+        return *this;
     }
 
     void insert(T const & elem) {
@@ -392,9 +450,9 @@ public:
         ++pos;
         iterator e    = end();
         for(; pos != e; ++pos, ++prev) {
-            *prev = *pos;
+            *prev = std::move(*pos);
         }
-        reinterpret_cast<SZ *>(m_data)[SIZE_IDX]--;
+        pop_back();
     }
 
     void erase(T const & elem) {
@@ -402,6 +460,20 @@ public:
         if (it != end()) {
             erase(it);
         }
+    }
+
+    /** Erase all elements that satisfy the given predicate. Returns the number of erased elements. */
+    template <typename UnaryPredicate>
+    SZ erase_if(UnaryPredicate should_erase) {
+        iterator i = begin();
+        iterator const e = end();
+        for (iterator j = begin(); j != e; ++j)
+            if (!should_erase(std::as_const(*j)))
+                *(i++) = std::move(*j);
+        SZ const count = e - i;
+        SASSERT_EQ(i - begin(), size() - count);
+        shrink(size() - count);
+        return count;
     }
 
     void shrink(SZ s) {
@@ -422,7 +494,7 @@ public:
     }
 
     template<typename Args>
-    void resize(SZ s, Args args...) {
+    void resize(SZ s, Args const& args) {
         SZ sz = size();
         if (s <= sz) { shrink(s); return; }
         while (s > capacity()) {
@@ -433,7 +505,7 @@ public:
         iterator it  = m_data + sz;
         iterator end = m_data + s;
         for (; it != end; ++it) {
-            new (it) T(std::forward<Args>(args));
+            new (it) T(args);
         }
     }
 
@@ -464,11 +536,23 @@ public:
         }
     }
 
-    T * c_ptr() const {
+    void init(vector<T, CallDestructors> const& other) {
+        if (this == &other)
+            return;
+        reset();
+        append(other);
+    }
+
+    void init(SZ sz, T const* data) {
+        reset();
+        append(sz, data);
+    }
+
+    T * data() const {
         return m_data;
     }
 
-    void swap(vector & other) {
+    void swap(vector & other) noexcept {
         std::swap(m_data, other.m_data);
     }
 
@@ -528,48 +612,72 @@ public:
         if (s > size())
             resize(s);
     }
+
+    struct scoped_stack {
+        vector& s;
+        unsigned sz;
+        scoped_stack(vector& s):s(s), sz(s.size()) {}
+        ~scoped_stack() { s.shrink(sz); }
+    };
+
 };
+
 
 template<typename T>
 class ptr_vector : public vector<T *, false> {
 public:
-    ptr_vector():vector<T *, false>() {}
+    ptr_vector() = default;
     ptr_vector(unsigned s):vector<T *, false>(s) {}
     ptr_vector(unsigned s, T * elem):vector<T *, false>(s, elem) {}
-    ptr_vector(ptr_vector const & source):vector<T *, false>(source) {}
-    ptr_vector(ptr_vector && other) : vector<T*, false>(std::move(other)) {}
     ptr_vector(unsigned s, T * const * data):vector<T *, false>(s, const_cast<T**>(data)) {}
-    ptr_vector & operator=(ptr_vector const & source) {
-        vector<T *, false>::operator=(source);
-        return *this;
+    std::ostream& display(std::ostream& out, char const* delim = " ") const {
+        char const* d = "";
+        for (auto const* u : *this) {
+            if (u)
+                out << d << *u;
+            else
+                out << d << "<NULL>";
+            d = delim;
+        }
+        return out;
     }
 };
 
 template<typename T, typename SZ = unsigned>
 class svector : public vector<T, false, SZ> {
 public:
-    svector():vector<T, false, SZ>() {}
+    svector() = default;
     svector(SZ s):vector<T, false, SZ>(s) {}
     svector(SZ s, T const & elem):vector<T, false, SZ>(s, elem) {}
-    svector(svector const & source):vector<T, false, SZ>(source) {}
-    svector(svector && other) : vector<T, false, SZ>(std::move(other)) {}
     svector(SZ s, T const * data):vector<T, false, SZ>(s, data) {}
-    svector & operator=(svector const & source) {
-        vector<T, false, SZ>::operator=(source);
-        return *this;
-    }
+    svector(const svector&) = default;
+    svector(svector&&) noexcept = default;
+
+    svector & operator=(const svector &) = default;
+    svector & operator=(svector &&) noexcept = default;
 };
 
-typedef svector<int> int_vector;
-typedef svector<unsigned> unsigned_vector;
-typedef svector<char> char_vector;
-typedef svector<signed char> signed_char_vector;
-typedef svector<double> double_vector;
 
-inline std::ostream& operator<<(std::ostream& out, unsigned_vector const& v) {
-    for (unsigned u : v) out << u << " ";
+
+using int_vector         = svector<int>;
+using unsigned_vector    = svector<unsigned>;
+using char_vector        = svector<char>;
+using signed_char_vector = svector<signed char>;
+using double_vector      = svector<double>;
+using bool_vector        = svector<bool>;
+
+template<typename T>
+inline std::ostream& operator<<(std::ostream& out, svector<T> const& v) {
+    for (auto const& x : v)
+        out << x << " ";
     return out;
 }
+
+template<typename T>
+inline std::ostream& operator<<(std::ostream& out, ptr_vector<T> const& v) {
+    return v.display(out);
+}
+
 
 template<typename Hash, typename Vec>
 struct vector_hash_tpl {
@@ -589,9 +697,18 @@ struct vector_hash_tpl {
 };
 
 template<typename Hash>
-struct vector_hash : public vector_hash_tpl<Hash, vector<typename Hash::data> > {};
+struct vector_hash : public vector_hash_tpl<Hash, vector<typename Hash::data_t> > {};
 
 template<typename Hash>
-struct svector_hash : public vector_hash_tpl<Hash, svector<typename Hash::data> > {};
+struct svector_hash : public vector_hash_tpl<Hash, svector<typename Hash::data_t> > {};
 
-#endif /* VECTOR_H_ */
+
+template<typename T>
+inline std::ostream& operator<<(std::ostream& out, vector<T> const& v) {
+    bool first = true;
+    for (auto const& t : v) {
+        if (first) first = false; else out << " ";
+        out << t;
+    }
+    return out;
+ }

@@ -28,8 +28,6 @@ public:
         , model_constructor(lmc)
     { }
 
-    ~lackr_model_converter_lazy() override { }
-
     void operator()(model_ref & md) override {
         SASSERT(md.get() == 0 || (!md->get_num_constants() && !md->get_num_functions()));
         SASSERT(model_constructor.get());
@@ -44,6 +42,7 @@ public:
 
     model_converter * translate(ast_translation & translator) override {
         NOT_IMPLEMENTED_YET();
+        return nullptr;
     }
 
     void display(std::ostream & out) override {

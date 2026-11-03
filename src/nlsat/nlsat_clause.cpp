@@ -25,25 +25,28 @@ namespace nlsat {
         m_size(sz),
         m_capacity(sz),
         m_learned(learned),
-        m_activity(0),
+        m_active(false),
+        m_removed(false),
+        m_marked(false),
+        m_var_hash(0),
         m_assumptions(as) {
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             m_lits[i] = lits[i];
         }
     }
 
     bool clause::contains(literal l) const {
-        for (unsigned i = 0; i < m_size; i++)
+        for (unsigned i = 0; i < m_size; ++i)
             if (m_lits[i] == l)
                 return true;
         return false;
     }
 
     bool clause::contains(bool_var v) const {
-        for (unsigned i = 0; i < m_size; i++)
+        for (unsigned i = 0; i < m_size; ++i)
             if (m_lits[i].var() == v)
                 return true;
         return false;
     }
 
-};
+}

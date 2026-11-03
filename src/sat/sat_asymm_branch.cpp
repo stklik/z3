@@ -32,6 +32,7 @@ namespace sat {
         updt_params(p);
         reset_statistics();
         m_calls = 0;
+        m_touch_index = 0;
     }
 
     struct clause_size_lt {
@@ -44,26 +45,35 @@ namespace sat {
         unsigned       m_elim_literals;
         unsigned       m_elim_learned_literals;
         unsigned       m_tr;
+        unsigned       m_units;
         report(asymm_branch & a):
             m_asymm_branch(a),
             m_elim_literals(a.m_elim_literals),
-            m_elim_learned_literals(a.m_elim_learned_literals),
-            m_tr(a.m_tr) {
+            m_elim_learned_literals(a.m_elim_learned_literals),            
+            m_tr(a.m_tr),
+            m_units(a.s.init_trail_size()) {
             m_watch.start();
         }
         
         ~report() {
             m_watch.stop();
-            IF_VERBOSE(SAT_VB_LVL, 
+            IF_VERBOSE(2,
                        unsigned num_learned = (m_asymm_branch.m_elim_learned_literals - m_elim_learned_literals);
                        unsigned num_total = (m_asymm_branch.m_elim_literals - m_elim_literals);
-                       verbose_stream() 
-                       << " (sat-asymm-branch :elim-literals " << (num_total - num_learned) 
-                       << " :elim-learned-literals " << num_learned
-                       << " :hte " << (m_asymm_branch.m_tr - m_tr)
-                       << " :cost " << m_asymm_branch.m_counter
-                       << mem_stat()
-                       << " :time " << std::fixed << std::setprecision(2) << m_watch.get_seconds() << ")\n";);
+                       unsigned num_units = (m_asymm_branch.s.init_trail_size() - m_units);
+                       unsigned elim_lits = (num_total - num_learned);
+                       unsigned tr = (m_asymm_branch.m_tr - m_tr);
+                       verbose_stream() << " (sat-asymm-branch";
+                       if (elim_lits > 0)   verbose_stream() << " :elim-literals " << elim_lits; 
+                       if (num_learned > 0) verbose_stream() << " :elim-learned-literals " << num_learned;
+                       if (num_units > 0)   verbose_stream() << " :units " << num_units;
+                       if (tr > 0)          verbose_stream() << " :hte " << tr;
+                       verbose_stream() << " :cost " << m_asymm_branch.m_counter;
+                       if (!get_suppress_platform_verbose()) {
+                           verbose_stream() << mem_stat();
+                           verbose_stream() << m_watch;
+                       }
+                       verbose_stream() << ")\n";);
         }
     };
 
@@ -84,11 +94,11 @@ namespace sat {
             if (s.m_inconsistent)
                 break;
             unsigned num_elim = m_elim_literals + m_tr - elim;
-            IF_VERBOSE(1, verbose_stream() << "(sat-asymm-branch-step :elim " << num_elim << ")\n";);
+            IF_VERBOSE(4, verbose_stream() << "(sat-asymm-branch-step :elim " << num_elim << ")\n";);
             if (num_elim == 0)
                 break;
         }        
-        IF_VERBOSE(1, if (m_elim_learned_literals > eliml0) 
+        IF_VERBOSE(4, if (m_elim_learned_literals > eliml0) 
                           verbose_stream() << "(sat-asymm-branch :elim " << m_elim_learned_literals - eliml0 << ")\n";);
         return m_elim_literals > elim0;
     }
@@ -97,8 +107,9 @@ namespace sat {
         unsigned eliml0 = m_elim_learned_literals;
         unsigned elim = m_elim_literals;
         process(nullptr, s.m_clauses);
+        if (learned) process(nullptr, s.m_learned);
         s.propagate(false); 
-        IF_VERBOSE(1, if (m_elim_learned_literals > eliml0) 
+        IF_VERBOSE(4, if (m_elim_learned_literals > eliml0) 
                           verbose_stream() << "(sat-asymm-branch :elim " << m_elim_learned_literals - eliml0 << ")\n";);
         return m_elim_literals > elim;
     }
@@ -160,15 +171,17 @@ namespace sat {
             return;
         }
         CASSERT("asymm_branch", s.check_invariant());
-        TRACE("asymm_branch_detail", s.display(tout););
+        TRACE(asymm_branch_detail, s.display(tout););
         report rpt(*this);
-        svector<char> saved_phase(s.m_phase);
+        bool_vector saved_phase(s.m_phase);
+        flet<bool> _is_probing(s.m_is_probing, true);
 
         bool change = true;
         unsigned counter = 0;
         while (change && counter < 2) {
             ++counter;
             change = false;
+            s.m_touch_index++;
             if (m_asymm_branch_sampled) {
                 big big(s.m_rand);
                 if (process(big, true)) change = true;
@@ -179,9 +192,10 @@ namespace sat {
             }
             if (m_asymm_branch) {
                 m_counter  = 0; 
-                if (process(true)) change = true;
+                if (process(false)) change = true;
                 m_counter = -m_counter;
             }
+            m_touch_index = s.m_touch_index;
         }
 
         s.m_phase = saved_phase;
@@ -190,6 +204,7 @@ namespace sat {
             m_asymm_branch_limit = UINT_MAX;
 
         CASSERT("asymm_branch", s.check_invariant());
+
     }
 
     /**
@@ -216,24 +231,12 @@ namespace sat {
         }
     };
 
-    void asymm_branch::sort(big& big, clause const& c) {
-        sort(big, c.begin(), c.end());
+    bool asymm_branch::is_touched(bool_var v) const { 
+        return s.m_touched[v] >= m_touch_index; 
     }
 
-    void asymm_branch::radix_sort(big& big, literal_vector& lits) {
-        const unsigned d = 4;
-        const unsigned w = 20; // 1M variable cap        
-        unsigned sz = lits.size();
-        m_tmp.reserve(sz);
-        for (unsigned p = 0; p < w/d; ++p) {
-            unsigned on[16];
-            memset(on, 0, 16*sizeof(unsigned));
-            for (literal l : lits) on[(big.get_left(l) >> 4*p) & 15]++;
-            for (unsigned i = 1; i < 16; ++i) on[i] += on[i-1];
-            for (unsigned i = sz; i-- > 0; ) 
-                m_tmp[--on[(big.get_left(lits[i]) >> 4*p) & 15]] = lits[i];
-            for (unsigned i = sz; i-- > 0; ) lits[i] = m_tmp[i];
-        }
+    void asymm_branch::sort(big& big, clause const& c) {
+        sort(big, c.begin(), c.end());
     }
 
     void asymm_branch::sort(big& big, literal const* begin, literal const* end) {
@@ -246,10 +249,6 @@ namespace sat {
         compare_left cmp(big);
         std::sort(m_pos.begin(), m_pos.end(), cmp);
         std::sort(m_neg.begin(), m_neg.end(), cmp);
-
-        // alternative: worse
-        // radix_sort(big, m_pos);
-        // radix_sort(big, m_neg);
 
         IF_VERBOSE(100, 
                    for (literal l : m_pos) verbose_stream() << big.get_left(l) << " "; 
@@ -278,22 +277,6 @@ namespace sat {
             }
         }
         return false;
-    }
-
-    void asymm_branch::minimize(big& big, literal_vector& lemma) {
-        big.ensure_big(s, true);
-        sort(big, lemma.begin(), lemma.end());
-        uhle(big);
-        if (!m_to_delete.empty()) {
-            unsigned j = 0;
-            for (unsigned i = 0; i < lemma.size(); ++i) {
-                literal l = lemma[i];
-                if (!m_to_delete.contains(l)) {
-                    lemma[j++] = l;
-                }
-            }
-            lemma.shrink(j);
-        }
     }
 
     void asymm_branch::uhle(big& big) {
@@ -342,7 +325,10 @@ namespace sat {
                     break;
                 default:
                     if (!m_to_delete.contains(lit)) {
-                        c[j++] = lit;
+                        if (i != j) {
+                            std::swap(c[i], c[j]);
+                        }
+                        j++;
                     }
                     break;
                 }
@@ -356,9 +342,12 @@ namespace sat {
 
 
     bool asymm_branch::propagate_literal(clause const& c, literal l) {
+        if (!is_touched(l.var())) {
+            return false;
+        }
         SASSERT(!s.inconsistent());
-        TRACE("asymm_branch_detail", tout << "assigning: " << l << "\n";);
-        s.assign(l, justification());
+        TRACE(asymm_branch_detail, tout << "assigning: " << l << "\n";);
+        s.assign_scoped(l);
         s.propagate_core(false); // must not use propagate(), since check_missed_propagation may fail for c
         return s.inconsistent();
     }
@@ -368,7 +357,7 @@ namespace sat {
         bool found_conflict = false;
         unsigned i = 0, sz = c.size();        
         s.push();
-        for (i = 0; !found_conflict && i < sz; i++) {
+        for (i = 0; !found_conflict && i < sz; ++i) {
             if (i == flip_index) continue;
             found_conflict = propagate_literal(c, ~c[i]);
         }
@@ -383,7 +372,7 @@ namespace sat {
     
     bool asymm_branch::cleanup(scoped_detach& scoped_d, clause& c, unsigned skip_idx, unsigned new_sz) {
         unsigned j = 0;
-        for (unsigned i = 0; i < new_sz; i++) {            
+        for (unsigned i = 0; i < new_sz; ++i) {            
             if (skip_idx == i) continue;
             literal l = c[i];
             switch (s.value(l)) {
@@ -406,18 +395,19 @@ namespace sat {
 
     bool asymm_branch::re_attach(scoped_detach& scoped_d, clause& c, unsigned new_sz) {
         VERIFY(s.m_trail.size() == s.m_qhead);
-        m_elim_literals += c.size() - new_sz;
+        unsigned old_sz = c.size();
+        m_elim_literals += old_sz - new_sz;
         if (c.is_learned()) {
-            m_elim_learned_literals += c.size() - new_sz; 
+            m_elim_learned_literals += old_sz - new_sz; 
         }
 
-        switch(new_sz) {
+        switch (new_sz) {
         case 0:
-            s.set_conflict(justification());
+            s.set_conflict();
             return false;
         case 1:
-            TRACE("asymm_branch", tout << "produced unit clause: " << c[0] << "\n";);
-            s.assign(c[0], justification());
+            TRACE(asymm_branch, tout << "produced unit clause: " << c[0] << "\n";);
+            s.assign_unit(c[0]);
             s.propagate_core(false); 
             scoped_d.del_clause();
             return false; // check_missed_propagation() may fail, since m_clauses is not in a consistent state.
@@ -429,9 +419,7 @@ namespace sat {
             scoped_d.del_clause();
             return false;
         default:
-            c.shrink(new_sz);
-            if (s.m_config.m_drat) s.m_drat.add(c, true);
-            // if (s.m_config.m_drat) s.m_drat.del(c0); // TBD
+            s.shrink(c, old_sz, new_sz);
             return true;
         }
     }
@@ -448,7 +436,7 @@ namespace sat {
     }
 
     bool asymm_branch::process(clause & c) {
-        TRACE("asymm_branch_detail", tout << "processing: " << c << "\n";);
+        TRACE(asymm_branch_detail, tout << "processing: " << c << "\n";);
         SASSERT(s.scope_lvl() == 0);
         SASSERT(!s.inconsistent());
 
@@ -456,7 +444,7 @@ namespace sat {
         SASSERT(sz > 0);
         unsigned i;
         // check if the clause is already satisfied
-        for (i = 0; i < sz; i++) {
+        for (i = 0; i < sz; ++i) {
             if (s.value(c[i]) == l_true) {
                 s.detach_clause(c);
                 s.del_clause(c);
@@ -502,8 +490,8 @@ namespace sat {
     }
     
     void asymm_branch::collect_statistics(statistics & st) const {
-        st.update("elim literals", m_elim_literals);
-        st.update("tr", m_tr);
+        st.update("sat elim literals", m_elim_literals);
+        st.update("sat tr", m_tr);
     }
 
     void asymm_branch::reset_statistics() {
@@ -512,4 +500,4 @@ namespace sat {
         m_tr = 0;
     }
 
-};
+}

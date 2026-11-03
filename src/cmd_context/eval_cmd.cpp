@@ -57,6 +57,8 @@ public:
 
     void execute(cmd_context & ctx) override {
         model_ref md;
+        if (ctx.ignore_check())
+            return;
         if (!ctx.is_model_available(md))
             throw cmd_exception("model is not available");
         if (!m_target)
@@ -71,6 +73,7 @@ public:
         expr_ref r(ctx.m());
         unsigned timeout = m_params.get_uint("timeout", UINT_MAX);
         unsigned rlimit  = m_params.get_uint("rlimit", 0);
+        // md->compress();
         model_evaluator ev(*(md.get()), m_params);
         cancel_eh<reslimit> eh(ctx.m().limit());
         { 
@@ -82,7 +85,7 @@ public:
                 ev(m_target, r);
             }
             catch (model_evaluator_exception & ex) {
-                ctx.regular_stream() << "(error \"evaluator failed: " << ex.msg() << "\")" << std::endl;
+                ctx.regular_stream() << "(error \"evaluator failed: " << ex.what() << "\")" << std::endl;
                 return;
             }
         }

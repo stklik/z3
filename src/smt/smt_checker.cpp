@@ -22,25 +22,25 @@ Revision History:
 
 namespace smt {
 
-    bool checker::all_args(app * a, bool is_true) {
-        unsigned num_args = a->get_num_args();
-        for (unsigned i = 0; i < num_args; i++) {
-            if (!check(a->get_arg(i), is_true))
+    bool checker::all_args(app *a, unsigned depth, bool is_true) {
+        for (expr* arg : *a) {
+            if (!check(arg, depth + 1, is_true))
                 return false;
         }
         return true;
     }
 
-    bool checker::any_arg(app * a, bool is_true) {
-        unsigned num_args = a->get_num_args();
-        for (unsigned i = 0; i < num_args; i++) {
-            if (check(a->get_arg(i), is_true))
+    bool checker::any_arg(app *a, unsigned depth, bool is_true) {
+        for (expr* arg : *a) {
+            if (check(arg, depth + 1, is_true))
                 return true;
         }
         return false;
     }
 
-    bool checker::check_core(expr * n, bool is_true) {
+    bool checker::check_core(expr *n, unsigned depth, bool is_true) {
+        if (depth > 600)
+            return false;
         SASSERT(m_manager.is_bool(n));
         if (m_context.b_internalized(n) && m_context.is_relevant(n)) {
             lbool val = m_context.get_assignment(n);
@@ -56,11 +56,11 @@ namespace smt {
             case OP_FALSE:
                 return !is_true;
             case OP_NOT:
-                return check(a->get_arg(0), !is_true);
+                return check(a->get_arg(0), depth + 1, !is_true);
             case OP_OR:
-                return is_true ? any_arg(a, true) : all_args(a, false);
+                return is_true ? any_arg(a, depth, true) : all_args(a, depth, false);
             case OP_AND:
-                return is_true ? all_args(a, true) : any_arg(a, false);
+                return is_true ? all_args(a, depth, true) : any_arg(a, depth, false);
             case OP_EQ:
                 if (!m_manager.is_iff(a)) {
                     enode * lhs = get_enode_eq_to(a->get_arg(0));
@@ -76,27 +76,27 @@ namespace smt {
                 }
                 else if (is_true) {
                     return 
-                        (check(a->get_arg(0), true) &&
-                         check(a->get_arg(1), true)) ||
-                        (check(a->get_arg(0), false) &&
-                         check(a->get_arg(1), false));
+                        (check(a->get_arg(0), depth + 1, true) &&
+                         check(a->get_arg(1), depth + 1, true)) ||
+                        (check(a->get_arg(0), depth + 1, false) &&
+                         check(a->get_arg(1), depth + 1, false));
                 }
                 else {
                     return 
-                        (check(a->get_arg(0), true) &&
-                         check(a->get_arg(1), false)) ||
-                        (check(a->get_arg(0), false) &&
-                         check(a->get_arg(1), true));
+                        (check(a->get_arg(0), depth + 1, true) &&
+                         check(a->get_arg(1), depth + 1, false)) ||
+                        (check(a->get_arg(0), depth + 1, false) &&
+                         check(a->get_arg(1), depth + 1, true));
                 }
             case OP_ITE: {
                 if (m_context.lit_internalized(a->get_arg(0)) && m_context.is_relevant(a->get_arg(0))) {
                     switch (m_context.get_assignment(a->get_arg(0))) {
-                    case l_false: return check(a->get_arg(2), is_true);
+                    case l_false: return check(a->get_arg(2), depth + 1, is_true);
                     case l_undef: return false;
-                    case l_true:  return check(a->get_arg(1), is_true);
+                    case l_true:  return check(a->get_arg(1), depth + 1, is_true);
                     }
                 }
-                return check(a->get_arg(1), is_true) && check(a->get_arg(2), is_true);
+                return check(a->get_arg(1), depth + 1, is_true) && check(a->get_arg(2), depth + 1, is_true);
             }
             default:
                 break;
@@ -104,17 +104,17 @@ namespace smt {
         }
         enode * e = get_enode_eq_to(a);
         if (e && e->is_bool() && m_context.is_relevant(e)) {
-            lbool val = m_context.get_assignment(e->get_owner());
+            lbool val = m_context.get_assignment(e->get_expr());
             return val != l_undef && is_true == (val == l_true);
         }
         return false;
     }
     
-    bool checker::check(expr * n, bool is_true) {
+    bool checker::check(expr *n, unsigned depth, bool is_true) {
         bool r;
         if (n->get_ref_count() > 1 && m_is_true_cache[is_true].find(n, r))
             return r;
-        r = check_core(n, is_true);
+        r = check_core(n, depth, is_true);
         if (n->get_ref_count() > 1)
             m_is_true_cache[is_true].insert(n, r);
         return r;
@@ -123,13 +123,13 @@ namespace smt {
     enode * checker::get_enode_eq_to_core(app * n) {
         ptr_buffer<enode> buffer;
         unsigned num = n->get_num_args();
-        for (unsigned i = 0; i < num; i++) {
+        for (unsigned i = 0; i < num; ++i) {
             enode * arg = get_enode_eq_to(n->get_arg(i));
             if (arg == nullptr)
                 return nullptr;
             buffer.push_back(arg);
         }
-        enode * e = m_context.get_enode_eq_to(n->get_decl(), num, buffer.c_ptr());
+        enode * e = m_context.get_enode_eq_to(n->get_decl(), num, buffer.data());
         if (e == nullptr)
             return nullptr;
         return m_context.is_relevant(e) ? e : nullptr;
@@ -158,7 +158,7 @@ namespace smt {
     bool checker::is_sat(expr * n, unsigned num_bindings, enode * const * bindings) {
         flet<unsigned>        l1(m_num_bindings, num_bindings);
         flet<enode * const *> l2(m_bindings, bindings);
-        bool r = check(n, true);
+        bool r = check(n, 0, true);
         m_is_true_cache[0].reset();
         m_is_true_cache[1].reset();
         m_to_enode_cache.reset();
@@ -168,7 +168,7 @@ namespace smt {
     bool checker::is_unsat(expr * n, unsigned num_bindings, enode * const * bindings) {
         flet<unsigned>        l1(m_num_bindings, num_bindings);
         flet<enode * const *> l2(m_bindings, bindings);
-        bool r = check(n, false);
+        bool r = check(n, 0,false);
         m_is_true_cache[0].reset();
         m_is_true_cache[1].reset();
         m_to_enode_cache.reset();
@@ -182,7 +182,7 @@ namespace smt {
         m_bindings(nullptr) {
     }
    
-};
+}
 
 
 

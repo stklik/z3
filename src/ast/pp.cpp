@@ -26,14 +26,14 @@ static std::pair<unsigned, bool> space_upto_line_break(ast_manager & m, format *
     decl_kind k = f->get_decl_kind();
     switch(k) {
     case OP_STRING: {
-        size_t len = strlen(f->get_decl()->get_parameter(0).get_symbol().bare_str());
-        return std::make_pair(static_cast<unsigned>(len), false);
+        unsigned len = f->get_decl()->get_parameter(0).get_symbol().display_size();
+        return std::make_pair(len, false);
     }
     case OP_CHOICE:
         return space_upto_line_break(m, to_app(f->get_arg(0)));
     case OP_COMPOSE: 
         r = 0;
-        for (unsigned i = 0; i < f->get_num_args(); i++) {
+        for (unsigned i = 0; i < f->get_num_args(); ++i) {
             std::pair<unsigned, bool> pair = space_upto_line_break(m, to_app(f->get_arg(i)));
             r += pair.first;
             if (pair.second)
@@ -52,7 +52,7 @@ static std::pair<unsigned, bool> space_upto_line_break(ast_manager & m, format *
 
 inline bool fits(ast_manager & m, format * f, unsigned space_left) {
     unsigned s = space_upto_line_break(m, f).first;
-    TRACE("fits", tout << "s: " << s << " space_left " << space_left << "\n";);
+    TRACE(fits, tout << "s: " << s << " space_left " << space_left << "\n";);
     return s <= space_left;
 }
 
@@ -66,7 +66,6 @@ void pp(std::ostream & out, format * f, ast_manager & m, params_ref const & _p) 
     bool     single_line   = p.single_line();
 
     unsigned pos = 0;
-    unsigned ribbon_pos = 0;
     unsigned line = 0;
     unsigned len;
     unsigned i;
@@ -92,7 +91,6 @@ void pp(std::ostream & out, format * f, ast_manager & m, params_ref const & _p) 
                 break;
             }
             pos += len;
-            ribbon_pos += len;
             out << f->get_decl()->get_parameter(0).get_symbol();
             break;
         case OP_INDENT:
@@ -121,11 +119,10 @@ void pp(std::ostream & out, format * f, ast_manager & m, params_ref const & _p) 
                 break;
             }
             pos = indent;
-            ribbon_pos = 0;
             line++;
             if (line < max_num_lines) {
                 out << "\n";
-                for (unsigned i = 0; i < indent; i++) 
+                for (unsigned i = 0; i < indent; ++i) 
                     out << " ";
             }
             else

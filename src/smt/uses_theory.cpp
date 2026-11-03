@@ -25,25 +25,24 @@ bool uses_theory(expr * n, family_id fid) {
     return uses_theory(n, fid, visited);
 }
 
-namespace uses_theory_ns {
+namespace {
     struct found {}; 
-    struct proc {
+    struct proc_z3 {
         family_id m_fid;
-        proc(family_id fid):m_fid(fid) {}
+        proc_z3(family_id fid):m_fid(fid) {}
         void operator()(var * n) {}
         void operator()(app * n) { if (n->get_family_id() == m_fid) throw found(); }
         void operator()(quantifier * n) {}
     };
-};
+}
 
 bool uses_theory(expr * n, family_id fid, expr_mark & visited) {
-    uses_theory_ns::proc p(fid);
+    proc_z3 p(fid);
     try {
         for_each_expr(p, visited, n);
     }
-    catch (uses_theory_ns::found) {
+    catch (const found &) {
         return true;
     }
     return false;
 }
-

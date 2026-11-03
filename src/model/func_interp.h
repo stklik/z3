@@ -27,8 +27,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef FUNC_INTERP_H_
-#define FUNC_INTERP_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/ast_translation.h"
@@ -41,7 +40,7 @@ class func_entry {
     // m_result and m_args[i] must be ground terms.
 
     expr * m_result;
-    expr * m_args[];
+    expr * m_args[0];
 
     static unsigned get_obj_size(unsigned arity) { return sizeof(func_entry) + arity * sizeof(expr*); }
     func_entry(ast_manager & m, unsigned arity, expr * const * args, expr * result);
@@ -64,6 +63,30 @@ public:
     bool eq_args(ast_manager & m, unsigned arity, expr * const * args) const;
 };
 
+struct func_entry_eq {
+    unsigned m_arity;
+    func_entry_eq(unsigned arity) : m_arity(arity) {}
+    bool operator()(func_entry* a, func_entry* b) const {
+        for (unsigned i = 0; i < m_arity; ++i)
+            if (a->get_arg(i) != b->get_arg(i))
+                return false;        
+        return true;
+    }
+};
+
+struct func_entry_hash {
+    unsigned m_arity;
+    struct chasher {
+        unsigned operator()(func_entry* e, unsigned idx) const {
+            return e->get_arg(idx)->get_id();
+        }
+    };
+    func_entry_hash(unsigned arity) : m_arity(arity) {}
+    unsigned operator()(func_entry* e) const {
+        return get_composite_hash(e, m_arity, default_kind_hash_proc<func_entry*>(), chasher());
+    }
+};
+
 class func_interp {
     ast_manager &          m_manager;
     unsigned               m_arity;
@@ -73,9 +96,19 @@ class func_interp {
 
     expr *                 m_interp; //!< cache for representing the whole interpretation as a single expression (it uses ite terms).
 
+    expr *                 m_array_interp; // <! interp with lambda abstraction
+
+    using entry_table = ptr_hashtable<func_entry, func_entry_hash, func_entry_eq>;
+    entry_table* m_entry_table = nullptr;
+    func_entry* m_key = nullptr;
+
     void reset_interp_cache();
 
+    void init_table();
+
     expr * get_interp_core() const;
+
+    expr_ref get_array_interp_core(func_decl * f) const;
 
 public:
     func_interp(ast_manager & m, unsigned arity);
@@ -104,13 +137,16 @@ public:
     unsigned num_entries() const { return m_entries.size(); }
     ptr_vector<func_entry>::const_iterator begin() const { return m_entries.begin(); }
     ptr_vector<func_entry>::const_iterator end() const { return m_entries.end(); }
-    func_entry const * const * get_entries() const { return m_entries.c_ptr(); }
+    func_entry const * const * get_entries() const { return m_entries.data(); }
     func_entry const * get_entry(unsigned idx) const { return m_entries[idx]; }
+    void del_entry(unsigned idx);
 
     expr * get_max_occ_result() const;
     void compress();
 
     expr * get_interp() const;
+
+    expr_ref get_array_interp(func_decl* f) const;
 
     func_interp * translate(ast_translation & translator) const;
 
@@ -119,4 +155,3 @@ private:
     bool is_identity() const;
 };
 
-#endif

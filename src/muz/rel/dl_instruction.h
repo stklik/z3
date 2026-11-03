@@ -16,10 +16,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_INSTRUCTION_H_
-#define DL_INSTRUCTION_H_
+#pragma once
 
-#include<iostream>
+#include<ostream>
 #include<string>
 #include<utility>
 #include "ast/ast.h"
@@ -225,8 +224,8 @@ namespace datalog {
 
            The newline character at the end should not be printed.
         */
-        virtual void display_head_impl(execution_context const & ctx, std::ostream & out) const {
-            out << "<instruction>";
+        virtual std::ostream& display_head_impl(execution_context const & ctx, std::ostream & out) const {
+            return out << "<instruction>";
         }
         /**
            \brief If relevant, output the body of the current instruction.
@@ -285,7 +284,7 @@ namespace datalog {
             const unsigned * cols1, const unsigned * cols2, unsigned removed_col_cnt, 
             const unsigned * removed_cols, reg_idx result);
         static instruction * mk_min(reg_idx source, reg_idx target, const unsigned_vector & group_by_cols,
-            const unsigned min_col);
+            unsigned min_col);
         static instruction * mk_rename(reg_idx src, unsigned cycle_len, const unsigned * permutation_cycle, 
             reg_idx tgt);
         static instruction * mk_filter_by_negation(reg_idx tgt, reg_idx neg_rel, unsigned col_cnt,
@@ -318,7 +317,7 @@ namespace datalog {
     class instruction_block {
     public:
         struct instruction_observer {
-            virtual ~instruction_observer() {}
+            virtual ~instruction_observer() = default;
             virtual void notify(instruction * i) {}
         };
     private:
@@ -365,7 +364,6 @@ namespace datalog {
     };
 
 
-};
+}
 
-#endif /* DL_INSTRUCTION_H_ */
 

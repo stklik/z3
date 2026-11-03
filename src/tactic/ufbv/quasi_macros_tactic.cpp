@@ -17,11 +17,13 @@ Notes:
 
 --*/
 #include "tactic/tactical.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/macros/macro_manager.h"
 #include "ast/macros/macro_finder.h"
 #include "ast/macros/quasi_macros.h"
+#include "ast/recfun_decl_plugin.h"
 #include "tactic/ufbv/quasi_macros_tactic.h"
+
 
 class quasi_macros_tactic : public tactic {
 
@@ -37,49 +39,45 @@ class quasi_macros_tactic : public tactic {
 
         void operator()(goal_ref const & g,
                         goal_ref_buffer & result) {
-            SASSERT(g->is_well_sorted());
             tactic_report report("quasi-macros", *g);
 
             bool produce_proofs = g->proofs_enabled();
             bool produce_unsat_cores = g->unsat_core_enabled();
+
+            recfun::util rec(m());
+            if (!rec.get_rec_funs().empty()) {
+                result.push_back(g.get());
+                return;
+            }
                             
             macro_manager mm(m_manager);
             quasi_macros qm(m_manager, mm);
-            bool more = true;
 
-            expr_ref_vector forms(m_manager), new_forms(m_manager);
-            proof_ref_vector proofs(m_manager), new_proofs(m_manager);
-            expr_dependency_ref_vector deps(m_manager), new_deps(m_manager);
+            expr_ref_vector forms(m_manager);
+            proof_ref_vector proofs(m_manager);
+            expr_dependency_ref_vector deps(m_manager);
 
             unsigned size = g->size();
-            for (unsigned i = 0; i < size; i++) {
+            for (unsigned i = 0; i < size; ++i) {
                 forms.push_back(g->form(i));
                 proofs.push_back(g->pr(i));
                 deps.push_back(g->dep(i));
             }
 
-            while (more) { // CMW: use repeat(...) ?
-                if (m().canceled())
-                    throw tactic_exception(m().limit().get_cancel_msg());
-
-                new_forms.reset();
-                new_proofs.reset();
-                new_deps.reset();
-                more = qm(forms.size(), forms.c_ptr(), proofs.c_ptr(), deps.c_ptr(), new_forms, new_proofs, new_deps);
-                forms.swap(new_forms);
-                proofs.swap(new_proofs);
-                deps.swap(new_deps);
-            }
+            do { 
+                tactic::checkpoint(m());
+            } 
+            while (qm(forms, proofs, deps));
 
             g->reset();
-            for (unsigned i = 0; i < new_forms.size(); i++)
+            for (unsigned i = 0; i < forms.size(); ++i)
                 g->assert_expr(forms.get(i),
                                produce_proofs ? proofs.get(i) : nullptr,
-                               produce_unsat_cores ? deps.get(i) : nullptr);
+                               produce_unsat_cores ? deps.get(i, nullptr) : nullptr);
 
             generic_model_converter * evmc = alloc(generic_model_converter, mm.get_manager(), "quasi_macros");
             unsigned num = mm.get_num_macros();
-            for (unsigned i = 0; i < num; i++) {
+            for (unsigned i = 0; i < num; ++i) {
                 expr_ref f_interp(mm.get_manager());
                 func_decl * f = mm.get_macro_interpretation(i, f_interp);
                 evmc->add(f, f_interp);
@@ -87,8 +85,6 @@ class quasi_macros_tactic : public tactic {
             g->add(evmc);
             g->inc_depth();
             result.push_back(g.get());
-            TRACE("quasi-macros", g->display(tout););
-            SASSERT(g->is_well_sorted());
         }
 
         void updt_params(params_ref const & p) {
@@ -112,9 +108,11 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "quasi_macros"; }
+
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {

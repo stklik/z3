@@ -21,7 +21,7 @@ Revision History:
 
 #include "tactic/bv/dt2bv_tactic.h"
 #include "tactic/tactical.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/datatype_decl_plugin.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/rewriter/rewriter_def.h"
@@ -41,7 +41,7 @@ class dt2bv_tactic : public tactic {
     obj_hashtable<sort> m_non_fd_sorts;
     
 
-    bool is_fd(expr* a) { return is_fd(get_sort(a)); }
+    bool is_fd(expr* a) { return is_fd(a->get_sort()); }
     bool is_fd(sort* a) { return m_dt.is_enum_sort(a); }
 
     struct check_fd {        
@@ -59,14 +59,14 @@ class dt2bv_tactic : public tactic {
             }
             else if (m_t.m_dt.is_recognizer(a->get_decl()) &&
                 m_t.is_fd(a->get_arg(0))) {
-                m_t.m_fd_sorts.insert(get_sort(a->get_arg(0)));
+                m_t.m_fd_sorts.insert(a->get_arg(0)->get_sort());
             }
             else if (m_t.is_fd(a) && a->get_num_args() > 0) {
-                m_t.m_non_fd_sorts.insert(get_sort(a));
+                m_t.m_non_fd_sorts.insert(a->get_sort());
                 args_cannot_be_fd(a);
             }
             else if (m_t.is_fd(a)) {
-                m_t.m_fd_sorts.insert(get_sort(a));
+                m_t.m_fd_sorts.insert(a->get_sort());
             }
             else {
                 args_cannot_be_fd(a);
@@ -76,14 +76,14 @@ class dt2bv_tactic : public tactic {
         void args_cannot_be_fd(app* a) {
             for (expr* arg : *a) {
                 if (m_t.is_fd(arg)) {
-                    m_t.m_non_fd_sorts.insert(get_sort(arg));
+                    m_t.m_non_fd_sorts.insert(arg->get_sort());
                 }                    
             }
         }
 
         void operator()(var * v) {
             if (m_t.is_fd(v)) {
-                m_t.m_fd_sorts.insert(get_sort(v));
+                m_t.m_fd_sorts.insert(v->get_sort());
             }
         }
 
@@ -93,7 +93,6 @@ class dt2bv_tactic : public tactic {
     struct sort_pred : public i_sort_pred {
         dt2bv_tactic& m_t;
         sort_pred(dt2bv_tactic& t): m_t(t) {}
-        ~sort_pred() override {}
         bool operator()(sort* s) override {
             return m_t.m_fd_sorts.contains(s);
         }
@@ -104,6 +103,8 @@ public:
 
     dt2bv_tactic(ast_manager& m, params_ref const& p): 
         m(m), m_params(p), m_dt(m), m_bv(m), m_is_fd(*this) {}
+
+    char const* name() const override { return "dt2bv"; }
     
     tactic * translate(ast_manager & m) override {
         return alloc(dt2bv_tactic, m, m_params);
@@ -132,7 +133,7 @@ public:
             rw.set_is_fd(&m_is_fd);            
             expr_ref   new_curr(m);
             proof_ref  new_pr(m);
-            for (unsigned idx = 0; idx < size; idx++) {
+            for (unsigned idx = 0; idx < size; ++idx) {
                 rw(g->form(idx), new_curr, new_pr);
                 if (produce_proofs) {
                     proof * pr = g->pr(idx);
@@ -154,8 +155,6 @@ public:
         }
         g->inc_depth();
         result.push_back(g.get());
-        TRACE("dt2bv", g->display(tout););
-        SASSERT(g->is_well_sorted());
     }
     
     void cleanup() override {

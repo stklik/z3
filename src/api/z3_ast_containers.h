@@ -16,18 +16,17 @@ Author:
 Notes:
 
 --*/
-#ifndef Z3_AST_CONTAINERS_H_
-#define Z3_AST_CONTAINERS_H_
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
 
     /** \defgroup capi C API */
-    /*@{*/
+    /**@{*/
 
     /** @name AST vectors */
-    /*@{*/
+    /**@{*/
     /**
        \brief Return an empty AST vector.
 
@@ -105,10 +104,10 @@ extern "C" {
     */
     Z3_string Z3_API Z3_ast_vector_to_string(Z3_context c, Z3_ast_vector v);
 
-    /*@}*/
+    /**@}*/
 
     /** @name AST maps */
-    /*@{*/
+    /**@{*/
     /**
     \brief Return an empty mapping from AST to AST
 
@@ -138,7 +137,7 @@ extern "C" {
 
     def_API('Z3_ast_map_contains', BOOL, (_in(CONTEXT), _in(AST_MAP), _in(AST)))
     */
-    Z3_bool Z3_API Z3_ast_map_contains(Z3_context c, Z3_ast_map m, Z3_ast k);
+    bool Z3_API Z3_ast_map_contains(Z3_context c, Z3_ast_map m, Z3_ast k);
 
     /**
     \brief Return the value associated with the key \c k.
@@ -190,11 +189,10 @@ extern "C" {
     def_API('Z3_ast_map_to_string', STRING, (_in(CONTEXT), _in(AST_MAP)))
     */
     Z3_string Z3_API Z3_ast_map_to_string(Z3_context c, Z3_ast_map m);
-    /*@}*/
-    /*@}*/
+    /**@}*/
+    /**@}*/
 
 #ifdef __cplusplus
 }
 #endif // __cplusplus
 
-#endif

@@ -16,7 +16,6 @@ Author:
 Revision History:
 
 --*/
-#ifdef _WINDOWS
 
 #include "api/z3.h"
 #include "util/trace.h"
@@ -24,7 +23,7 @@ Revision History:
 
 #define TEST(TEST_NAME, TEST_OUTCOME, NEG_TEST_OUTCOME) \
     do { \
-        if (TEST_NAME != NULL) \
+        if (TEST_NAME != nullptr) \
         { \
             Z3_solver_push(ctx, s);            \
             Z3_solver_assert(ctx, s, TEST_NAME);     \
@@ -94,7 +93,7 @@ Z3_ast mk_max(Z3_context ctx, Z3_sort bv, bool is_signed) {
 
 void test_add(unsigned bvsize, bool is_signed) {
 
-    TRACE("no_overflow", tout << "test_add: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
+    TRACE(no_overflow, tout << "test_add: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
 
     Z3_config cfg = Z3_mk_config();
     Z3_context ctx = Z3_mk_context(cfg);
@@ -112,7 +111,7 @@ void test_add(unsigned bvsize, bool is_signed) {
     t1 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"x"), bv);
     t2 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"y"), bv);
     test_ovfl = Z3_mk_bvadd_no_overflow(ctx, t1, t2, is_signed);
-    test_udfl = is_signed ? Z3_mk_bvadd_no_underflow(ctx, t1, t2) : NULL;
+    test_udfl = is_signed ? Z3_mk_bvadd_no_underflow(ctx, t1, t2) : nullptr;
 
     Z3_solver_push(ctx, s);
     Z3_solver_assert(ctx, s, Z3_mk_eq(ctx, t1, Z3_mk_numeral(ctx, "0", bv)));
@@ -179,7 +178,7 @@ void test_add(unsigned bvsize, bool is_signed) {
 
 void test_sub(unsigned bvsize, bool is_signed) {
 
-    TRACE("no_overflow", tout << "test_sub: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
+    TRACE(no_overflow, tout << "test_sub: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
 
     Z3_config cfg = Z3_mk_config();
     Z3_context ctx = Z3_mk_context(cfg);
@@ -197,7 +196,7 @@ void test_sub(unsigned bvsize, bool is_signed) {
 
     t1 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"x"), bv);
     t2 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"y"), bv);
-    test_ovfl = is_signed ? Z3_mk_bvsub_no_overflow(ctx, t1, t2) : NULL;
+    test_ovfl = is_signed ? Z3_mk_bvsub_no_overflow(ctx, t1, t2) : nullptr;
     test_udfl = Z3_mk_bvsub_no_underflow(ctx, t1, t2, is_signed);
 
     Z3_solver_push(ctx, s);
@@ -293,7 +292,7 @@ void test_sub(unsigned bvsize, bool is_signed) {
 
 void test_neg(unsigned bvsize) {
 
-    TRACE("no_overflow", tout << "test_neg: bvsize = " << bvsize << "\n";);
+    TRACE(no_overflow, tout << "test_neg: bvsize = " << bvsize << "\n";);
 
     Z3_config cfg = Z3_mk_config();
     Z3_context ctx = Z3_mk_context(cfg);
@@ -341,7 +340,7 @@ void test_neg(unsigned bvsize) {
 
 void test_mul(unsigned bvsize, bool is_signed) {
 
-    TRACE("no_overflow", tout << "test_mul: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
+    TRACE(no_overflow, tout << "test_mul: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
 
     Z3_config cfg = Z3_mk_config();
     Z3_context ctx = Z3_mk_context(cfg);
@@ -359,7 +358,7 @@ void test_mul(unsigned bvsize, bool is_signed) {
     t1 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"x"), bv);
     t2 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"y"), bv);
     test_ovfl = Z3_mk_bvmul_no_overflow(ctx, t1, t2, is_signed);
-    test_udfl = is_signed ? Z3_mk_bvmul_no_underflow(ctx, t1, t2) : NULL;
+    test_udfl = is_signed ? Z3_mk_bvmul_no_underflow(ctx, t1, t2) : nullptr;
 
     Z3_solver_push(ctx, s);
     Z3_solver_assert(ctx, s, Z3_mk_eq(ctx, t1, Z3_mk_numeral(ctx, "1", bv)));
@@ -447,7 +446,7 @@ void test_mul(unsigned bvsize, bool is_signed) {
 
 void test_div(unsigned bvsize) {
 
-    TRACE("no_overflow", tout << "test_div: bvsize = " << bvsize << "\n";);
+    TRACE(no_overflow, tout << "test_div: bvsize = " << bvsize << "\n";);
 
     Z3_config cfg = Z3_mk_config();
     Z3_context ctx = Z3_mk_context(cfg);
@@ -530,8 +529,8 @@ void test_div(unsigned bvsize) {
     Z3_del_context(ctx);
 }
 
-typedef Z3_ast (Z3_API *NO_OVFL_ARITH_FUNC)(Z3_context ctx, Z3_ast t1, Z3_ast t2, Z3_bool is_signed);
-typedef Z3_ast (Z3_API *ARITH_FUNC)(Z3_context ctx, Z3_ast t1, Z3_ast t2);
+typedef Z3_ast (*NO_OVFL_ARITH_FUNC)(Z3_context ctx, Z3_ast t1, Z3_ast t2, bool is_signed);
+typedef Z3_ast (*ARITH_FUNC)(Z3_context ctx, Z3_ast t1, Z3_ast t2);
 
 typedef enum { OVFL_FUNC, UDFL_FUNC } overflow_type;
 
@@ -546,11 +545,11 @@ typedef struct {
     bool               sign_compar; // whether signed comparison should be used even for unsigned operation
 } Equivalence_params;
 
-Z3_ast Z3_API Z3_mk_bvsdiv_no_overflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, Z3_bool is_signed) {
+Z3_ast Z3_API Z3_mk_bvsdiv_no_overflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, bool is_signed) {
     return Z3_mk_bvsdiv_no_overflow(ctx, t1, t2);
 }
 
-Z3_ast Z3_API Z3_mk_bvneg_no_overflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, Z3_bool is_signed) {
+Z3_ast Z3_API Z3_mk_bvneg_no_overflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, bool is_signed) {
     return Z3_mk_bvneg_no_overflow(ctx, t1);
 }
 
@@ -558,21 +557,21 @@ Z3_ast Z3_API Z3_mk_bvneg_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2) {
     return Z3_mk_bvneg(ctx, t1);
 }
 
-Z3_ast Z3_API Z3_mk_bvadd_no_underflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, Z3_bool is_signed) {
+Z3_ast Z3_API Z3_mk_bvadd_no_underflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, bool is_signed) {
     return Z3_mk_bvadd_no_underflow(ctx, t1, t2);
 }
 
-Z3_ast Z3_API Z3_mk_bvsub_no_overflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, Z3_bool is_signed) {
+Z3_ast Z3_API Z3_mk_bvsub_no_overflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, bool is_signed) {
     return Z3_mk_bvsub_no_overflow(ctx, t1, t2);
 }
 
-Z3_ast Z3_API Z3_mk_bvmul_no_underflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, Z3_bool is_signed) {
+Z3_ast Z3_API Z3_mk_bvmul_no_underflow_wrapper(Z3_context ctx, Z3_ast t1, Z3_ast t2, bool is_signed) {
     return Z3_mk_bvmul_no_underflow(ctx, t1, t2);
 }
 
 void test_equiv(Equivalence_params params, unsigned bvsize, bool is_signed) {
 
-    TRACE("no_overflow", tout << "test_" << params.name << "_equiv: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
+    TRACE(no_overflow, tout << "test_" << params.name << "_equiv: bvsize = " << bvsize << ", is_signed = " << is_signed << "\n";);
 
     Z3_config cfg = Z3_mk_config();
     Z3_context ctx = Z3_mk_context(cfg);
@@ -586,7 +585,7 @@ void test_equiv(Equivalence_params params, unsigned bvsize, bool is_signed) {
     Z3_ast t2 = Z3_mk_const(ctx, Z3_mk_string_symbol(ctx,"y"), bv);
     Z3_ast real_test = (*params.no_overflow_func)(ctx, t1, t2, is_signed);
 
-    Z3_ast cond = NULL;
+    Z3_ast cond = nullptr;
     if (params.non_zero)
     {
         cond = Z3_mk_not(ctx, Z3_mk_eq(ctx, t2, Z3_mk_int(ctx, 0, bv)));
@@ -625,7 +624,7 @@ void test_equiv(Equivalence_params params, unsigned bvsize, bool is_signed) {
     
     Z3_solver_push(ctx, s);
     Z3_ast equiv = Z3_mk_iff(ctx, real_test, check);
-    if (cond != NULL)
+    if (cond != nullptr)
     {
         equiv = Z3_mk_implies(ctx, cond, equiv);
     }
@@ -662,7 +661,7 @@ void test_equiv(Equivalence_params params, unsigned bvsize, bool is_signed) {
 //    Z3_solver_assert(ctx, s, Z3_mk_eq(ctx, t2, Z3_mk_numeral(ctx, "1", bv)));
 //    //TEST_NO_UNDERFLOW;
 //    Z3_solver_assert(ctx, s, test_udfl);
-//    ENSURE(Z3_check(ctx) == Z3_TRUE);
+//    ENSURE(Z3_check(ctx) == true);
 //    Z3_solver_pop(ctx, s, 1);
 //
 //    Z3_del_config(cfg);
@@ -724,7 +723,3 @@ void tst_no_overflow() {
         }
     }
 }
-#else
-void tst_no_overflow() {
-}
-#endif

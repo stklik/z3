@@ -17,16 +17,15 @@ Notes:
     
 --*/
 
+using System.Diagnostics;
 using System;
-using System.Diagnostics.Contracts;
 
 namespace Microsoft.Z3
 {
     /// <summary>
     /// Map from AST to AST
     /// </summary>
-    [ContractVerification(true)]
-    internal class ASTMap : Z3Object
+    public class ASTMap : Z3Object
     {
         /// <summary>
         /// Checks whether the map contains the key <paramref name="k"/>.
@@ -35,7 +34,7 @@ namespace Microsoft.Z3
         /// <returns>True if <paramref name="k"/> is a key in the map, false otherwise.</returns>
         public bool Contains(AST k)
         {
-            Contract.Requires(k != null);
+            Debug.Assert(k != null);
 
             return 0 != Native.Z3_ast_map_contains(Context.nCtx, NativeObject, k.NativeObject);
         }
@@ -49,8 +48,7 @@ namespace Microsoft.Z3
         /// <param name="k">An AST</param>    
         public AST Find(AST k)
         {
-            Contract.Requires(k != null);
-            Contract.Ensures(Contract.Result<AST>() != null);
+            Debug.Assert(k != null);
 
             return new AST(Context, Native.Z3_ast_map_find(Context.nCtx, NativeObject, k.NativeObject));
         }
@@ -62,8 +60,8 @@ namespace Microsoft.Z3
         /// <param name="v">The value AST</param>
         public void Insert(AST k, AST v)
         {
-            Contract.Requires(k != null);
-            Contract.Requires(v != null);
+            Debug.Assert(k != null);
+            Debug.Assert(v != null);
 
             Native.Z3_ast_map_insert(Context.nCtx, NativeObject, k.NativeObject, v.NativeObject);
         }
@@ -74,7 +72,7 @@ namespace Microsoft.Z3
         /// <param name="k">An AST</param>
         public void Erase(AST k)
         {
-            Contract.Requires(k != null);
+            Debug.Assert(k != null);
 
             Native.Z3_ast_map_erase(Context.nCtx, NativeObject, k.NativeObject);
         }
@@ -102,7 +100,7 @@ namespace Microsoft.Z3
         {
             get
             {
-                ASTVector res = new ASTVector(Context, Native.Z3_ast_map_keys(Context.nCtx, NativeObject));
+                using ASTVector res = new ASTVector(Context, Native.Z3_ast_map_keys(Context.nCtx, NativeObject));
                 return res.ToArray();
             }
         }
@@ -119,39 +117,26 @@ namespace Microsoft.Z3
         internal ASTMap(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
         }
         internal ASTMap(Context ctx)
             : base(ctx, Native.Z3_mk_ast_map(ctx.nCtx))
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
         }
-
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_ast_map_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_ast_map_dec_ref(ctx.nCtx, obj);
-            }
-        };
 
         internal override void IncRef(IntPtr o)
         {
-            Context.ASTMap_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_ast_map_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.ASTMap_DRQ.Add(o);
-            base.DecRef(o);
+            lock (Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_ast_map_dec_ref(Context.nCtx, o);
+            }
         }
         #endregion
     }

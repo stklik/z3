@@ -15,8 +15,7 @@
 
  Revision History:
  --*/
-#ifndef LACKR_MODEL_CONSTRUCTOR_H_
-#define LACKR_MODEL_CONSTRUCTOR_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ackermannization/ackr_info.h"
@@ -49,7 +48,7 @@ class lackr_model_constructor {
     private:
         struct imp;
         imp * m_imp;
-        ast_manager &                      m_m;
+        ast_manager &                      m;
         enum {CHECKED, CONFLICT, UNKNOWN}  m_state;
         conflict_list                      m_conflicts;
         const ackr_info_ref                m_info;
@@ -58,4 +57,3 @@ class lackr_model_constructor {
 };
 
 typedef ref<lackr_model_constructor> lackr_model_constructor_ref;
-#endif /* MODEL_CONSTRUCTOR_H_ */

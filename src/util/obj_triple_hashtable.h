@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef OBJ_TRIPLE_HASHTABLE_H_
-#define OBJ_TRIPLE_HASHTABLE_H_
+#pragma once
 
 #include "util/hashtable.h"
 
@@ -31,11 +30,10 @@ Revision History:
 template<typename T1, typename T2, typename T3>
 class obj_triple_hash_entry {
     unsigned            m_hash; // cached hash code
-    triple<T1*, T2*, T3*> m_data;
+    triple<T1*, T2*, T3*> m_data { nullptr, nullptr, nullptr };
     
 public:
     typedef triple<T1*, T2*, T3*> data;
-    obj_triple_hash_entry():m_data(0,0,0) {}
     unsigned get_hash() const { return m_hash; }
     bool is_free() const { return m_data.first == 0; }
     bool is_deleted() const { return m_data.first == reinterpret_cast<T1 *>(1); }
@@ -62,19 +60,14 @@ protected:
     class entry;
 public:
     class key_data {
-        Key1 *   m_key1;
-        Key2 *   m_key2;
-        Key3 *   m_key3;
+        Key1 *   m_key1 = nullptr;
+        Key2 *   m_key2 = nullptr;
+        Key3 *   m_key3 = nullptr;
         Value    m_value;
-        unsigned m_hash;
+        unsigned m_hash = 0;
         friend class entry;
     public:
-        key_data():
-            m_key1(nullptr),
-            m_key2(nullptr),
-            m_key3(nullptr),
-            m_hash(0) {
-        }
+        key_data() = default;
         key_data(Key1 * k1, Key2 * k2, Key3 * k3):
             m_key1(k1), 
             m_key2(k2),
@@ -100,7 +93,6 @@ protected:
         key_data m_data;
     public:
         typedef key_data data;
-        entry() {}
         unsigned get_hash() const { return m_data.hash(); }
         bool is_free() const { return m_data.m_key1 == nullptr; }
         bool is_deleted() const { return m_data.m_key1 == reinterpret_cast<Key1 *>(1); }
@@ -176,5 +168,4 @@ public:
     }
 };
 
-#endif /* OBJ_TRIPLE_HASHTABLE_H_ */
 

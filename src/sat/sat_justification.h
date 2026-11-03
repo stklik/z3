@@ -16,26 +16,28 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_JUSTIFICATIONS_H_
-#define SAT_JUSTIFICATIONS_H_
+#pragma once
 
 namespace sat {
     
     class justification {
     public:
-        enum kind { NONE, BINARY, TERNARY, CLAUSE, EXT_JUSTIFICATION };
+        enum kind { NONE = 0, BINARY = 1, CLAUSE = 2, EXT_JUSTIFICATION = 3};
     private:
+        unsigned m_level;
         size_t m_val1;
         unsigned m_val2; 
-        justification(ext_justification_idx idx, kind k):m_val1(idx), m_val2(k) {}
+        justification(unsigned lvl, ext_justification_idx idx, kind k):m_level(lvl), m_val1(idx), m_val2(k) {}
         unsigned val1() const { return static_cast<unsigned>(m_val1); }
     public:
-        justification():m_val1(0), m_val2(NONE) {}
-        explicit justification(literal l):m_val1(l.to_uint()), m_val2(BINARY) {}
-        justification(literal l1, literal l2):m_val1(l1.to_uint()), m_val2(TERNARY + (l2.to_uint() << 3)) {}
-        explicit justification(clause_offset cls_off):m_val1(cls_off), m_val2(CLAUSE) {}
-        static justification mk_ext_justification(ext_justification_idx idx) { return justification(idx, EXT_JUSTIFICATION); }
+        justification(unsigned lvl):m_level(lvl), m_val1(0), m_val2(NONE) {}
+        explicit justification(unsigned lvl, literal l):m_level(lvl), m_val1(l.to_uint()), m_val2(BINARY) {}
+
+        explicit justification(unsigned lvl, clause_offset cls_off):m_level(lvl), m_val1(cls_off), m_val2(CLAUSE) {}
+        static justification mk_ext_justification(unsigned lvl, ext_justification_idx idx) { return justification(lvl, idx, EXT_JUSTIFICATION); }
         
+        unsigned level() const { return m_level; }
+
         kind get_kind() const { return static_cast<kind>(m_val2 & 7); }
         
         bool is_none() const { return m_val2 == NONE; }
@@ -43,15 +45,12 @@ namespace sat {
         bool is_binary_clause() const { return m_val2 == BINARY; }
         literal get_literal() const { SASSERT(is_binary_clause()); return to_literal(val1()); }
 
-        bool is_ternary_clause() const { return get_kind() == TERNARY; }
-        literal get_literal1() const { SASSERT(is_ternary_clause()); return to_literal(val1()); }
-        literal get_literal2() const { SASSERT(is_ternary_clause()); return to_literal(m_val2 >> 3); }
-
         bool is_clause() const { return m_val2 == CLAUSE; }
         clause_offset get_clause_offset() const { return m_val1; }
         
         bool is_ext_justification() const { return m_val2 == EXT_JUSTIFICATION; }
         ext_justification_idx get_ext_justification_idx() const { return m_val1; }
+
     };
 
     inline std::ostream & operator<<(std::ostream & out, justification const & j) {
@@ -62,9 +61,6 @@ namespace sat {
         case justification::BINARY:
             out << "binary " << j.get_literal();
             break;
-        case justification::TERNARY:
-            out << "ternary " << j.get_literal1() << " " << j.get_literal2();
-            break;
         case justification::CLAUSE:
             out << "clause";
             break;
@@ -72,8 +68,9 @@ namespace sat {
             out << "external";
             break;
         }
+        out << " @" << j.level();
         return out;
     }
-};
 
-#endif
+}
+

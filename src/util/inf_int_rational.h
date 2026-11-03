@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef INF_INT_RATIONAL_H_
-#define INF_INT_RATIONAL_H_
+#pragma once
 #include<stdlib.h>
 #include<string>
 #include "util/debug.h"
@@ -44,7 +43,7 @@ class inf_int_rational {
 
     struct eq_proc { bool operator()(inf_int_rational const& r1, inf_int_rational const& r2) const { return r1 == r2; } };
 
-    void swap(inf_int_rational & n) { 
+    void swap(inf_int_rational & n) noexcept {
         m_first.swap(n.m_first);
         std::swap(m_second, n.m_second);
     }
@@ -54,11 +53,6 @@ class inf_int_rational {
     inf_int_rational():
         m_first(rational()),
         m_second(0)
-     {}
-
-    inf_int_rational(const inf_int_rational & r): 
-        m_first(r.m_first),
-        m_second(r.m_second)
      {}
 
     explicit inf_int_rational(int n):
@@ -84,8 +78,6 @@ class inf_int_rational {
         m_first(r),
         m_second(i) {
     }
-
-    ~inf_int_rational() {}
 
     /**
        \brief Set inf_int_rational to 0.
@@ -129,12 +121,6 @@ class inf_int_rational {
 
     rational const & get_first() const { return m_first; }
 
-    inf_int_rational & operator=(const inf_int_rational & r) {
-        m_first = r.m_first;
-        m_second = r.m_second;
-        return *this;
-    }
-
     inf_int_rational & operator=(const rational & r) {
         m_first = r;
         m_second = 0;
@@ -165,8 +151,6 @@ class inf_int_rational {
         m_second *= r.get_int32();
         return *this; 
     }
-
-
 
     inf_int_rational & operator-=(const inf_int_rational & r) { 
         m_first  -= r.m_first;
@@ -386,4 +370,3 @@ inline inf_int_rational abs(const inf_int_rational & r) {
     return result;
 }
 
-#endif /* INF_INT_RATIONAL_H_ */

@@ -19,9 +19,9 @@ Revision History:
 
 --*/
 
-#ifndef _SYM_MUX_H_
-#define _SYM_MUX_H_
+#pragma once
 
+#include <optional>
 #include <string>
 
 #include "ast/ast.h"
@@ -35,7 +35,7 @@ private:
     public:
         func_decl_ref m_main;
         func_decl_ref_vector m_variants;
-        sym_mux_entry(ast_manager &m) : m_main(m), m_variants(m) {};
+        sym_mux_entry(ast_manager &m) : m_main(m), m_variants(m) {}
     };
 
     typedef obj_map<func_decl, sym_mux_entry*> decl2entry_map;
@@ -54,9 +54,9 @@ public:
     ast_manager & get_manager() const { return m; }
 
     void register_decl(func_decl *fdecl);
-    bool find_idx(func_decl * sym, unsigned & idx) const;
+    std::optional<unsigned> find_idx(func_decl * sym) const;
     bool has_index(func_decl * sym, unsigned idx) const
-    {unsigned v; return find_idx(sym, v) && idx == v;}
+    {auto v = find_idx(sym); return v && *v == idx;}
 
     bool is_muxed(func_decl *fdecl) const {return m_muxes.contains(fdecl);}
 
@@ -91,4 +91,3 @@ public:
 };
 }
 
-#endif

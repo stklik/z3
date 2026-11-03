@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_FAILURE_H_
-#define SMT_FAILURE_H_
+#pragma once
 
 namespace smt {
 
@@ -27,15 +26,14 @@ namespace smt {
     enum failure {
         OK,
         UNKNOWN,
-        TIMEOUT,    
         MEMOUT,     
         CANCELED,      //!< External cancel flag was set
         NUM_CONFLICTS, //!< Maximum number of conflicts was reached
         THEORY,        //!< Theory is incomplete
-        RESOURCE_LIMIT,
+        RESOURCE_LIMIT,       
+        LAMBDAS,       //!< Logical context contains lambdas.
         QUANTIFIERS    //!< Logical context contains universal quantifiers.
     };
 
-};
+}
 
-#endif

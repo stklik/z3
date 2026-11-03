@@ -23,6 +23,7 @@ Revision History:
 #include "ast/array_decl_plugin.h"
 #include "ast/for_each_expr.h"
 #include "ast/reg_decl_plugins.h"
+#include <iostream>
 
 namespace find_q {
     struct proc {
@@ -32,7 +33,7 @@ namespace find_q {
         void operator()(app * n) {}
         void operator()(quantifier * n) { m_q = n; }
     };
-};
+}
 
 quantifier * find_quantifier(expr * n) {
     find_q::proc p;
@@ -48,10 +49,10 @@ void tst_instantiate(ast_manager & m, expr * f) {
     quantifier * q = find_quantifier(f);
     if (q) {
         expr_ref_vector cnsts(m);
-        for (unsigned i = 0; i < q->get_num_decls(); i++) 
+        for (unsigned i = 0; i < q->get_num_decls(); ++i) 
             cnsts.push_back(m.mk_fresh_const("a", q->get_decl_sort(i)));
-        expr_ref r = instantiate(m, q, cnsts.c_ptr());
-        TRACE("var_subst", tout << "quantifier:\n" << mk_pp(q, m) << "\nresult:\n" << mk_pp(r, m) << "\n";);
+        expr_ref r = instantiate(m, q, cnsts.data());
+        TRACE(var_subst, tout << "quantifier:\n" << mk_pp(q, m) << "\nresult:\n" << mk_pp(r, m) << "\n";);
     }
 }
 
@@ -70,19 +71,29 @@ void tst_subst(ast_manager& m) {
     z = m.mk_var(2, s);
     u = m.mk_var(3, s);
     v = m.mk_var(4, s);
-    e1 = m.mk_and(m.mk_app(p, x.get(), y.get()), m.mk_app(p, z.get(), u.get()));
+    {
+        expr_ref lhs(m.mk_app(p, x.get(), y.get()), m);
+        expr_ref rhs(m.mk_app(p, z.get(), u.get()), m);
+        e1 = m.mk_and(lhs, rhs);
+    }
     e2 = m.mk_forall(1, ss, names, e1);
-    t1 = m.mk_forall(1, ss, names, 
-                     m.mk_and(m.mk_app(p, x.get(), z.get()), m.mk_app(p, y.get(), u.get())));
-    t2 = m.mk_forall(2, ss, names, 
-                     m.mk_and(m.mk_app(p, x.get(), y.get()), m.mk_app(p, u.get(), z.get())));
-    
+    {
+        expr_ref lhs(m.mk_app(p, x.get(), z.get()), m);
+        expr_ref rhs(m.mk_app(p, y.get(), u.get()), m);
+        t1 = m.mk_forall(1, ss, names, m.mk_and(lhs, rhs));
+    }
+    {
+        expr_ref lhs(m.mk_app(p, x.get(), y.get()), m);
+        expr_ref rhs(m.mk_app(p, u.get(), z.get()), m);
+        t2 = m.mk_forall(2, ss, names, m.mk_and(lhs, rhs));
+    }
+
     var_subst subst(m);
     expr_ref_vector sub1(m);
     sub1.push_back(x);
     sub1.push_back(y);
     // replace #1 -> #2, #2 -> #1
-    e3 = subst(e2, 2, sub1.c_ptr());
+    e3 = subst(e2, 2, sub1.data());
     std::cout << mk_pp(e2, m) << "\n";
     std::cout << mk_pp(e3, m) << "\n";
     std::cout << mk_pp(t1, m) << "\n";
@@ -90,7 +101,7 @@ void tst_subst(ast_manager& m) {
 
     // replace #2 -> #3, #3 -> #2
     e2 = m.mk_forall(2, ss, names, e1);
-    e3 = subst(e2, 2, sub1.c_ptr());
+    e3 = subst(e2, 2, sub1.data());
     std::cout << mk_pp(e2, m) << "\n";
     std::cout << mk_pp(e3, m) << "\n";
     std::cout << mk_pp(t2, m) << "\n";

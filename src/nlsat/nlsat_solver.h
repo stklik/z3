@@ -18,22 +18,41 @@ Author:
 Revision History:
 
 --*/
-#ifndef NLSAT_SOLVER_H_
-#define NLSAT_SOLVER_H_
+#pragma once
 
 #include "nlsat/nlsat_types.h"
+#include "nlsat/nlsat_transcendentals.h"
 #include "util/params.h"
 #include "util/statistics.h"
 #include "util/rlimit.h"
+#include "util/dependency.h"
 
 namespace nlsat {
 
     class evaluator;
     class explain;
 
+    class display_assumption_proc {
+    public:
+        virtual ~display_assumption_proc() = default;
+        virtual std::ostream& operator()(std::ostream& out, assumption a) const = 0;
+    };
+
+    struct bound_constraint {
+        var x;
+        polynomial_ref A, B;
+        bool is_strict;
+        clause* c;
+        bound_constraint(var x, polynomial_ref& A, polynomial_ref& B, bool is_strict, clause* c) :
+            x(x), A(A), B(B), is_strict(is_strict), c(c) {}
+    };
+
     class solver {
         struct imp;
+        struct ctx;
         imp * m_imp;
+        ctx * m_ctx;
+        solver(ctx& c);
     public:
         solver(reslimit& rlim, params_ref const & p, bool incremental);
         ~solver();
@@ -54,6 +73,8 @@ namespace nlsat {
         pmanager & pm();
 
         void set_display_var(display_var_proc const & proc);
+
+        void set_display_assumption(display_assumption_proc const& proc);
 
         // -----------------------
         //
@@ -93,22 +114,69 @@ namespace nlsat {
            e[i] = 1 if is_even[i] is false
            e[i] = 2 if is_even[i] is true
         */
-        literal mk_ineq_literal(atom::kind k, unsigned sz, poly * const * ps, bool const * is_even);
+        literal mk_ineq_literal(atom::kind k, unsigned sz, poly * const * ps, bool const * is_even, bool simplify = false);
 
         /**
            \brief Create an atom of the form: x=root[i](p), x<root[i](p), x>root[i](p)
         */
         bool_var mk_root_atom(atom::kind k, var x, unsigned i, poly * p);
 
+        /**
+           \brief Register a transcendental function application (sin/cos/exp/atan)
+           to be refined directly by nlsat's own search loop; see
+           nlsat_transcendentals.h. Refinement is enabled automatically the
+           moment at least one such application is registered - there is no
+           separate on/off parameter.
+        */
+        void add_transcendental(transcendental_op_kind op, var arg, var val);
+
+        /**
+           \brief Register the nullary constant pi with the persistent
+           transcendentals engine (see nlsat_transcendentals.h::add_pi).
+        */
+        void add_pi(var val);
+
+        /**
+           \brief Register a binary atan2(y, x) application to be refined
+           directly by nlsat's own search loop (see
+           nlsat_transcendentals.h::add_atan2).
+        */
+        void add_atan2(var y, var x, var val);
+
+        /**
+           \brief True if at least one transcendental application has been
+           registered (see add_transcendental/add_pi/add_atan2), i.e. this
+           solver's own search loop refines them.
+        */
+        bool transcendentals_enabled() const;
+
         void inc_ref(bool_var b);
         void inc_ref(literal l) { inc_ref(l.var()); }
         void dec_ref(bool_var b);
         void dec_ref(literal l) { dec_ref(l.var()); }
+        void inc_ref(assumption a);
+        void dec_ref(assumption a);
+        
         
         /**
            \brief Create a new clause.
         */
         void mk_clause(unsigned num_lits, literal * lits, assumption a = nullptr);
+
+        /**
+           \brief Borrow the learned clauses and inspect their external assumption tags.
+           Clause pointers remain valid only until the next solver mutation.
+        */
+        ptr_vector<clause> const& get_lemmas() const;
+        void get_dependencies(clause const& c, vector<assumption, false>& deps) const;
+
+        /**
+           \brief Retract clauses depending on the non-null external scope_tag,
+           preserving independent learned clauses without rebuilding surviving atoms.
+           Keep at most max_lemmas learned clauses, preferring shorter clauses.
+           Requires an incremental solver. Invalidates the model and unsat core.
+        */
+        void retract(assumption scope_tag, unsigned max_lemmas = UINT_MAX);
 
         // -----------------------
         //
@@ -159,12 +227,45 @@ namespace nlsat {
         void get_rvalues(assignment& as);
         void set_rvalues(assignment const& as);
 
-        void get_bvalues(svector<lbool>& vs);
+        void get_bvalues(svector<bool_var> const& bvars, svector<lbool>& vs);
         void set_bvalues(svector<lbool> const& vs);
+
+        /**
+        * \brief Access functions for simplify module.
+        */
+        void del_clause(clause* c);
+        clause* mk_clause(unsigned n, literal const* lits, bool learned, internal_assumption a);
+        bool has_root_atom(clause const& c) const;
+        assumption join(assumption a, assumption b);
+
+        void inc_simplify();
+        void record_levelwise_result(bool success);
+        void add_bound(bound_constraint const& c);
 
         /**
            \brief reorder variables. 
          */
+        /**
+           \brief Optimization support: when x is the designated maximization
+           variable, the solver assigns x the largest value compatible with the
+           current infeasible intervals (instead of an arbitrary witness) and
+           does not reorder variables, so that x keeps its position in the
+           variable order. Use null_var to disable.
+        */
+        void set_max_var(var x);
+        /**
+           \brief Query right after check() returns l_true. If the feasible set
+           of the maximization variable is bounded above, set sup to its
+           supremum, set attained to true when the assigned value equals sup
+           (false when the supremum is open and the value lies below it), and
+           return true. Return false when the feasible set is unbounded above;
+           that is not a verdict on the problem, since clauses learned in later
+           rounds may still bound the variable. The answer is read from the
+           solver's infeasible-interval sets, so it goes stale after further
+           mk_clause or check calls.
+        */
+        bool max_var_sup(anum & sup, bool & attained) const;
+
         void reorder(unsigned sz, var const* permutation);
         void restore_order();
 
@@ -183,6 +284,34 @@ namespace nlsat {
         lbool check();
 
         lbool check(literal_vector& assumptions);
+
+        /**
+           \brief Decide whether feasible values of x approach bound from below,
+           or are unbounded above when bound is null.
+
+           Project satisfying regions onto x and cover them until a feasible
+           interval reaches the limit or no feasible values remain. A finite
+           limit need not be an upper bound of the original problem.
+
+           Requires an incremental solver with x == 0 and no active reordering.
+           Integer variables return l_undef. Resource exceptions propagate.
+           Temporary clauses are retracted on exit, including on cancellation;
+           the previous model and unsat core are invalidated.
+        */
+        lbool check_limit(var x, anum const* bound = nullptr);
+
+        //
+        // check satisfiability of asserted formulas relative to state of the nlsat solver.
+        // produce either,
+        // l_true - a model is available (rvalues can be ignored) or,
+        // l_false - a clause (not core v not cell) excluding a cell around rvalues if core (consisting of atoms
+        // passed to nlsat) is asserted.
+        // l_undef - if the search was interrupted by a resource limit.
+        // clause is a list of literals. Their disjunction is valid.
+        // Different implementations of check are possible. One where cell comprises of linear polynomials could
+        // produce lemmas that are friendly to linear arithmetic solvers.
+        //
+        lbool check(assignment const& rvalues, literal_vector& clause);
 
         // -----------------------
         //
@@ -210,7 +339,12 @@ namespace nlsat {
         // -----------------------
         void updt_params(params_ref const & p);
         static void collect_param_descrs(param_descrs & d);
-
+        const assignment& sample() const;
+        assignment& sample(); 
+        bool apply_levelwise() const;
+        unsigned lws_spt_threshold() const;
+        bool lws_witness_subs_lc() const;
+        bool lws_witness_subs_disc() const;
         void reset();
         void collect_statistics(statistics & st);
         void reset_statistics();
@@ -234,7 +368,21 @@ namespace nlsat {
 
         std::ostream& display(std::ostream & out, unsigned n, literal const* ls) const;
 
+        std::ostream& display(std::ostream& out, clause const& c) const;
+
+        std::ostream& display(std::ostream & out, literal_vector const& ls) const;
+
         std::ostream& display(std::ostream & out, atom const& a) const;
+
+        std::ostream& display_smt2(std::ostream & out, literal l) const;
+
+        std::ostream& display_smt2(std::ostream & out, unsigned n, literal const* ls) const;
+
+        std::ostream& display_smt2(std::ostream & out, literal_vector const& ls) const;
+
+
+
+        std::ostream& display_smt2(std::ostream & out) const;
 
         /**
            \brief Display variable
@@ -242,8 +390,11 @@ namespace nlsat {
         std::ostream& display(std::ostream & out, var x) const;
         
         display_var_proc const & display_proc() const;
+
+        std::ostream& display_assignment(std::ostream& out) const;
+
+        std::ostream& display_var(std::ostream& out, unsigned j) const;
+
     };
 
-};
-
-#endif
+}

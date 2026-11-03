@@ -18,15 +18,19 @@ Notes:
 --*/
 #include "util/scoped_timer.h"
 #include "util/cancel_eh.h"
-#include "util/cooperate.h"
 #include "util/scoped_ptr_vector.h"
-#include "util/z3_omp.h"
 #include "tactic/tactical.h"
+#include "tactic/goal_proof_converter.h"
+#ifndef SINGLE_THREAD
+#include <thread>
+#endif
+#include <vector>
 
 class binary_tactical : public tactic {
 protected:
     tactic_ref      m_t1;
     tactic_ref      m_t2;
+    bool            m_clean = true;
     
 public:
 
@@ -36,8 +40,6 @@ public:
         SASSERT(m_t1);
         SASSERT(m_t2);
     }
-    
-    ~binary_tactical() override { }
     
     void updt_params(params_ref const & p) override {
         m_t1->updt_params(p);
@@ -60,8 +62,11 @@ public:
     }
         
     void cleanup() override {
+        if (m_clean)
+            return;
         m_t1->cleanup();
         m_t2->cleanup();
+        m_clean = true;
     }
     
     void reset() override {
@@ -99,9 +104,11 @@ struct false_pred {
 class and_then_tactical : public binary_tactical {
 public:
     and_then_tactical(tactic * t1, tactic * t2):binary_tactical(t1, t2) {}
-    ~and_then_tactical() override {}
 
-    void operator()(goal_ref const & in, goal_ref_buffer& result) override { 
+    char const* name() const override { return "and_then"; }
+
+    void operator()(goal_ref const & in, goal_ref_buffer& result) override {
+        m_clean = false;
 
         bool proofs_enabled = in->proofs_enabled();
         bool cores_enabled  = in->unsat_core_enabled();
@@ -121,7 +128,7 @@ public:
         }
         else {
             goal_ref_buffer r2;
-            for (unsigned i = 0; i < r1_size; i++) {                                                        
+            for (unsigned i = 0; i < r1_size; ++i) {                                                        
                 goal_ref g = r1[i];                                                                       
                 r2.reset();
                 m_t2->operator()(g, r2);
@@ -138,7 +145,7 @@ public:
                     }                                                                         
                 }                                                                                       
                 else {                                                                                      
-                    result.append(r2.size(), r2.c_ptr());
+                    result.append(r2.size(), r2.data());
                 }                                                                                           
             }
                         
@@ -149,7 +156,8 @@ public:
                 proof_ref pr(m);
                 expr_dependency_ref core(m);
                 if (proofs_enabled) {
-                    apply(m, in->pc(), pr);
+                    pr = apply(m, in->pc());
+                    in->set(static_cast<proof_converter*>(nullptr));
                 }
                 dependency_converter* dc = in->dc();
                 if (cores_enabled && dc) {
@@ -163,6 +171,60 @@ public:
 
     tactic * translate(ast_manager & m) override {
         return translate_core<and_then_tactical>(m);
+    }
+
+    void register_on_clause(void* ctx, user_propagator::on_clause_eh_t& on_clause) override {
+        m_t2->register_on_clause(ctx, on_clause);
+    }
+
+    void user_propagate_init(
+        void* ctx,
+        user_propagator::push_eh_t& push_eh,
+        user_propagator::pop_eh_t& pop_eh,
+        user_propagator::fresh_eh_t& fresh_eh) override {
+        m_t2->user_propagate_init(ctx, push_eh, pop_eh, fresh_eh);
+    }
+
+    void user_propagate_register_fixed(user_propagator::fixed_eh_t& fixed_eh) override {
+        m_t2->user_propagate_register_fixed(fixed_eh);
+    }
+
+    void user_propagate_register_final(user_propagator::final_eh_t& final_eh) override {
+        m_t2->user_propagate_register_final(final_eh);
+    }
+
+    void user_propagate_register_eq(user_propagator::eq_eh_t& eq_eh) override {
+        m_t2->user_propagate_register_eq(eq_eh);
+    }
+
+    void user_propagate_register_diseq(user_propagator::eq_eh_t& diseq_eh) override {
+        m_t2->user_propagate_register_diseq(diseq_eh);
+    }
+
+    void user_propagate_register_on_binding(user_propagator::binding_eh_t& binding_eh) override {
+        m_t2->user_propagate_register_on_binding(binding_eh);
+    }
+
+    void user_propagate_register_expr(expr* e) override {
+        m_t1->user_propagate_register_expr(e);
+        m_t2->user_propagate_register_expr(e);
+    }
+
+    void user_propagate_clear() override {
+        m_t1->user_propagate_clear();
+        m_t2->user_propagate_clear();
+    }
+
+    void user_propagate_register_created(user_propagator::created_eh_t& created_eh) override {
+        m_t2->user_propagate_register_created(created_eh);
+    }
+
+    void user_propagate_register_decide(user_propagator::decide_eh_t& decide_eh) override {
+        m_t2->user_propagate_register_decide(decide_eh);
+    }
+
+    void user_propagate_initialize_value(expr* var, expr* value) override {
+        m_t2->user_propagate_initialize_value(var, value);
     }
 
 };
@@ -224,16 +286,14 @@ protected:
 
 public:
     nary_tactical(unsigned num, tactic * const * ts) {
-        for (unsigned i = 0; i < num; i++) {
+        for (unsigned i = 0; i < num; ++i) {
             SASSERT(ts[i]);
             m_ts.push_back(ts[i]);
         }
     }
 
-    ~nary_tactical() override { }
-
     void updt_params(params_ref const & p) override {
-        TRACE("nary_tactical_updt_params", tout << "updt_params: " << p << "\n";);
+        TRACE(nary_tactical_updt_params, tout << "updt_params: " << p << "\n";);
         for (tactic* t : m_ts) t->updt_params(p);
     }
     
@@ -273,7 +333,7 @@ protected:
         for (tactic* curr : m_ts) {
             new_ts.push_back(curr->translate(m));
         }
-        return alloc(T, new_ts.size(), new_ts.c_ptr());
+        return alloc(T, new_ts.size(), new_ts.data());
     }
 
 };
@@ -282,13 +342,13 @@ class or_else_tactical : public nary_tactical {
 public:
     or_else_tactical(unsigned num, tactic * const * ts):nary_tactical(num, ts) { SASSERT(num > 0); }
 
-    ~or_else_tactical() override {}
+    char const* name() const override { return "or_else"; }
 
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         goal orig(*(in.get()));
         unsigned sz = m_ts.size();
         unsigned i;
-        for (i = 0; i < sz; i++) {
+        for (i = 0; i < sz; ++i) {
             tactic * t = m_ts[i];
             SASSERT(sz > 0);
             if (i < sz - 1) {
@@ -298,6 +358,28 @@ public:
                 }
                 catch (tactic_exception &) {
                     result.reset();
+                }
+                catch (rewriter_exception&) {
+                    result.reset();
+                }
+                catch (z3_error & ex) {
+                    IF_VERBOSE(10, verbose_stream() << "z3 error: " << ex.error_code() << " in or-else\n");
+                    throw;
+                }
+                catch (z3_exception& ex) {
+                    IF_VERBOSE(10, verbose_stream() << ex.what() << " in or-else\n");
+                    throw;
+                }
+                catch (const std::exception &ex) {
+                    IF_VERBOSE(10, verbose_stream() << ex.what() << " in or-else\n");
+                    throw;
+                }
+                catch (...) {
+                    IF_VERBOSE(10, verbose_stream() << " unclassified exception in or-else\n");
+                    // std::current_exception returns a std::exception_ptr, which apparently 
+                    // needs to be re-thrown to extract type information.
+                    // typeid(ex).name() would be nice.
+                    throw;
                 }
             }
             else {
@@ -310,6 +392,12 @@ public:
     }
 
     tactic * translate(ast_manager & m) override { return translate_core<or_else_tactical>(m); }
+
+    void user_propagate_initialize_value(expr* var, expr* value) override {
+        for (auto t : m_ts)
+            t->user_propagate_initialize_value(var, value);
+    }
+
 };
 
 tactic * or_else(unsigned num, tactic * const * ts) {
@@ -361,6 +449,14 @@ tactic * or_else(tactic * t1, tactic * t2, tactic * t3, tactic * t4, tactic * t5
     return or_else(10, ts);
 }
 
+#ifdef SINGLE_THREAD
+
+tactic* par(unsigned num, tactic* const* ts) {
+    return alloc(or_else_tactical, num, ts);
+}
+
+#else
+
 enum par_exception_kind {
     TACTIC_EX,
     DEFAULT_EX,
@@ -369,20 +465,19 @@ enum par_exception_kind {
 
 class par_tactical : public or_else_tactical {
 
+	std::string        ex_msg;
+	unsigned           error_code;
 
 public:
-    par_tactical(unsigned num, tactic * const * ts):or_else_tactical(num, ts) {}
-    ~par_tactical() override {}
+    par_tactical(unsigned num, tactic * const * ts):or_else_tactical(num, ts) {
+		error_code = 0;
+	}
 
-    
+    char const* name() const override { return "par"; }
 
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         bool use_seq;
-#ifdef _NO_OMP_
-        use_seq = true;
-#else
-        use_seq = 0 != omp_in_parallel();
-#endif
+        use_seq = false;
         if (use_seq) {
             // execute tasks sequentially
             or_else_tactical::operator()(in, result);
@@ -391,12 +486,15 @@ public:
         
         ast_manager & m = in->m();
         
+        if (m.has_trace_stream())
+            throw default_exception("threads and trace are incompatible");
+
         scoped_ptr_vector<ast_manager> managers;
         scoped_limits scl(m.limit());
         goal_ref_vector                in_copies;
         tactic_ref_vector              ts;
         unsigned sz = m_ts.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             ast_manager * new_m = alloc(ast_manager, m, !m.proof_mode());
             managers.push_back(new_m);
             ast_translation translator(m, *new_m);
@@ -407,32 +505,31 @@ public:
 
         unsigned finished_id       = UINT_MAX;
         par_exception_kind ex_kind = DEFAULT_EX;
-        std::string        ex_msg;
-        unsigned           error_code = 0;
-        
-        #pragma omp parallel for
-        for (int i = 0; i < static_cast<int>(sz); i++) {
-            goal_ref_buffer     _result;
-            
+
+        std::mutex         mux;
+
+        auto worker_thread = [&](unsigned i) {
+            goal_ref_buffer     _result;                        
             goal_ref in_copy = in_copies[i];
             tactic & t = *(ts.get(i));
             
             try {
                 t(in_copy, _result);
                 bool first = false;
-                #pragma omp critical (par_tactical)
                 {
+                    std::lock_guard<std::mutex> lock(mux);
                     if (finished_id == UINT_MAX) {
                         finished_id = i;
                         first = true;
                     }
                 }                
                 if (first) {
-                    for (unsigned j = 0; j < sz; j++) {
-                        if (static_cast<unsigned>(i) != j) {
+                    for (unsigned j = 0; j < sz; ++j) {
+                        if (i != j) {
                             managers[j]->limit().cancel();
                         }
                     }
+                    
                     ast_translation translator(*(managers[i]), m, false);
                     for (goal* g : _result) {
                         result.push_back(g->translate(translator));
@@ -444,7 +541,7 @@ public:
             catch (tactic_exception & ex) {
                 if (i == 0) {
                     ex_kind = TACTIC_EX;
-                    ex_msg = ex.msg();
+                    ex_msg = ex.what();
                 }
             }
             catch (z3_error & err) {
@@ -456,10 +553,20 @@ public:
             catch (z3_exception & z3_ex) {
                 if (i == 0) {
                     ex_kind = DEFAULT_EX;
-                    ex_msg = z3_ex.msg();
+                    ex_msg = z3_ex.what();
                 }
             }
+        };
+
+        vector<std::thread> threads(sz);
+
+        for (unsigned i = 0; i < sz; ++i) {
+            threads[i] = std::thread([&, i]() { worker_thread(i); });
         }
+        for (unsigned i = 0; i < sz; ++i) {
+            threads[i].join();
+        }
+        
         if (finished_id == UINT_MAX) {
             switch (ex_kind) {
             case ERROR_EX: throw z3_error(error_code);
@@ -477,6 +584,8 @@ tactic * par(unsigned num, tactic * const * ts) {
     return alloc(par_tactical, num, ts);
 }
 
+#endif
+
 tactic * par(tactic * t1, tactic * t2) {
     tactic * ts[2] = { t1, t2 };
     return par(2, ts);
@@ -492,18 +601,23 @@ tactic * par(tactic * t1, tactic * t2, tactic * t3, tactic * t4) {
     return par(4, ts);
 }
 
+
+#ifdef SINGLE_THREAD
+
+tactic * par_and_then(tactic * t1, tactic * t2) {
+    return alloc(and_then_tactical, t1, t2);
+}
+
+#else
 class par_and_then_tactical : public and_then_tactical {
 public:
     par_and_then_tactical(tactic * t1, tactic * t2):and_then_tactical(t1, t2) {}
-    ~par_and_then_tactical() override {}
+
+    char const* name() const override { return "par_then"; }
 
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         bool use_seq;
-#ifdef _NO_OMP_
-        use_seq = true;
-#else
-        use_seq = 0 != omp_in_parallel();
-#endif
+        use_seq = false;
         if (use_seq) {
             // execute tasks sequentially
             and_then_tactical::operator()(in, result);
@@ -535,7 +649,7 @@ public:
             tactic_ref_vector              ts2;
             goal_ref_vector                g_copies;
 
-            for (unsigned i = 0; i < r1_size; i++) {
+            for (unsigned i = 0; i < r1_size; ++i) {
                 ast_manager * new_m = alloc(ast_manager, m, !m.proof_mode());
                 managers.push_back(new_m);
                 ast_translation translator(m, *new_m);
@@ -554,9 +668,9 @@ public:
             par_exception_kind ex_kind = DEFAULT_EX;
             unsigned error_code = 0;
             std::string  ex_msg;
+            std::mutex mux;
 
-            #pragma omp parallel for
-            for (int i = 0; i < static_cast<int>(r1_size); i++) { 
+            auto worker_thread = [&](unsigned i) {
                 ast_manager & new_m = *(managers[i]);
                 goal_ref new_g = g_copies[i];
 
@@ -568,19 +682,19 @@ public:
                     ts2[i]->operator()(new_g, r2);                  
                 }
                 catch (tactic_exception & ex) {
-                    #pragma omp critical (par_and_then_tactical)
                     {
+                        std::lock_guard<std::mutex> lock(mux);
                         if (!failed && !found_solution) {
                             curr_failed = true;
                             failed      = true;
                             ex_kind     = TACTIC_EX;
-                            ex_msg      = ex.msg();
+                            ex_msg      = ex.what();
                         }
                     }
                 }
                 catch (z3_error & err) {
-                    #pragma omp critical (par_and_then_tactical)
                     {
+                        std::lock_guard<std::mutex> lock(mux);
                         if (!failed && !found_solution) {
                             curr_failed = true;
                             failed      = true;
@@ -590,19 +704,19 @@ public:
                     }                    
                 }
                 catch (z3_exception & z3_ex) {
-                    #pragma omp critical (par_and_then_tactical)
                     {
+                        std::lock_guard<std::mutex> lock(mux);
                         if (!failed && !found_solution) {
                             curr_failed = true;
                             failed      = true;
                             ex_kind     = DEFAULT_EX;
-                            ex_msg      = z3_ex.msg();
+                            ex_msg      = z3_ex.what();
                         }
                     }
                 }
 
                 if (curr_failed) {
-                    for (unsigned j = 0; j < r1_size; j++) {
+                    for (unsigned j = 0; j < r1_size; ++j) {
                         if (static_cast<unsigned>(i) != j) {
                             managers[j]->limit().cancel();
                         }
@@ -614,8 +728,8 @@ public:
                         if (is_decided_sat(r2)) {                                                          
                             // found solution... 
                             bool first = false;
-                            #pragma omp critical (par_and_then_tactical)
                             {
+                                std::lock_guard<std::mutex> lock(mux);
                                 if (!found_solution) {
                                     failed         = false;
                                     found_solution = true;
@@ -623,7 +737,7 @@ public:
                                 }
                             }
                             if (first) {
-                                for (unsigned j = 0; j < r1_size; j++) {
+                                for (unsigned j = 0; j < r1_size; ++j) {
                                     if (static_cast<unsigned>(i) != j) {
                                         managers[j]->limit().cancel();
                                     }
@@ -636,7 +750,7 @@ public:
                         else {                                                                                  
                             SASSERT(is_decided_unsat(r2));                                                 
                             
-                            if (cores_enabled && r2[0]->dep(0) != 0) {
+                            if (cores_enabled && r2[0]->dep(0) != nullptr) {
                                 expr_dependency_ref * new_dep = alloc(expr_dependency_ref, new_m);
                                 *new_dep = r2[0]->dep(0);
                                 core_buffer.set(i, new_dep);
@@ -646,7 +760,7 @@ public:
                     else {                                                                                      
                         goal_ref_buffer * new_r2 = alloc(goal_ref_buffer);
                         goals_vect.set(i, new_r2);
-                        new_r2->append(r2.size(), r2.c_ptr());
+                        new_r2->append(r2.size(), r2.data());
                         dependency_converter* dc = r1[i]->dc();                           
                         if (cores_enabled && dc) {
                             expr_dependency_ref * new_dep = alloc(expr_dependency_ref, new_m);
@@ -655,6 +769,17 @@ public:
                         }
                     }                                                                                           
                 }
+            };
+
+            if (m.has_trace_stream())
+                throw default_exception("threads and trace are incompatible");
+
+            vector<std::thread> threads(r1_size);
+            for (unsigned i = 0; i < r1_size; ++i) {
+                threads[i] = std::thread([&, i]() { worker_thread(i); });
+            }
+            for (unsigned i = 0; i < r1_size; ++i) {
+                threads[i].join();
             }
             
             if (failed) {
@@ -670,18 +795,18 @@ public:
                 return;
             
             expr_dependency_ref core(m);
-            for (unsigned i = 0; i < r1_size; i++) {
+            for (unsigned i = 0; i < r1_size; ++i) {
                 ast_translation translator(*(managers[i]), m, false);
                 goal_ref_buffer * r = goals_vect[i];
                 unsigned j = result.size();
-                if (r != 0) {
-                    for (unsigned k = 0; k < r->size(); k++) {
+                if (r != nullptr) {
+                    for (unsigned k = 0; k < r->size(); ++k) {
                         result.push_back((*r)[k]->translate(translator));
                     }
                 }
                 if (proofs_enabled) {
                     // update proof converter of r1[i]
-                    r1[i]->set(concat(r1[i]->pc(), result.size() - j, result.c_ptr() + j));
+                    r1[i]->set(concat(r1[i]->pc(), result.size() - j, result.data() + j));
                 }
                 expr_dependency_translation td(translator);
                 if (core_buffer[i] != nullptr) {
@@ -700,7 +825,8 @@ public:
                 in->reset_all();
                 proof_ref pr(m);
                 if (proofs_enabled) {
-                    apply(m, in->pc(), pr);
+                    pr = apply(m, in->pc());
+                    in->set(static_cast<proof_converter*>(nullptr));
                 }
                 dependency_converter* dc = in->dc();
                 if (cores_enabled && dc) {
@@ -722,6 +848,7 @@ public:
 tactic * par_and_then(tactic * t1, tactic * t2) {
     return alloc(par_and_then_tactical, t1, t2);
 }
+#endif
 
 tactic * par_and_then(unsigned num, tactic * const * ts) {
     unsigned i = num - 1;
@@ -736,21 +863,21 @@ tactic * par_and_then(unsigned num, tactic * const * ts) {
 class unary_tactical : public tactic {
 protected:
     tactic_ref m_t;
+    bool m_clean = true;
 
 
 public:
     unary_tactical(tactic * t): 
         m_t(t) {
         SASSERT(t);  
-    }    
+    }
 
-    virtual ~unary_tactical() { }
-
-    void operator()(goal_ref const & in, goal_ref_buffer& result) override { 
+    void operator()(goal_ref const & in, goal_ref_buffer& result) override {
+        m_clean = false;
         m_t->operator()(in, result);
     }
    
-    void cleanup(void) override { m_t->cleanup(); }
+    void cleanup(void) override { if (!m_clean) m_t->cleanup(); m_clean = true; }
     void collect_statistics(statistics & st) const override { m_t->collect_statistics(st); }
     void reset_statistics() override { m_t->reset_statistics(); }    
     void updt_params(params_ref const & p) override { m_t->updt_params(p); }
@@ -758,6 +885,10 @@ public:
     void reset() override { m_t->reset(); }
     void set_logic(symbol const& l) override { m_t->set_logic(l); }    
     void set_progress_callback(progress_callback * callback) override { m_t->set_progress_callback(callback); }
+    void user_propagate_register_expr(expr* e) override { m_t->user_propagate_register_expr(e); }
+    void user_propagate_clear() override { m_t->user_propagate_clear(); }
+    void user_propagate_initialize_value(expr* var, expr* value) override { m_t->user_propagate_initialize_value(var, value); }
+
 protected:
 
     template<typename T>
@@ -773,11 +904,6 @@ class repeat_tactical : public unary_tactical {
     void operator()(unsigned depth,
                     goal_ref const & in, 
                     goal_ref_buffer& result) {
-        // TODO: implement a non-recursive version.
-        if (depth > m_max_depth) {
-            result.push_back(in.get());
-            return;
-        }
 
         bool models_enabled = in->models_enabled();
         bool proofs_enabled = in->proofs_enabled();
@@ -785,64 +911,73 @@ class repeat_tactical : public unary_tactical {
 
         ast_manager & m = in->m();                                                                          
         goal_ref_buffer      r1;  
-        result.reset();          
+        goal_ref g = in;
+        unsigned r1_size = 0;
+        result.reset();      
+    try_goal:
+        r1.reset();
+        if (depth > m_max_depth) {
+            result.push_back(g.get());
+            return;
+        }
         {
-            goal orig_in(in->m(), proofs_enabled, models_enabled, cores_enabled);
-            orig_in.copy_from(*(in.get()));
-            m_t->operator()(in, r1);                                                            
+            goal orig_in(g->m(), proofs_enabled, models_enabled, cores_enabled);
+            orig_in.copy_from(*(g.get()));
+            m_t->operator()(g, r1);                                                            
             if (r1.size() == 1 && is_equal(orig_in, *(r1[0]))) {
                 result.push_back(r1[0]);
                 return;                                                                                     
             }
         }
-        unsigned r1_size = r1.size();                                                                       
-        SASSERT(r1_size > 0);                                                                               
+        r1_size = r1.size();                                                                       
+        SASSERT(r1_size > 0);    
         if (r1_size == 1) {                                                                                 
             if (r1[0]->is_decided()) {
                 result.push_back(r1[0]);  
                 return;                                                                                     
-            }                                                                                               
-            goal_ref r1_0 = r1[0];                                                                          
-            operator()(depth+1, r1_0, result); 
-        }                                                                                                   
-        else {
-            goal_ref_buffer            r2;                                                                  
-            for (unsigned i = 0; i < r1_size; i++) {                                                        
-                goal_ref g = r1[i];                                                                         
-                r2.reset();                   
-                operator()(depth+1, g, r2);                                              
-                if (is_decided(r2)) {
-                    SASSERT(r2.size() == 1);
-                    if (is_decided_sat(r2)) {                                                          
-                        // found solution...                                                                
-                        result.push_back(r2[0]);
-                        return;                                                                             
-                    }                                                                                       
-                    else {                                                                                  
-                        SASSERT(is_decided_unsat(r2));
-                    }                                                                                       
-                }                                                                                           
-                else {                                                                                      
-                    result.append(r2.size(), r2.c_ptr());                                                           
-                }                                                                                           
-            }    
-                                                                                           
-            if (result.empty()) {                                                                           
-                // all subgoals were shown to be unsat.                                                     
-                // create an decided_unsat goal with the proof
-                in->reset_all();
-                proof_ref pr(m);
-                expr_dependency_ref core(m);
-                if (proofs_enabled) {
-                    apply(m, in->pc(), pr);                    
-                }
-                if (cores_enabled && in->dc()) {
-                    core = (*in->dc())();
-                }
-                in->assert_expr(m.mk_false(), pr, core);
-                result.push_back(in.get());
-            }
-        }
+            }                          
+            g = r1[0];   
+            depth++;
+            goto try_goal;
+        }                      
+
+		goal_ref_buffer            r2;
+		for (unsigned i = 0; i < r1_size; ++i) {
+			goal_ref g = r1[i];
+			r2.reset();
+			operator()(depth + 1, g, r2);
+			if (is_decided(r2)) {
+				SASSERT(r2.size() == 1);
+				if (is_decided_sat(r2)) {
+					// found solution...                                                                
+					result.push_back(r2[0]);
+					return;
+				}
+				else {
+					SASSERT(is_decided_unsat(r2));
+				}
+			}
+			else {
+				result.append(r2.size(), r2.data());
+			}
+		}
+
+		if (result.empty()) {
+			// all subgoals were shown to be unsat.                                                     
+			// create an decided_unsat goal with the proof
+			g->reset_all();
+			proof_ref pr(m);
+			expr_dependency_ref core(m);
+			if (proofs_enabled) {
+				pr = apply(m, g->pc());
+				g->set(static_cast<proof_converter*>(nullptr));
+			}
+			if (cores_enabled && g->dc()) {
+				core = (*g->dc())();
+			}
+			g->assert_expr(m.mk_false(), pr, core);
+			result.push_back(g.get());
+		}
     }
 
 public:
@@ -850,6 +985,8 @@ public:
         unary_tactical(t), 
         m_max_depth(max_depth) {
     }
+
+    char const* name() const override { return "repeat"; }
     
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         operator()(0, in, result);
@@ -870,13 +1007,15 @@ class fail_if_branching_tactical : public unary_tactical {
 public:
     fail_if_branching_tactical(tactic * t, unsigned threshold):unary_tactical(t), m_threshold(threshold) {}
 
+    char const* name() const override { return "fail_if_branching"; }
+
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         m_t->operator()(in, result);
         if (result.size() > m_threshold) {
             result.reset(); // assumes in is not strenthened to one of the branches
             throw tactic_exception("failed-if-branching tactical");
         }
-    };    
+    }    
 
     tactic * translate(ast_manager & m) override { 
         tactic * new_t = m_t->translate(m);
@@ -891,6 +1030,8 @@ tactic * fail_if_branching(tactic * t, unsigned threshold) {
 class cleanup_tactical : public unary_tactical {
 public:
     cleanup_tactical(tactic * t):unary_tactical(t) {}
+
+    char const* name() const override { return "cleanup"; }
 
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         m_t->operator()(in, result);
@@ -911,13 +1052,23 @@ class try_for_tactical : public unary_tactical {
     unsigned m_timeout;
 public:
     try_for_tactical(tactic * t, unsigned ts):unary_tactical(t), m_timeout(ts) {}
+
+    char const* name() const override { return "try_for"; }
     
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         cancel_eh<reslimit> eh(in->m().limit());
         { 
-            // Warning: scoped_timer is not thread safe in Linux.
             scoped_timer timer(m_timeout, &eh);
-            m_t->operator()(in, result);
+            try {
+                m_t->operator()(in, result);
+            } catch (z3_error &ex) {
+                throw ex;
+            } catch (tactic_exception &) {
+                throw;
+            } catch (z3_exception &ex) {
+                // convert all Z3 exceptions into tactic exceptions.
+                throw tactic_exception(ex.what());
+            }
         }
     }
 
@@ -938,8 +1089,10 @@ public:
         t->updt_params(p);
     }
 
+    char const* name() const override { return "using_params"; }
+
     void updt_params(params_ref const & p) override {
-        TRACE("using_params", 
+        TRACE(using_params, 
               tout << "before p: " << p << "\n";
               tout << "m_params: " << m_params << "\n";);
         
@@ -947,7 +1100,7 @@ public:
         new_p.append(m_params);
         unary_tactical::updt_params(new_p);
         
-        TRACE("using_params", 
+        TRACE(using_params, 
               tout << "after p: " << p << "\n";
               tout << "m_params: " << m_params << "\n";
               tout << "new_p: " << new_p << "\n";);
@@ -966,7 +1119,7 @@ tactic * using_params(tactic * t, params_ref const & p) {
 class annotate_tactical : public unary_tactical {
     std::string m_name;
     struct scope {
-        std::string m_name;
+        const std::string &m_name;
         scope(std::string const& name) : m_name(name) {
             IF_VERBOSE(TACTIC_VERBOSITY_LVL, verbose_stream() << "(" << m_name << " start)\n";);
         }
@@ -987,6 +1140,8 @@ public:
         tactic * new_t = m_t->translate(m);
         return alloc(annotate_tactical, m_name.c_str(), new_t);
     }
+
+    char const* name() const override { return "annotate"; }
     
 };
 
@@ -1003,9 +1158,10 @@ public:
         SASSERT(m_p);
     }
 
-    virtual ~cond_tactical() {}
+    char const* name() const override { return "cond"; }
     
     void operator()(goal_ref const & in, goal_ref_buffer & result) override {
+        m_clean = false;
         if (m_p->operator()(*(in.get())).is_true()) 
             m_t1->operator()(in, result);
         else
@@ -1016,6 +1172,11 @@ public:
         tactic * new_t1 = m_t1->translate(m);
         tactic * new_t2 = m_t2->translate(m);
         return alloc(cond_tactical, m_p.get(), new_t1, new_t2);
+    }
+
+    void user_propagate_initialize_value(expr* var, expr* value) override {
+        m_t1->user_propagate_initialize_value(var, value);
+        m_t2->user_propagate_initialize_value(var, value);
     }
 };
 
@@ -1034,8 +1195,8 @@ public:
         m_p(p) { 
         SASSERT(m_p);
     }
-    
-    virtual ~fail_if_tactic() {}
+
+    char const* name() const override { return "fail_if"; }
 
     void cleanup() override {}
 
@@ -1048,6 +1209,9 @@ public:
 
     tactic * translate(ast_manager & m) override {
         return this;
+    }
+
+    void collect_statistics(statistics& st) const override {
     }
 };
 
@@ -1062,6 +1226,8 @@ tactic * fail_if_not(probe * p) {
 class if_no_proofs_tactical : public unary_tactical {
 public:
     if_no_proofs_tactical(tactic * t):unary_tactical(t) {}
+
+    char const* name() const override { return "if_no_proofs"; }
     
     void operator()(goal_ref const & in, goal_ref_buffer & result) override {
         if (in->proofs_enabled()) {
@@ -1073,11 +1239,14 @@ public:
     }
 
     tactic * translate(ast_manager & m) override { return translate_core<if_no_proofs_tactical>(m); }
+   
 };
 
 class if_no_unsat_cores_tactical : public unary_tactical {
 public:
     if_no_unsat_cores_tactical(tactic * t):unary_tactical(t) {}
+
+    char const* name() const override { return "if_no_unsat_cores"; }
     
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         if (in->unsat_core_enabled()) {
@@ -1094,6 +1263,8 @@ public:
 class if_no_models_tactical : public unary_tactical {
 public:
     if_no_models_tactical(tactic * t):unary_tactical(t) {}
+
+    char const* name() const override { return "if_no_models"; }
     
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         if (in->models_enabled()) {
@@ -1125,4 +1296,3 @@ tactic * if_no_models(tactic * t) {
 tactic * skip_if_failed(tactic * t) {
     return or_else(t, mk_skip_tactic());
 }
-

@@ -17,10 +17,10 @@ Notes:
 
 --*/
 
-#ifndef HS_INC_SAT_SOLVER_H_
-#define HS_INC_SAT_SOLVER_H_
+#pragma once
 
 #include "solver/solver.h"
+#include "tactic/tactic.h"
 
 class tactic;
 
@@ -28,7 +28,7 @@ solver* mk_inc_sat_solver(ast_manager& m, params_ref const& p, bool incremental_
 
 tactic* mk_psat_tactic(ast_manager& m, params_ref const& p);
 
+Z3_ADD_TACTIC(psat, "psat", "(try to) solve goal using a parallel SAT solver.", mk_psat_tactic(m, p));
 
 void  inc_sat_display(std::ostream& out, solver& s, unsigned sz, expr*const* soft, rational const* _weights);
 
-#endif

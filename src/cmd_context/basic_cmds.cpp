@@ -17,7 +17,7 @@ Notes:
 --*/
 #include "util/gparams.h"
 #include "util/env_params.h"
-#include "util/version.h"
+#include "util/z3_version.h"
 #include "ast/ast_smt_pp.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/ast_pp_dot.h"
@@ -58,7 +58,7 @@ public:
         cmd * c = ctx.find_cmd(s);
         if (c == nullptr) {
             std::string err_msg("unknown command '");
-            err_msg = err_msg + s.bare_str() + "'";
+            err_msg = err_msg + s.str() + "'";
             throw cmd_exception(std::move(err_msg));
         }
         m_cmds.push_back(s);
@@ -137,7 +137,7 @@ ATOMIC_CMD(get_assignment_cmd, "get-assignment", "retrieve assignment", {
         symbol const & name = kv.m_key;
         macro_decls const & _m    = kv.m_value;
         for (auto md : _m) {
-            if (md.m_domain.size() == 0 && ctx.m().is_bool(md.m_body)) {
+            if (md.m_domain.empty() && ctx.m().is_bool(md.m_body)) {
                 model::scoped_model_completion _scm(*m, true);
                 expr_ref val = (*m)(md.m_body);
                 if (ctx.m().is_true(val) || ctx.m().is_false(val)) {
@@ -174,14 +174,19 @@ public:
 };
 
 ATOMIC_CMD(get_proof_cmd, "get-proof", "retrieve proof", {
-    if (!ctx.produce_proofs())
-        throw cmd_exception("proof construction is not enabled, use command (set-option :produce-proofs true)");
-    if (!ctx.has_manager() ||
-        ctx.cs_state() != cmd_context::css_unsat)
+    if (!ctx.has_manager())
         throw cmd_exception("proof is not available");
+
     expr_ref pr(ctx.m());
-    pr = ctx.get_check_sat_result()->get_proof();
-    if (pr == 0)
+    auto* chsr = ctx.get_check_sat_result();
+    if (!chsr && ctx.ignore_check())
+        return;
+    if (!chsr)
+        throw cmd_exception("proof is not available");
+    pr = chsr->get_proof();
+    if (!pr && !ctx.produce_proofs())
+        throw cmd_exception("proof construction is not enabled, use command (set-option :produce-proofs true)");
+    if (!pr) 
         throw cmd_exception("proof is not available");
     if (ctx.well_sorted_check_enabled() && !is_well_sorted(ctx.m(), pr)) {
         throw cmd_exception("proof is not well sorted");
@@ -197,6 +202,7 @@ ATOMIC_CMD(get_proof_cmd, "get-proof", "retrieve proof", {
         cmd_is_declared isd(ctx);
         pp.set_is_declared(&isd);
         pp.set_logic(ctx.get_logic());
+        pp.set_simplify_implies(params.simplify_implies());
         pp.display_smt2(ctx.regular_stream(), pr);
         ctx.regular_stream() << std::endl;
     }
@@ -209,12 +215,13 @@ ATOMIC_CMD(get_proof_graph_cmd, "get-proof-graph", "retrieve proof and print it 
         ctx.cs_state() != cmd_context::css_unsat)
         throw cmd_exception("proof is not available");
     proof_ref pr(ctx.m());
+    if (ctx.ignore_check())
+        return;
     pr = ctx.get_check_sat_result()->get_proof();
     if (pr == 0)
         throw cmd_exception("proof is not available");
-    if (ctx.well_sorted_check_enabled() && !is_well_sorted(ctx.m(), pr)) {
+    if (ctx.well_sorted_check_enabled() && !is_well_sorted(ctx.m(), pr)) 
         throw cmd_exception("proof is not well sorted");
-    }
 
     context_params& params = ctx.params();
     const std::string& file = params.m_dot_proof_file;
@@ -228,16 +235,18 @@ static void print_core(cmd_context& ctx) {
     ctx.regular_stream() << "(";
     bool first = true;
     for (expr* e : core) {
-    if (first)
-        first = false;
-    else
-        ctx.regular_stream() << " ";
-    ctx.regular_stream() << mk_ismt2_pp(e, ctx.m());
+        if (first)
+            first = false;
+        else
+            ctx.regular_stream() << " ";
+        ctx.regular_stream() << mk_ismt2_pp(e, ctx.m());
     }
     ctx.regular_stream() << ")" << std::endl;
 }
 
 ATOMIC_CMD(get_unsat_core_cmd, "get-unsat-core", "retrieve unsat core", {
+        if (ctx.ignore_check())
+            return;
         if (!ctx.produce_unsat_cores())
             throw cmd_exception("unsat core construction is not enabled, use command (set-option :produce-unsat-cores true)");
         if (!ctx.has_manager() ||
@@ -247,11 +256,12 @@ ATOMIC_CMD(get_unsat_core_cmd, "get-unsat-core", "retrieve unsat core", {
     });
 
 ATOMIC_CMD(get_unsat_assumptions_cmd, "get-unsat-assumptions", "retrieve subset of assumptions sufficient for unsatisfiability", {
+        if (ctx.ignore_check())
+            return;
         if (!ctx.produce_unsat_assumptions())
             throw cmd_exception("unsat assumptions construction is not enabled, use command (set-option :produce-unsat-assumptions true)");
-        if (!ctx.has_manager() || ctx.cs_state() != cmd_context::css_unsat) {
+        if (!ctx.has_manager() || ctx.cs_state() != cmd_context::css_unsat) 
             throw cmd_exception("unsat assumptions is not available");
-        }
         print_core(ctx);
     });
 
@@ -263,7 +273,7 @@ ATOMIC_CMD(labels_cmd, "labels", "retrieve Simplify-like labels", {
     svector<symbol> labels;
     ctx.get_check_sat_result()->get_labels(labels);
     ctx.regular_stream() << "(labels";
-    for (unsigned i = 0; i < labels.size(); i++) {
+    for (unsigned i = 0; i < labels.size(); ++i) {
         ctx.regular_stream() << " " << labels[i];
     }
     ctx.regular_stream() << ")" << std::endl;
@@ -281,7 +291,7 @@ UNARY_CMD(set_logic_cmd, "set-logic", "<symbol>", "set the background logic.", C
               ctx.print_success();
           else {
               std::string msg = "ignoring unsupported logic " + arg.str();
-              ctx.print_unsupported(symbol(msg.c_str()), m_line, m_pos);
+              ctx.print_unsupported(symbol(msg), m_line, m_pos);
           }
           );
 
@@ -290,10 +300,85 @@ UNARY_CMD(pp_cmd, "display", "<term>", "display the given term.", CPK_EXPR, expr
     ctx.regular_stream() << std::endl;
 });
 
-UNARY_CMD(echo_cmd, "echo", "<string>", "display the given string", CPK_STRING, char const *,
-    bool smt2c = ctx.params().m_smtlib2_compliant;
-    ctx.regular_stream() << (smt2c ? "\"" : "") << arg << (smt2c ? "\"" : "") << std::endl;);
+static std::string escape_string(char const* arg) {
+    std::string result;
+    while (*arg) {
+        auto ch = *arg++;
+        if (ch == '"')
+            result.push_back(ch);
+        result.push_back(ch);
+    }
+    return result;
+}
 
+UNARY_CMD(echo_cmd, "echo", "<string>", "display the given string", CPK_STRING, char const *,
+          bool smt2c = ctx.params().m_smtlib2_compliant;
+          if (smt2c) 
+              ctx.regular_stream() << "\"" << escape_string(arg) << "\"" << std::endl;
+          else
+              ctx.regular_stream() << arg << std::endl;);
+
+class set_initial_value_cmd : public cmd {
+    expr* m_var = nullptr, *m_value = nullptr;
+public:
+    set_initial_value_cmd(): cmd("set-initial-value") {}
+    char const* get_usage() const override { return "<var> <value>"; }
+    char const* get_descr(cmd_context& ctx) const override { return "set an initial value for search as a hint to the solver"; }
+    unsigned get_arity() const override { return 2; }
+    void prepare(cmd_context& ctx) override { m_var = m_value = nullptr; }
+    cmd_arg_kind next_arg_kind(cmd_context& ctx) const override { return CPK_EXPR; }
+    void set_next_arg(cmd_context& ctx, expr* e) override { if (m_var) m_value = e; else m_var = e; }
+    void execute(cmd_context& ctx) override {
+        SASSERT(m_var && m_value);
+        ctx.set_initial_value(m_var, m_value);
+    }    
+};
+
+class prefer_cmd : public cmd {
+    expr *m_formula = nullptr;
+
+public:
+    prefer_cmd() : cmd("prefer") {}
+    char const *get_usage() const override {
+        return "<formula>";
+    }
+    char const *get_descr(cmd_context &ctx) const override {
+        return "set a preferred formula for the solver";
+    }
+    unsigned get_arity() const override {
+        return 1;
+    }
+    void prepare(cmd_context &ctx) override {
+        m_formula = nullptr;
+    }
+    cmd_arg_kind next_arg_kind(cmd_context &ctx) const override {
+        return CPK_EXPR;
+    }
+    void set_next_arg(cmd_context &ctx, expr *e) override {
+        m_formula = e;
+    }
+    void execute(cmd_context &ctx) override {
+        SASSERT(m_formula);
+        ctx.set_preferred(m_formula);
+    }
+};
+
+class reset_preferences_cmd : public cmd {
+    public:
+    reset_preferences_cmd() : cmd("reset-preferences") {}
+    char const *get_usage() const override {
+        return "";
+    }
+    char const *get_descr(cmd_context &ctx) const override {
+        return "reset all preferred formulas";
+    }
+    unsigned get_arity() const override {
+        return 0;
+    }
+    void execute(cmd_context &ctx) override {
+        ctx.reset_preferred();
+    }
+};
 
 class set_get_option_cmd : public cmd {
 protected:
@@ -309,7 +394,6 @@ protected:
     symbol      m_produce_unsat_assumptions;
     symbol      m_produce_models;
     symbol      m_produce_assignments;
-    symbol      m_produce_interpolants;
     symbol      m_produce_assertions;
     symbol      m_regular_output_channel;
     symbol      m_diagnostic_output_channel;
@@ -326,7 +410,7 @@ protected:
         return
             s == m_print_success || s == m_print_warning || s == m_expand_definitions ||
             s == m_interactive_mode || s == m_produce_proofs || s == m_produce_unsat_cores || s == m_produce_unsat_assumptions ||
-            s == m_produce_models || s == m_produce_assignments || s == m_produce_interpolants ||
+            s == m_produce_models || s == m_produce_assignments ||
             s == m_regular_output_channel || s == m_diagnostic_output_channel ||
             s == m_random_seed || s == m_verbosity || s == m_global_decls || s == m_global_declarations ||
             s == m_produce_assertions || s == m_reproducible_resource_limit;
@@ -346,7 +430,6 @@ public:
         m_produce_unsat_assumptions(":produce-unsat-assumptions"),
         m_produce_models(":produce-models"),
         m_produce_assignments(":produce-assignments"),
-        m_produce_interpolants(":produce-interpolants"),
         m_produce_assertions(":produce-assertions"),
         m_regular_output_channel(":regular-output-channel"),
         m_diagnostic_output_channel(":diagnostic-output-channel"),
@@ -359,8 +442,6 @@ public:
         m_int_real_coercions(":int-real-coercions"),
         m_reproducible_resource_limit(":reproducible-resource-limit") {
     }
-    ~set_get_option_cmd() override {}
-
 };
 
 class set_option_cmd : public set_get_option_cmd {
@@ -388,14 +469,23 @@ class set_option_cmd : public set_get_option_cmd {
         }
     }
 
+    static void check_no_assertions(cmd_context & ctx, symbol const & opt_name) {
+        if (ctx.has_assertions()) {
+            std::string msg = "error setting '";
+            msg += opt_name.str();
+            msg += "', option value cannot be modified after assertions have been added";
+            throw cmd_exception(std::move(msg));
+        }
+    }
+
     void set_param(cmd_context & ctx, char const * value) {
-        try {
+        try {            
             gparams::set(m_option, value);
             env_params::updt_params();
             ctx.global_params_updated();
         }
         catch (const gparams::exception & ex) {
-            throw cmd_exception(ex.msg());
+            throw cmd_exception(ex.what());
         }
     }
 
@@ -415,19 +505,15 @@ class set_option_cmd : public set_get_option_cmd {
             ctx.set_interactive_mode(to_bool(value));
         }
         else if (m_option == m_produce_proofs) {
-            check_not_initialized(ctx, m_produce_proofs);
+            check_no_assertions(ctx, m_produce_proofs);
             ctx.set_produce_proofs(to_bool(value));
         }
-        else if (m_option == m_produce_interpolants) {
-            check_not_initialized(ctx, m_produce_interpolants);
-            ctx.set_produce_interpolants(to_bool(value));
-        }
         else if (m_option == m_produce_unsat_cores) {
-            check_not_initialized(ctx, m_produce_unsat_cores);
+            check_no_assertions(ctx, m_produce_unsat_cores);
             ctx.set_produce_unsat_cores(to_bool(value));
         }
         else if (m_option == m_produce_unsat_assumptions) {
-            check_not_initialized(ctx, m_produce_unsat_assumptions);
+            check_no_assertions(ctx, m_produce_unsat_assumptions);
             ctx.set_produce_unsat_assumptions(to_bool(value));
         }
         else if (m_option == m_produce_models) {
@@ -437,8 +523,11 @@ class set_option_cmd : public set_get_option_cmd {
             ctx.set_produce_assignments(to_bool(value));
         }
         else if (m_option == m_global_decls || m_option == m_global_declarations) {
-            check_not_initialized(ctx, m_global_decls);
-            ctx.set_global_decls(to_bool(value));
+            auto global_decls = to_bool(value);
+            if (global_decls != ctx.global_decls()) {
+                check_not_initialized(ctx, m_global_decls);
+                ctx.set_global_decls(global_decls);
+            }
         }
         else if (m_option == m_numeral_as_real) {
             ctx.set_numeral_as_real(to_bool(value));
@@ -577,9 +666,6 @@ public:
         else if (opt == m_produce_proofs) {
             print_bool(ctx, ctx.produce_proofs());
         }
-        else if (opt == m_produce_interpolants) {
-            print_bool(ctx, ctx.produce_interpolants());
-        }
         else if (opt == m_produce_unsat_cores) {
             print_bool(ctx, ctx.produce_unsat_cores());
         }
@@ -588,6 +674,9 @@ public:
         }
         else if (opt == m_produce_assignments) {
             print_bool(ctx, ctx.produce_assignments());
+        }
+        else if (opt == m_produce_unsat_assumptions) {
+            print_bool(ctx, ctx.produce_unsat_assumptions());
         }
         else if (opt == m_global_decls || opt == m_global_declarations) {
             print_bool(ctx, ctx.global_decls());
@@ -638,6 +727,7 @@ class get_info_cmd : public cmd {
     symbol   m_reason_unknown;
     symbol   m_all_statistics;
     symbol   m_assertion_stack_levels;
+    symbol   m_rlimit;
 public:
     get_info_cmd():
         cmd("get-info"),
@@ -648,10 +738,11 @@ public:
         m_status(":status"),
         m_reason_unknown(":reason-unknown"),
         m_all_statistics(":all-statistics"),
-        m_assertion_stack_levels(":assertion-stack-levels") {
+        m_assertion_stack_levels(":assertion-stack-levels"),
+        m_rlimit(":rlimit") {
     }
     char const * get_usage() const override { return "<keyword>"; }
-    char const * get_descr(cmd_context & ctx) const override { return "get information."; }
+    char const * get_descr(cmd_context & ctx) const override { return "(get-info :?) for options."; }
     unsigned get_arity() const override { return 1; }
     cmd_arg_kind next_arg_kind(cmd_context & ctx) const override { return CPK_KEYWORD; }
     void set_next_arg(cmd_context & ctx, symbol const & opt) override {
@@ -665,7 +756,7 @@ public:
             ctx.regular_stream() << "(:name \"Z3\")" << std::endl;
         }
         else if (opt == m_authors) {
-            ctx.regular_stream() << "(:authors \"Leonardo de Moura, Nikolaj Bjorner and Christoph Wintersteiger\")" << std::endl;
+            ctx.regular_stream() << "(:authors \"Leonardo de Moura, Nikolaj Bjorner, Lev Nachmanson and Christoph Wintersteiger\")" << std::endl;
         }
         else if (opt == m_version) {
             ctx.regular_stream() << "(:version \"" << Z3_MAJOR_VERSION << "." << Z3_MINOR_VERSION << "." << Z3_BUILD_NUMBER
@@ -678,7 +769,10 @@ public:
             ctx.regular_stream() << "(:status " << ctx.get_status() << ")" << std::endl;
         }
         else if (opt == m_reason_unknown) {
-            ctx.regular_stream() << "(:reason-unknown \"" << escaped(ctx.reason_unknown().c_str()) << "\")" << std::endl;
+            ctx.regular_stream() << "(:reason-unknown \"" << escaped(ctx.reason_unknown()) << "\")" << std::endl;
+        }
+        else if (opt == m_rlimit) {
+            ctx.regular_stream() << "(:rlimit " << ctx.m().limit().count() << ")" << std::endl;
         }
         else if (opt == m_all_statistics) {
             ctx.display_statistics();
@@ -686,8 +780,21 @@ public:
         else if (opt == m_assertion_stack_levels) {
             ctx.regular_stream() << "(:assertion-stack-levels " << ctx.num_scopes() << ")" << std::endl;
         }
+        else if (opt == symbol(":parameters")) {
+            ctx.display_parameters(ctx.regular_stream());
+        }
         else {
-            ctx.print_unsupported(opt, m_line, m_pos);
+            if (opt != symbol(":?"))
+               ctx.print_unsupported(opt, m_line, m_pos);
+            ctx.regular_stream() << "; Suppported get-info parameters:\n";
+            ctx.regular_stream() << "; (get-info :reason-unknown)\n";
+            ctx.regular_stream() << "; (get-info :status)\n";
+            ctx.regular_stream() << "; (get-info :version)\n";
+            ctx.regular_stream() << "; (get-info :authors)\n";
+            ctx.regular_stream() << "; (get-info :error-behavior)\n";
+            ctx.regular_stream() << "; (get-info :parameters)\n";
+            ctx.regular_stream() << "; (get-info :rlimit)\n";
+            ctx.regular_stream() << "; (get-info :assertion-stack-levels)\n";
         }
     }
 };
@@ -760,7 +867,7 @@ public:
         return m_array_fid;
     }
     char const * get_usage() const override { return "<symbol> (<sort>+) <func-decl-ref>"; }
-    char const * get_descr(cmd_context & ctx) const override { return "declare a new array map operator with name <symbol> using the given function declaration.\n<func-decl-ref> ::= <symbol>\n                  | (<symbol> (<sort>*) <sort>)\n                  | ((_ <symbol> <numeral>+) (<sort>*) <sort>)\nThe last two cases are used to disumbiguate between declarations with the same name and/or select (indexed) builtin declarations.\nFor more details about the array map operator, see 'Generalized and Efficient Array Decision Procedures' (FMCAD 2009).\nExample: (declare-map set-union (Int) (or (Bool Bool) Bool))\nDeclares a new function (declare-fun set-union ((Array Int Bool) (Array Int Bool)) (Array Int Bool)).\nThe instance of the map axiom for this new declaration is:\n(forall ((a1 (Array Int Bool)) (a2 (Array Int Bool)) (i Int)) (= (select (set-union a1 a2) i) (or (select a1 i) (select a2 i))))"; }
+    char const * get_descr(cmd_context & ctx) const override { return "declare a new array map operator with name <symbol> using the given function declaration.\n<func-decl-ref> ::= <symbol>\n                  | (<symbol> (<sort>*) <sort>)\n                  | ((_ <symbol> <numeral>+) (<sort>*) <sort>)\nThe last two cases are used to disambiguate between declarations with the same name and/or select (indexed) builtin declarations.\nFor more details about the array map operator, see 'Generalized and Efficient Array Decision Procedures' (FMCAD 2009).\nExample: (declare-map set-union (Int) (or (Bool Bool) Bool))\nDeclares a new function (declare-fun set-union ((Array Int Bool) (Array Int Bool)) (Array Int Bool)).\nThe instance of the map axiom for this new declaration is:\n(forall ((a1 (Array Int Bool)) (a2 (Array Int Bool)) (i Int)) (= (select (set-union a1 a2) i) (or (select a1 i) (select a2 i))))"; }
     unsigned get_arity() const override { return 3; }
     void prepare(cmd_context & ctx) override { m_name = symbol::null; m_domain.reset(); }
     cmd_arg_kind next_arg_kind(cmd_context & ctx) const override {
@@ -789,17 +896,17 @@ public:
         ptr_vector<sort> & array_sort_args = m_domain;
         sort_ref_buffer domain(ctx.m());
         unsigned arity = m_f->get_arity();
-        for (unsigned i = 0; i < arity; i++) {
+        for (unsigned i = 0; i < arity; ++i) {
             array_sort_args.push_back(m_f->get_domain(i));
-            domain.push_back(array_sort->instantiate(ctx.pm(), array_sort_args.size(), array_sort_args.c_ptr()));
+            domain.push_back(array_sort->instantiate(ctx.pm(), array_sort_args.size(), array_sort_args.data()));
             array_sort_args.pop_back();
         }
         sort_ref range(ctx.m());
         array_sort_args.push_back(m_f->get_range());
-        range = array_sort->instantiate(ctx.pm(), array_sort_args.size(), array_sort_args.c_ptr());
-        parameter p[1] = { parameter(m_f) };
+        range = array_sort->instantiate(ctx.pm(), array_sort_args.size(), array_sort_args.data());
+        parameter p(m_f);
         func_decl_ref new_map(ctx.m());
-        new_map = ctx.m().mk_func_decl(get_array_fid(ctx), OP_ARRAY_MAP, 1, p, domain.size(), domain.c_ptr(), range.get());
+        new_map = ctx.m().mk_func_decl(get_array_fid(ctx), OP_ARRAY_MAP, 1, &p, domain.size(), domain.data(), range.get());
         if (new_map == 0)
             throw cmd_exception("invalid array map operator");
         ctx.insert(m_name, new_map);
@@ -829,8 +936,8 @@ public:
     void execute(cmd_context & ctx) override {
         ast_manager& m = ctx.m();
         expr_ref_vector assumptions(m), variables(m), consequences(m);
-        assumptions.append(m_assumptions.size(), m_assumptions.c_ptr());
-        variables.append(m_variables.size(), m_variables.c_ptr());
+        assumptions.append(m_assumptions.size(), m_assumptions.data());
+        variables.append(m_variables.size(), m_variables.data());
         ctx.get_consequences(assumptions, variables, consequences);
         ctx.regular_stream() << consequences << "\n";
     }
@@ -841,6 +948,7 @@ public:
     }
     void finalize(cmd_context & ctx) override {}
 };
+
 
 // provides "help" for builtin cmds
 class builtin_cmd : public cmd {
@@ -866,6 +974,9 @@ void install_basic_cmds(cmd_context & ctx) {
     ctx.insert(alloc(get_option_cmd));
     ctx.insert(alloc(get_info_cmd));
     ctx.insert(alloc(set_info_cmd));
+    ctx.insert(alloc(set_initial_value_cmd));
+    ctx.insert(alloc(prefer_cmd));
+    ctx.insert(alloc(reset_preferences_cmd));
     ctx.insert(alloc(get_consequences_cmd));
     ctx.insert(alloc(builtin_cmd, "assert", "<term>", "assert term."));
     ctx.insert(alloc(builtin_cmd, "check-sat", "<boolean-constants>*", "check if the current context is satisfiable. If a list of boolean constants B is provided, then check if the current context is consistent with assigning every constant in B to true."));

@@ -16,19 +16,19 @@ Author:
 Revision History:
 
 --*/
-#ifndef QI_QUEUE_H_
-#define QI_QUEUE_H_
+#pragma once
 
 #include "ast/ast.h"
-#include "smt/smt_quantifier_stat.h"
+#include "ast/quantifier_stat.h"
+#include "ast/rewriter/cached_var_subst.h"
+#include "parsers/util/cost_parser.h"
 #include "smt/smt_checker.h"
 #include "smt/smt_quantifier.h"
-#include "smt/params/qi_params.h"
 #include "smt/fingerprints.h"
-#include "parsers/util/cost_parser.h"
-#include "smt/cost_evaluator.h"
-#include "smt/cached_var_subst.h"
+#include "params/qi_params.h"
+#include "ast/cost_evaluator.h"
 #include "util/statistics.h"
+#include "tactic/user_propagator_base.h"
 
 namespace smt {
     class context;
@@ -42,7 +42,7 @@ namespace smt {
     class qi_queue {
         quantifier_manager &          m_qm;
         context &                     m_context;
-        ast_manager &                 m_manager;
+        ast_manager &                 m;
         qi_params &                   m_params;
         qi_queue_stats                m_stats;
         checker                       m_checker;
@@ -52,17 +52,20 @@ namespace smt {
         cost_evaluator                m_evaluator;
         cached_var_subst              m_subst;
         svector<float>                m_vals;
-        double                        m_eager_cost_threshold;
+        double                        m_eager_cost_threshold = 0;
+        std::function<bool(quantifier*,expr*)> m_on_binding;
         struct entry {
             fingerprint * m_qb;
             float         m_cost;
             unsigned      m_generation:31;
             unsigned      m_instantiated:1;
-            entry(fingerprint * f, float c, unsigned g):m_qb(f), m_cost(c), m_generation(g), m_instantiated(false) {}
+            unsigned      m_model_based:1; // produced by model-based quantifier instantiation
+            entry(fingerprint * f, float c, unsigned g, bool mb = false):m_qb(f), m_cost(c), m_generation(g), m_instantiated(false), m_model_based(mb) {}
         };
         svector<entry>                m_new_entries;
         svector<entry>                m_delayed_entries;
         expr_ref_vector               m_instances;
+        vector<std::pair<expr_ref, app_ref>> m_persistent_instances; // (lemma, proof); proof is null when proofs are disabled
         unsigned_vector               m_instantiated_trail;
         struct scope {
             unsigned   m_delayed_entries_lim;
@@ -72,7 +75,7 @@ namespace smt {
         svector<scope>                m_scopes;
 
         void init_parser_vars();
-        quantifier_stat * set_values(quantifier * q, app * pat, unsigned generation, unsigned min_top_generation, unsigned max_top_generation, float cost);
+        q::quantifier_stat * set_values(quantifier * q, app * pat, unsigned generation, unsigned min_top_generation, unsigned max_top_generation, float cost);
         float get_cost(quantifier * q, app * pat, unsigned generation, unsigned min_top_generation, unsigned max_top_generation);
         unsigned get_new_gen(quantifier * q, unsigned generation, float cost);
         void instantiate(entry & ent);
@@ -81,13 +84,12 @@ namespace smt {
 
     public:
         qi_queue(quantifier_manager & qm, context & ctx, qi_params & params);
-        ~qi_queue();
         void setup();
         /**
            \brief Insert a new quantifier in the queue, f contains the quantifier and bindings.
            f->get_data() is the quantifier.
         */
-        void insert(fingerprint * f, app * pat, unsigned generation, unsigned min_top_generation, unsigned max_top_generation);
+        void insert(fingerprint * f, app * pat, unsigned generation, unsigned min_top_generation, unsigned max_top_generation, bool mbqi_instance = false);
         void instantiate();
         bool has_work() const { return !m_new_entries.empty(); }
         void init_search_eh();
@@ -97,8 +99,14 @@ namespace smt {
         void reset();
         void display_delayed_instances_stats(std::ostream & out) const;
         void collect_statistics(::statistics & st) const;
+        // instances (lemmas of the form (or (not q) inst)) produced so far in the current search,
+        // paired with their proofs when proofs are enabled (proof component is null otherwise).
+        // model-based instances produced since the last call, kept across backtracking (see context::check)
+        void collect_instances(vector<std::pair<expr_ref, app_ref>> & out) { out.append(m_persistent_instances); m_persistent_instances.reset(); }
+        void register_on_binding(std::function<bool(quantifier* q, expr* e)> & on_binding) {
+            m_on_binding = on_binding;
+        }
     };
-};
+}
 
-#endif /* QI_QUEUE_H_ */
 

@@ -17,6 +17,10 @@ Revision History:
 
 --*/
 #include "tactic/tactical.h"
+// Pulls in this file's own Z3_ADD_TACTIC registration (see tactic/tactic.h) -- an `inline`
+// global's constructor only runs if some compiled translation unit includes the header
+// declaring it, and subpaving_tactic.h was otherwise never included by anything.
+#include "math/subpaving/tactic/subpaving_tactic.h"
 #include "tactic/core/simplify_tactic.h"
 #include "math/subpaving/tactic/expr2subpaving.h"
 #include "ast/expr2var.h"
@@ -26,6 +30,7 @@ Revision History:
 #include "util/mpff.h"
 #include "util/mpfx.h"
 #include "util/f2n.h"
+#include <iostream>
 
 class subpaving_tactic : public tactic {
 
@@ -36,8 +41,6 @@ class subpaving_tactic : public tactic {
             e2v.mk_inv(m_inv);
         }
 
-        virtual ~display_var_proc() {}
-        
         ast_manager & m() const { return m_inv.get_manager(); }
         
         void operator()(std::ostream & out, subpaving::var x) const override {
@@ -155,7 +158,7 @@ class subpaving_tactic : public tactic {
             m_qm.div(k, n, k);
             if (is_neg(n))
                 lower = !lower;
-            TRACE("subpaving_tactic", tout << x << " " << k << " " << lower << " " << open << "\n";);
+            TRACE(subpaving_tactic, tout << x << " " << k << " " << lower << " " << open << "\n";);
             return m_ctx->mk_ineq(x, k, lower, open);
         }
 
@@ -171,19 +174,19 @@ class subpaving_tactic : public tactic {
                 sz   = 1;
             }
             ref_buffer<subpaving::ineq, subpaving::context> ineq_buffer(*m_ctx);
-            for (unsigned i = 0; i < sz; i++) {
+            for (unsigned i = 0; i < sz; ++i) {
                 ineq_buffer.push_back(mk_ineq(args[i]));
             }
-            m_ctx->add_clause(sz, ineq_buffer.c_ptr());
+            m_ctx->add_clause(sz, ineq_buffer.data());
         }
         
         void internalize(goal const & g) {
             try {
-                for (unsigned i = 0; i < g.size(); i++) {
+                for (unsigned i = 0; i < g.size(); ++i) {
                     process_clause(g.form(i));
                 }
             }
-            catch (subpaving::exception) {
+            catch (const subpaving::exception &) {
                 throw tactic_exception("failed to internalize goal into subpaving module");
             }
         }
@@ -195,7 +198,7 @@ class subpaving_tactic : public tactic {
             try {
                 (*m_ctx)();
             }
-            catch (subpaving::exception) {
+            catch (const subpaving::exception &) {
                 throw tactic_exception("failed building subpaving tree...");
             }
             if (m_display) {
@@ -220,13 +223,15 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "subpaving"; }
+
     tactic * translate(ast_manager & m) override {
         return alloc(subpaving_tactic, m, m_params);
     }
 
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {
@@ -251,7 +256,7 @@ public:
         }
         catch (z3_exception & ex) {
             // convert all Z3 exceptions into tactic exceptions
-            throw tactic_exception(ex.msg());
+            throw tactic_exception(ex.what());
         }
     }
     

@@ -3,8 +3,7 @@ Copyright (c) 2017 Arie Gurfinkel
 
  Deprecated implementation of model evaluator. To be removed.
 */
-#ifndef OLD_MEV_H
-#define OLD_MEV_H
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/ast_pp.h"
@@ -72,7 +71,7 @@ class model_evaluator {
     {
         set_v(x);
         m_numbers.insert(x, v);
-        TRACE("spacer_verbose", tout << mk_pp(x, m) << " " << v << "\n";);
+        TRACE(spacer_verbose, tout << mk_pp(x, m) << " " << v << "\n";);
     }
     expr* get_value(expr* x) { return m_values.find(x); }
     void set_value(expr* x, expr* v)
@@ -113,4 +112,3 @@ public:
 
 
 
-#endif /* OLD_MEV_H */

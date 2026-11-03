@@ -59,7 +59,7 @@ struct mus::imp {
         unsigned idx = m_lit2expr.size();
         m_expr2lit.insert(lit, idx);
         m_lit2expr.push_back(lit);
-        TRACE("mus", tout << idx << ": " << mk_pp(lit, m) << "\n" << m_lit2expr << "\n";);
+        TRACE(mus, tout << idx << ": " << mk_pp(lit, m) << "\n" << m_lit2expr << "\n";);
         return idx;
     }
 
@@ -78,12 +78,12 @@ struct mus::imp {
     }
 
     lbool get_mus1(expr_ref_vector& mus) {
-        ptr_vector<expr> unknown(m_lit2expr.size(), m_lit2expr.c_ptr());
+        ptr_vector<expr> unknown(m_lit2expr.size(), m_lit2expr.data());
         expr_ref_vector core_exprs(m);
-        TRACE("mus", m_solver.display(tout););
+        TRACE(mus, m_solver.display(tout););
         while (!unknown.empty()) { 
             IF_VERBOSE(12, verbose_stream() << "(mus reducing core: " << unknown.size() << " new core: " << mus.size() << ")\n";);
-            TRACE("mus", display_vec(tout << "core:  ", unknown); display_vec(tout << "mus:   ", mus););
+            TRACE(mus, display_vec(tout << "core:  ", unknown); display_vec(tout << "mus:   ", mus););
             expr* lit = unknown.back();
             unknown.pop_back();
             expr_ref not_lit(mk_not(m, lit), m);
@@ -112,7 +112,7 @@ struct mus::imp {
                             unknown.push_back(c);
                         }
                     }
-                    TRACE("mus", tout << "core exprs:" << core_exprs << "\n";
+                    TRACE(mus, tout << "core exprs:" << core_exprs << "\n";
                         display_vec(tout << "core:", unknown);
                         display_vec(tout << "mus:", mus);
                     );
@@ -129,7 +129,7 @@ struct mus::imp {
     lbool get_mus2(expr_ref_vector& mus) {
         expr* lit = nullptr;
         lbool is_sat;
-        ptr_vector<expr> unknown(m_lit2expr.size(), m_lit2expr.c_ptr());
+        ptr_vector<expr> unknown(m_lit2expr.size(), m_lit2expr.data());
         while (!unknown.empty()) { 
             IF_VERBOSE(12, verbose_stream() << "(mus reducing core: " << unknown.size() << " new core: " << mus.size() << ")\n";);
             {
@@ -164,7 +164,7 @@ struct mus::imp {
             scoped_append assume_lit(*this,  mus, lit);      // current unknown literal
             switch (m_solver.check_sat(mus)) {
             case l_true: {
-                TRACE("mus", tout << "literal can be satisfied: " << mk_pp(lit, m) << "\n";);
+                TRACE(mus, tout << "literal can be satisfied: " << mk_pp(lit, m) << "\n";);
                 mss.push_back(lit);
                 m_solver.get_model(mdl);
                 model_evaluator eval(*mdl.get());
@@ -183,7 +183,7 @@ struct mus::imp {
                 break;
             }
             case l_false:
-                TRACE("mus", tout << "literal is in a core: " << mk_pp(lit, m) << "\n";);
+                TRACE(mus, tout << "literal is in a core: " << mk_pp(lit, m) << "\n";);
                 nmcs.push_back(mk_not(m, lit));
                 nmcs_set.insert(nmcs.back());
                 get_core(core);
@@ -201,7 +201,7 @@ struct mus::imp {
                 }
                 if (!min_core_valid || core.size() < min_core.size()) {
                     // The current core is smallest so far, so we get fewer unknowns from it.
-                    min_core = core;
+                    min_core = std::move(core);
                     min_core_valid = true;
                     min_lit = lit;
                 }
@@ -217,13 +217,12 @@ struct mus::imp {
         }
 
         expr_set mss_set;
-        for (unsigned i = 0; i < mss.size(); ++i) {
-            mss_set.insert(mss[i]);
+        for (expr* e : mss) {
+            mss_set.insert(e);
         }
-        expr_set::iterator it = min_core.begin(), end = min_core.end();
-        for (; it != end; ++it) {
-            if (mss_set.contains(*it) && min_lit != *it) {
-                unknown.push_back(*it);
+        for (expr * e : min_core) {
+            if (mss_set.contains(e) && min_lit != e) {
+                unknown.push_back(e);
             }
         }
         core_literal = min_lit;
@@ -282,7 +281,7 @@ struct mus::imp {
         scoped_append(imp& imp, expr_ref_vector& fmls1, ptr_vector<expr> const& fmls2):
             m_fmls(fmls1),
             m_size(fmls1.size()) {
-            fmls1.append(fmls2.size(), fmls2.c_ptr());
+            fmls1.append(fmls2.size(), fmls2.data());
         }
         scoped_append(imp& imp, expr_ref_vector& fmls1, expr* fml):
             m_fmls(fmls1),

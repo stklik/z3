@@ -17,10 +17,8 @@ Revision History:
 
 --*/
 
-#ifndef DL_SPARSE_TABLE_H_
-#define DL_SPARSE_TABLE_H_
+#pragma once
 
-#include<iostream>
 #include<list>
 #include<utility>
 
@@ -72,7 +70,7 @@ namespace datalog {
         ~sparse_table_plugin() override;
 
         bool can_handle_signature(const table_signature & s) override
-        { return s.size()>0; }
+        { return !s.empty(); }
 
         table_base * mk_empty(const table_signature & s) override;
         sparse_table * mk_clone(const sparse_table & t);
@@ -123,7 +121,7 @@ namespace datalog {
             offset_hash_proc(storage & s, unsigned unique_entry_sz) 
                 : m_storage(s), m_unique_entry_size(unique_entry_sz) {}
             unsigned operator()(store_offset ofs) const {
-                return string_hash(m_storage.c_ptr()+ofs, m_unique_entry_size, 0);
+                return string_hash(std::string_view(m_storage.data()+ofs, m_unique_entry_size), 0);
             } 
         };
 
@@ -134,7 +132,7 @@ namespace datalog {
             offset_eq_proc(storage & s, unsigned unique_entry_sz) 
                 : m_storage(s), m_unique_entry_size(unique_entry_sz) {}
             bool operator()(store_offset o1, store_offset o2) const {
-                const char * base = m_storage.c_ptr();
+                const char * base = m_storage.data();
                 return memcmp(base+o1, base+o2, m_unique_entry_size)==0;
             }
         };
@@ -330,7 +328,7 @@ namespace datalog {
             column_info(unsigned offset, unsigned length) 
                 : m_big_offset(offset / 8), 
                   m_small_offset(offset % 8),
-                  m_mask( length == 64 ? ULLONG_MAX : (static_cast<uint64_t>(1)<<length)-1 ),
+                  m_mask( length >= 64 ? ULLONG_MAX : (static_cast<uint64_t>(1)<<length)-1 ),
                   m_write_mask( ~(m_mask << m_small_offset) ),
                   m_offset(offset), 
                   m_length(length) {
@@ -338,17 +336,20 @@ namespace datalog {
                 SASSERT(length + m_small_offset <= 64);
             }
             table_element get(const char * rec) const {
-                const uint64_t * ptr = reinterpret_cast<const uint64_t*>(rec + m_big_offset);
-                uint64_t res = *ptr;
+
+                uint64_t res;
+                memcpy(&res, rec + m_big_offset, sizeof(res));
                 res >>= m_small_offset;
                 res &= m_mask;
                 return res;
             }
             void set(char * rec, table_element val) const {
                 SASSERT( (val&~m_mask)==0 ); //the value fits into the column
-                uint64_t * ptr = reinterpret_cast<uint64_t*>(rec + m_big_offset);
-                *ptr &= m_write_mask;
-                *ptr |= val << m_small_offset;
+                uint64_t cell;
+                memcpy(&cell, rec + m_big_offset, sizeof(cell));
+                cell &= m_write_mask;
+                cell |= val << m_small_offset;
+                memcpy(rec + m_big_offset, &cell, sizeof(cell));
             }
             unsigned next_ofs() const { return m_offset+m_length; }
         };
@@ -493,6 +494,5 @@ namespace datalog {
         bool knows_exact_size() const override { return true; }
     };
 
- };
+ }
 
-#endif /* DL_SPARSE_TABLE_H_ */

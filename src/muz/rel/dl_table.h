@@ -16,10 +16,8 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_TABLE_H_
-#define DL_TABLE_H_
+#pragma once
 
-#include<iostream>
 #include<list>
 #include<utility>
 
@@ -127,8 +125,8 @@ namespace datalog {
         friend class bitvector_table_plugin;
 
         class bv_iterator;
-        bit_vector m_bv;
-        unsigned   m_num_cols;
+        bit_vector      m_bv;
+        unsigned        m_num_cols;
         unsigned_vector m_shift;
         unsigned_vector m_mask;
 
@@ -146,7 +144,6 @@ namespace datalog {
 
 
     
-};
+}
 
-#endif /* DL_TABLE_H_ */
 

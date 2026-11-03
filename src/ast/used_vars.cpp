@@ -22,6 +22,9 @@ Revision History:
 void used_vars::process(expr * n, unsigned delta) {
     unsigned j, idx;
 
+    if (m_num_found_vars == m_num_decls)
+        return;
+
     m_cache.reset();
     m_todo.reset();
     m_todo.push_back(expr_delta_pair(n, delta));
@@ -58,8 +61,16 @@ void used_vars::process(expr * n, unsigned delta) {
             if (idx >= delta) {
                 idx = idx - delta;
                 if (idx >= m_found_vars.size())
-                    m_found_vars.resize(idx + 1);
-                m_found_vars[idx] = to_var(n)->get_sort();
+                    m_found_vars.resize(idx + 1, nullptr);
+                if (!m_found_vars[idx]) {
+                    m_found_vars[idx] = to_var(n)->get_sort();
+                    if (idx < m_num_decls)
+                        m_num_found_vars++;
+                    if (m_num_found_vars == m_num_decls) {
+                        m_todo.reset();
+                        return;
+                    }
+                }
             }
             break;
         case AST_QUANTIFIER:
@@ -86,7 +97,7 @@ void used_vars::process(expr * n, unsigned delta) {
 bool used_vars::uses_all_vars(unsigned num_decls) const {
     if (num_decls > m_found_vars.size())
         return false;
-    for (unsigned i = 0; i < num_decls; i++) {
+    for (unsigned i = 0; i < num_decls; ++i) {
         if (!m_found_vars[i])
             return false;
     }
@@ -95,7 +106,7 @@ bool used_vars::uses_all_vars(unsigned num_decls) const {
 
 bool used_vars::uses_a_var(unsigned num_decls) const {
     num_decls = std::min(num_decls, m_found_vars.size());
-    for (unsigned i = 0; i < num_decls; i++) {
+    for (unsigned i = 0; i < num_decls; ++i) {
         if (m_found_vars[i])
             return true;
     }
@@ -105,7 +116,7 @@ bool used_vars::uses_a_var(unsigned num_decls) const {
 unsigned used_vars::get_num_vars() const {
     unsigned r   = 0;
     unsigned num = m_found_vars.size();
-    for (unsigned i = 0; i < num; i++) {
+    for (unsigned i = 0; i < num; ++i) {
         if (m_found_vars[i])
             r++;
     }

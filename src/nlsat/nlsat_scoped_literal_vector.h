@@ -17,8 +17,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef NLSAT_SCOPED_LITERAL_VECTOR_H_
-#define NLSAT_SCOPED_LITERAL_VECTOR_H_
+#pragma once
 
 #include "nlsat/nlsat_solver.h"
 
@@ -30,6 +29,22 @@ namespace nlsat {
     public:
         scoped_literal_vector(solver & s):m_solver(s) {}
         ~scoped_literal_vector() { reset(); }
+
+        scoped_literal_vector(scoped_literal_vector && other) noexcept = default;
+
+        scoped_literal_vector & operator=(scoped_literal_vector && other) noexcept {
+            if (this != &other) {
+                SASSERT(&m_solver == &other.m_solver);
+                reset();  // dec_ref our current literals
+                m_lits = std::move(other.m_lits);
+            }
+            return *this;
+        }
+        
+        // Delete copy operations to prevent accidental copies
+        scoped_literal_vector(scoped_literal_vector const &) = delete;
+        scoped_literal_vector & operator=(scoped_literal_vector const &) = delete;
+        
         unsigned size() const { return m_lits.size(); }
         bool empty() const { return m_lits.empty(); }
         literal operator[](unsigned i) const { return m_lits[i]; }
@@ -48,7 +63,7 @@ namespace nlsat {
             m_solver.dec_ref(m_lits[i]);
             m_lits[i] = l;
         }
-        literal const * c_ptr() const { return m_lits.c_ptr(); }
+        literal const * data() const { return m_lits.data(); }
         literal const * begin() const { return m_lits.begin(); }
         literal const * end() const { return m_lits.end(); }
         void shrink(unsigned new_sz) {
@@ -56,19 +71,19 @@ namespace nlsat {
             unsigned sz = m_lits.size();
             if (new_sz == sz)
                 return;
-            for (unsigned i = new_sz; i < sz; i++) {
+            for (unsigned i = new_sz; i < sz; ++i) {
                 m_solver.dec_ref(m_lits[i]);
             }
             m_lits.shrink(new_sz);
         }
         void append(unsigned sz, literal const * ls) {
-            for (unsigned i = 0; i < sz; i++)
+            for (unsigned i = 0; i < sz; ++i)
                 push_back(ls[i]);
         }
         void append(scoped_literal_vector const& ls) {
-            append(ls.size(), ls.c_ptr());
+            append(ls.size(), ls.data());
         }
-        void swap(scoped_literal_vector& other) {
+        void swap(scoped_literal_vector& other) noexcept {
             SASSERT(&m_solver == &other.m_solver);
             m_lits.swap(other.m_lits);
         }
@@ -92,6 +107,5 @@ namespace nlsat {
         operator literal const &() const { return m_lit; }
         void neg() { m_lit.neg(); }
     };
-};
+}
 
-#endif

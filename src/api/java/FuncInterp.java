@@ -17,18 +17,21 @@ Notes:
 
 package com.microsoft.z3;
 
+import java.lang.ref.ReferenceQueue;
+
 /**
  * A function interpretation is represented as a finite map and an 'else' value.
  * Each entry in the finite map represents the value of a function given a set
  * of arguments.
  **/
-public class FuncInterp extends Z3Object {
+@SuppressWarnings("unchecked")
+public class FuncInterp<R extends Sort> extends Z3Object {
 
     /**
      * An Entry object represents an element in the finite map used to encode a
      * function interpretation.
      **/
-    public static class Entry extends Z3Object {
+    public static class Entry<R extends Sort> extends Z3Object {
 
         /**
          * Return the (symbolic) value of this entry.
@@ -36,9 +39,9 @@ public class FuncInterp extends Z3Object {
          * @throws Z3Exception
          * @throws Z3Exception on error
          **/
-        public Expr getValue()
+        public Expr<R> getValue()
         {
-            return Expr.create(getContext(),
+            return (Expr<R>) Expr.create(getContext(),
                     Native.funcEntryGetValue(getContext().nCtx(), getNativeObject()));
         }
 
@@ -57,10 +60,10 @@ public class FuncInterp extends Z3Object {
          * @throws Z3Exception
          * @throws Z3Exception on error
          **/
-        public Expr[] getArgs()
+        public Expr<?>[] getArgs()
         {
             int n = getNumArgs();
-            Expr[] res = new Expr[n];
+            Expr<?>[] res = new Expr[n];
             for (int i = 0; i < n; i++)
                 res[i] = Expr.create(getContext(), Native.funcEntryGetArg(
                         getContext().nCtx(), getNativeObject(), i));
@@ -75,7 +78,7 @@ public class FuncInterp extends Z3Object {
         {
             int n = getNumArgs();
             String res = "[";
-            Expr[] args = getArgs();
+            Expr<?>[] args = getArgs();
             for (int i = 0; i < n; i++)
                 res += args[i] + ", ";
             return res + getValue() + "]";
@@ -92,7 +95,19 @@ public class FuncInterp extends Z3Object {
 
         @Override
         void addToReferenceQueue() {
-            getContext().getFuncEntryDRQ().storeReference(getContext(), this);
+            getContext().getReferenceQueue().storeReference(this, FuncEntryRef::new);
+        }
+
+        private static class FuncEntryRef extends Z3ReferenceQueue.Reference<Entry<?>> {
+
+            private FuncEntryRef(Entry<?> referent, ReferenceQueue<Z3Object> q) {
+                super(referent, q);
+            }
+
+            @Override
+            void decRef(Context ctx, long z3Obj) {
+                Native.funcEntryDecRef(ctx.nCtx(), z3Obj);
+            }
         }
     }
 
@@ -112,12 +127,12 @@ public class FuncInterp extends Z3Object {
      * @throws Z3Exception
      * @throws Z3Exception on error
      **/
-    public Entry[] getEntries()
+    public Entry<R>[] getEntries()
     {
         int n = getNumEntries();
-        Entry[] res = new Entry[n];
+        Entry<R>[] res = new Entry[n];
         for (int i = 0; i < n; i++)
-            res[i] = new Entry(getContext(), Native.funcInterpGetEntry(getContext()
+            res[i] = new Entry<>(getContext(), Native.funcInterpGetEntry(getContext()
                     .nCtx(), getNativeObject(), i));
         return res;
     }
@@ -129,9 +144,9 @@ public class FuncInterp extends Z3Object {
      * @throws Z3Exception on error
      * @return an Expr
      **/
-    public Expr getElse()
+    public Expr<R> getElse()
     {
-        return Expr.create(getContext(),
+        return (Expr<R>) Expr.create(getContext(),
                 Native.funcInterpGetElse(getContext().nCtx(), getNativeObject()));
     }
 
@@ -152,12 +167,12 @@ public class FuncInterp extends Z3Object {
     {
         String res = "";
         res += "[";
-        for (Entry e : getEntries())
+        for (Entry<R> e : getEntries())
         {
             int n = e.getNumArgs();
             if (n > 1)
                 res += "[";
-            Expr[] args = e.getArgs();
+            Expr<?>[] args = e.getArgs();
             for (int i = 0; i < n; i++)
             {
                 if (i != 0)
@@ -185,6 +200,18 @@ public class FuncInterp extends Z3Object {
 
     @Override
     void addToReferenceQueue() {
-        getContext().getFuncInterpDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, FuncInterpRef::new);
+    }
+
+    private static class FuncInterpRef extends Z3ReferenceQueue.Reference<FuncInterp<?>> {
+
+        private FuncInterpRef(FuncInterp<?> referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.funcInterpDecRef(ctx.nCtx(), z3Obj);
+        }
     }
 }

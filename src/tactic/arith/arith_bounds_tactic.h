@@ -27,11 +27,11 @@ Notes:
     for assembling bounds, but it does not have a way to check for
     subsumption of atoms. 
 
+## Tactic arith-bounds
+
 --*/
-#ifndef ARITH_BOUNDS_TACTIC_H_
-#define ARITH_BOUNDS_TACTIC_H_
+#pragma once
 #include "tactic/tactic.h"
 
 tactic * mk_arith_bounds_tactic(ast_manager & m, params_ref const & p = params_ref());
 
-#endif

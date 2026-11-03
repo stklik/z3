@@ -23,18 +23,19 @@ Revision History:
 --*/
 #include "tactic/tactical.h"
 #include "ast/rewriter/th_rewriter.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/expr_substitution.h"
 #include "ast/ast_smt2_pp.h"
+#include "ast/ast_pp.h"
 
 class fix_dl_var_tactic : public tactic {
 
     struct is_target {
-        struct failed {};
+        struct failed : public std::exception {};
         ast_manager &          m;
         arith_util &           m_util;
-        expr_fast_mark1 *      m_visited;
+        expr_fast_mark1 *      m_visited = nullptr;
         ptr_vector<expr>       m_todo;
         obj_map<app, unsigned> m_occs;
         obj_map<app, unsigned> m_non_nested_occs;
@@ -45,17 +46,13 @@ class fix_dl_var_tactic : public tactic {
         }
         
         void throw_failed(expr * ctx1, expr * ctx2 = nullptr) {
-            TRACE("fix_dl_var", tout << mk_ismt2_pp(ctx1, m) << "\n"; if (ctx2) tout << mk_ismt2_pp(ctx2, m) << "\n";);
+            TRACE(fix_dl_var, tout << mk_ismt2_pp(ctx1, m) << "\n"; if (ctx2) tout << mk_ismt2_pp(ctx2, m) << "\n";);
             throw failed();
         }
         
         bool is_arith(expr * n) {
-            sort * s = m.get_sort(n);
+            sort * s = n->get_sort();
             return s->get_family_id() == m_util.get_family_id();
-        }
-        // Return true if n is uninterpreted with respect to arithmetic.
-        bool is_uninterp(expr * n) {
-            return is_app(n) && to_app(n)->get_family_id() != m_util.get_family_id();
         }
 
         // Remark: we say an expression is nested, if it occurs inside the boolean structure of the formula.
@@ -63,12 +60,10 @@ class fix_dl_var_tactic : public tactic {
         
         void inc_occ(expr * n, bool nested) {
             if (is_uninterp_const(n) && is_arith(n)) {
-                obj_map<app, unsigned>::obj_map_entry * entry = m_occs.insert_if_not_there2(to_app(n), 0); 
-                entry->get_data().m_value++;
+                m_occs.insert_if_not_there(to_app(n), 0)++;
 
                 if (!nested) {
-                    entry = m_non_nested_occs.insert_if_not_there2(to_app(n), 0);
-                    entry->get_data().m_value++;
+                    m_non_nested_occs.insert_if_not_there(to_app(n), 0)++;
                 }
             }
         }
@@ -82,9 +77,11 @@ class fix_dl_var_tactic : public tactic {
         }
         
         void process_app(app * t) {
-            unsigned num = t->get_num_args();
-            for (unsigned i = 0; i < num; i++)
-                visit(t->get_arg(i), false);
+            if (!is_uninterp(t) && !is_arith(t)) {
+                throw_failed(t);
+            }
+            for (expr* arg : *t) 
+                visit(arg, false);
         }
 
         void process_arith_atom(expr * lhs, expr * rhs, bool nested) {
@@ -107,7 +104,7 @@ class fix_dl_var_tactic : public tactic {
                 visit(s, nested);
             }
             else {
-                CTRACE("fix_dl_var", m_util.is_add(lhs, t, ms),
+                CTRACE(fix_dl_var, m_util.is_add(lhs, t, ms),
                        s = 0;
                        tout << "is_times_minus_one: " << m_util.is_times_minus_one(ms, s) << "\n";
                        tout << "is_uninterp(t):     " << is_uninterp(t) << "\n";
@@ -124,13 +121,14 @@ class fix_dl_var_tactic : public tactic {
         void process_eq(app * t, bool nested) {
             if (!is_arith(t->get_arg(0))) {
                 process_app(t);
-                return;
             }
-            process_arith_atom(t->get_arg(0), t->get_arg(1), nested);
+            else {
+                process_arith_atom(t->get_arg(0), t->get_arg(1), nested);
+            }
         }
 
         void process_arith(app * t, bool nested) {
-            if (m.is_bool(t)) {
+            if (m.is_bool(t) && t->get_num_args() == 2) {
                 process_arith_atom(t->get_arg(0), t->get_arg(1), nested);
                 return;
             }
@@ -180,12 +178,10 @@ class fix_dl_var_tactic : public tactic {
         app * most_occs(obj_map<app, unsigned> & occs, unsigned & best) {
             app * r = nullptr;
             best = 0;
-            obj_map<app, unsigned>::iterator it  = occs.begin();
-            obj_map<app, unsigned>::iterator end = occs.end();
-            for (; it != end; ++it) {
-                if (it->m_value > best) {
-                    best = it->m_value;
-                    r    = it->m_key;
+            for (auto const& kv : occs) {
+                if (kv.m_value > best) {
+                    best = kv.m_value;
+                    r    = kv.m_key;
                 }
             }
             return r;
@@ -201,7 +197,7 @@ class fix_dl_var_tactic : public tactic {
             app * r1, * r2;
             r1 = most_occs(m_non_nested_occs, best1);
             r2 = most_occs(m_occs, best2);
-            TRACE("fix_dl_var_choice", 
+            TRACE(fix_dl_var, 
                   if (r1) {
                       tout << "r1 occs: " << best1 << "\n";
                       tout << mk_ismt2_pp(r1, m) << "\n";
@@ -219,14 +215,12 @@ class fix_dl_var_tactic : public tactic {
         app * operator()(goal const & g) {
             try {
                 expr_fast_mark1 visited;
-                m_visited = &visited;
-                unsigned sz = g.size();
-                for (unsigned i = 0; i < sz; i++) {
-                    process(g.form(i));
-                }
+                flet<expr_fast_mark1*> _visited(m_visited, &visited);
+                for (auto [f, d, p] : g)
+                    process(f);
                 return most_occs();
             }
-            catch (failed) {
+            catch (const failed &) {
                 return nullptr;
             }
         }
@@ -250,15 +244,13 @@ class fix_dl_var_tactic : public tactic {
                 
         void operator()(goal_ref const & g, 
                         goal_ref_buffer & result) {
-            SASSERT(g->is_well_sorted());
             tactic_report report("fix-dl-var", *g);
-            bool produce_proofs = g->proofs_enabled();
             m_produce_models    = g->models_enabled();
+            TRACE(fix_dl_var, g->display(tout););
 
             app * var = is_target(u)(*g);
             if (var != nullptr) {
                 IF_VERBOSE(TACTIC_VERBOSITY_LVL, verbose_stream() << "(fixing-at-zero " << var->get_decl()->get_name() << ")\n";);
-                tactic_report report("fix-dl-var", *g);
                 
                 expr_substitution subst(m);
                 app * zero = u.mk_numeral(rational(0), u.is_int(var));
@@ -273,21 +265,17 @@ class fix_dl_var_tactic : public tactic {
                 
                 expr_ref   new_curr(m);
                 proof_ref  new_pr(m);
-                unsigned size = g->size();
-                for (unsigned idx = 0; !g->inconsistent() && idx < size; idx++) {
-                    expr * curr = g->form(idx);
+                unsigned idx = 0;
+                for (auto [curr, d, p] : *g) {
+                    if (g->inconsistent())
+                        break;
                     m_rw(curr, new_curr, new_pr);
-                    if (produce_proofs) {
-                        proof * pr = g->pr(idx);
-                        new_pr     = m.mk_modus_ponens(pr, new_pr);
-                    }
-                    g->update(idx, new_curr, new_pr, g->dep(idx));
+                    new_pr = m.mk_modus_ponens(p, new_pr);
+                    g->update(idx++, new_curr, new_pr, d);
                 }
                 g->inc_depth();
             }
             result.push_back(g.get());
-            TRACE("fix_dl_var", g->display(tout););
-            SASSERT(g->is_well_sorted());
         }
     };
     
@@ -307,9 +295,11 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "fix_dl_var"; }
+
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {
@@ -322,7 +312,7 @@ public:
             (*m_imp)(in, result);
         }
         catch (rewriter_exception & ex) {
-            throw tactic_exception(ex.msg());
+            throw tactic_exception(ex.what());
         }
     }
     

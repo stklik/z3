@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MODEL2EXPR_H_
-#define MODEL2EXPR_H_
+#pragma once
 
 #include "model/model.h"
 
@@ -30,10 +29,9 @@ typedef hashtable<symbol, symbol_hash_proc, symbol_eq_proc> symbol_set;
 
 class mk_fresh_name {
     symbol_set m_symbols;
-    char       m_char;
-    unsigned   m_num;
+    char       m_char = 'A';
+    unsigned   m_num = 0;
 public:
-    mk_fresh_name(): m_char('A'), m_num(0) {}
     void add(ast* a);
     void add(symbol const& s) { m_symbols.insert(s); }
     symbol next();
@@ -41,5 +39,4 @@ public:
 };
 
 
-#endif /* MODEL2EXPR_H_ */
 

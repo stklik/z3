@@ -24,17 +24,19 @@ Revision History:
 
 namespace smt {
     class theory_lra : public theory, public theory_opt {
+    public:
         class imp;
+    private:
         imp* m_imp;
 
     public:
-        theory_lra(ast_manager& m, theory_arith_params& ap);
+        theory_lra(context& ctx);
         ~theory_lra() override;
         theory* mk_fresh(context* new_ctx) override;
         char const* get_name() const override { return "arithmetic"; }
-        
-        void init(context * ctx) override;
 
+        void init() override;
+        
         bool internalize_atom(app * atom, bool gate_ctx) override;
                                                      
         bool internalize_term(app * term) override;
@@ -42,6 +44,8 @@ namespace smt {
         void internalize_eq_eh(app * atom, bool_var v) override;
 
         void assign_eh(bool_var v, bool is_true) override;
+
+        lbool get_phase(bool_var v) override;
 
         void new_eq_eh(theory_var v1, theory_var v2) override;
 
@@ -55,11 +59,15 @@ namespace smt {
 
         void restart_eh() override;
 
-        void relevant_eh(app* e) override;
+        void relevant_eh(expr* e) override;
 
         void init_search_eh() override;
 
-        final_check_status final_check_eh() override;
+        final_check_status final_check_eh(unsigned) override;
+
+        unsigned num_final_check_levels() const override {
+            return 2;
+        }
 
         bool is_shared(theory_var v) const override;
     
@@ -73,24 +81,43 @@ namespace smt {
 
         void reset_eh() override;
 
+        void apply_sort_cnstr(enode * n, sort * s) override;
+
         void init_model(model_generator & m) override;
+
+        void initialize_value(expr* var, expr* value) override;
         
         model_value_proc * mk_value(enode * n, model_generator & mg) override;
+        void validate_model(proto_model& mdl) override;
 
         bool get_value(enode* n, expr_ref& r) override;
+        bool include_func_interp(func_decl* f) override;
+        bool get_value(enode* n, rational& r);
         bool get_lower(enode* n, expr_ref& r);
         bool get_upper(enode* n, expr_ref& r);
+        bool get_lower(enode* n, rational& r, bool& is_strict);
+        bool get_upper(enode* n, rational& r, bool& is_strict);
+        void solve_for(vector<solution>& s) override;
 
-        bool validate_eq_in_model(theory_var v1, theory_var v2, bool is_true) const override;
+
+        // check if supplied set of linear constraints are LP feasible within current backtracking context
+        // identify core by setting Boolean flags to true for constraints used in the proof of infeasibility
+        // and return l_false if infeasible.
+        lbool check_lp_feasible(vector<std::pair<bool, expr_ref>> &ineqs, literal_vector& lit_core, enode_pair_vector& eq_core);
+
+        void updt_params() override;
                 
         void display(std::ostream & out) const override;
         
         void collect_statistics(::statistics & st) const override;
 
+        void setup() override;
+
         // optimization
         expr_ref mk_ge(generic_model_converter& fm, theory_var v, inf_rational const& val);
         inf_eps value(theory_var) override;
-        inf_eps maximize(theory_var v, expr_ref& blocker, bool& has_shared) override;
+        inf_eps maximize(theory_var v, expr_ref& blocker) override;
+        inf_eps maximize_with_bound(theory_var v, expr_ref& blocker, std::optional<upper_bound>& upper) override;
         theory_var add_objective(app* term) override;
     };
 

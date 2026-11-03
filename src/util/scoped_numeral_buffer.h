@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_NUMERAL_BUFFER_H_
-#define SCOPED_NUMERAL_BUFFER_H_
+#pragma once
 
 #include "util/buffer.h"
 
@@ -25,16 +24,17 @@ template<typename Manager, unsigned INITIAL_SIZE = 16>
 class _scoped_numeral_buffer : public sbuffer<typename Manager::numeral, INITIAL_SIZE> {
     typedef sbuffer<typename Manager::numeral, INITIAL_SIZE> super;
     Manager & m_manager;
-    _scoped_numeral_buffer(_scoped_numeral_buffer const & v);
 public:
     _scoped_numeral_buffer(Manager & m):m_manager(m) {}
     ~_scoped_numeral_buffer() {
         reset();
     }
 
+    _scoped_numeral_buffer(_scoped_numeral_buffer const & v) = delete;
+
     void reset() {
         unsigned sz = this->size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             m().del(this->operator[](i));
         }
         super::reset();
@@ -51,7 +51,7 @@ public:
         unsigned old_sz = this->size();
         if (old_sz == sz)
             return;
-        for (unsigned i = sz; i < old_sz; i++)
+        for (unsigned i = sz; i < old_sz; ++i)
             m().del(this->operator[](i));
         super::shrink(sz);
     }
@@ -65,4 +65,3 @@ public:
     }
 };
 
-#endif

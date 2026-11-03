@@ -17,8 +17,7 @@
 
  Revision History:
  --*/
-#ifndef BV_BOUNDS_H_23754
-#define BV_BOUNDS_H_23754
+#pragma once
 #include "ast/ast.h"
 #include "ast/bv_decl_plugin.h"
 #include "ast/rewriter/rewriter_types.h"
@@ -35,7 +34,7 @@ public:
     typedef rational numeral;
     typedef std::pair<numeral, numeral> interval;
     typedef obj_map<app, numeral>       bound_map;
-    bv_bounds(ast_manager& m) : m_m(m), m_bv_util(m), m_okay(true) {};
+    bv_bounds(ast_manager& m) : m_m(m), m_bv_util(m), m_okay(true) {}
     ~bv_bounds();
 public: // bounds addition methods
     br_status rewrite(unsigned limit, func_decl * f, unsigned num, expr * const * args, expr_ref& result);
@@ -127,4 +126,3 @@ inline bool bv_bounds::is_constant_add(unsigned bv_sz, expr * e, app*& v, numera
 }
 
 
-#endif /* BV_BOUNDS_H_23754 */

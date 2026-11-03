@@ -16,9 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_CONTEXT_H_
-#define SMT_CONTEXT_H_
+#pragma once
 
+#include <atomic>
+#include "ast/quantifier_stat.h"
+#include "ast/simplifiers/dependent_expr_state.h"
 #include "smt/smt_clause.h"
 #include "smt/smt_setup.h"
 #include "smt/smt_enode.h"
@@ -27,46 +29,68 @@ Revision History:
 #include "smt/smt_eq_justification.h"
 #include "smt/smt_justification.h"
 #include "smt/smt_bool_var_data.h"
+#include "smt/smt_clause_proof.h"
 #include "smt/smt_theory.h"
 #include "smt/smt_quantifier.h"
-#include "smt/smt_quantifier_stat.h"
 #include "smt/smt_statistics.h"
 #include "smt/smt_conflict_resolution.h"
 #include "smt/smt_relevancy.h"
 #include "smt/smt_case_split_queue.h"
 #include "smt/smt_almost_cg_table.h"
 #include "smt/smt_failure.h"
-#include "smt/asserted_formulas.h"
 #include "smt/smt_types.h"
 #include "smt/dyn_ack.h"
 #include "ast/ast_smt_pp.h"
 #include "smt/watch_list.h"
 #include "util/trail.h"
-#include "smt/fingerprints.h"
 #include "util/ref.h"
-#include "smt/proto_model/proto_model.h"
-#include "model/model.h"
 #include "util/timer.h"
 #include "util/statistics.h"
+#include "util/map.h"
+#include "smt/fingerprints.h"
+#include "smt/proto_model/proto_model.h"
+#include "smt/theory_user_propagator.h"
+#include "model/model.h"
 #include "solver/progress_callback.h"
+#include "solver/assertions/asserted_formulas.h"
 #include <tuple>
 
 // there is a significant space overhead with allocating 1000+ contexts in
 // the case that each context only references a few expressions.
 // Using a map instead of a vector for the literals can compress space
 // consumption.
-#ifdef SPARSE_MAP
-#define USE_BOOL_VAR_VECTOR 0
-#else
 #define USE_BOOL_VAR_VECTOR 1
-#endif
 
 namespace smt {
 
     class model_generator;
+    class context;
+    class kernel;
+
+    // Hash table for storing enode -> generation mappings
+    typedef ptr_addr_map<enode, unsigned> enode_generation_table;
+
+    struct oom_exception : public z3_error {
+        oom_exception() : z3_error(ERR_MEMOUT) {}
+    };
+
+    struct enode_pp {
+        context const& ctx;
+        enode*   n;
+        enode_pp(enode* n, context const& ctx): ctx(ctx), n(n) {}
+    };
+
+    struct replay_unit {
+        expr_ref m_unit;
+        bool     m_sign;
+        bool     m_relevant;
+    };
 
     class context {
         friend class model_generator;
+        friend class lookahead;
+        friend class parallel;
+        friend class kernel;
     public:
         statistics                  m_stats;
 
@@ -77,23 +101,26 @@ namespace smt {
 
 
     protected:
-        ast_manager &               m_manager;
+        ast_manager &               m;
         smt_params &                m_fparams;
         params_ref                  m_params;
+        ::statistics                m_aux_stats;
         setup                       m_setup;
+        unsigned                    m_relevancy_lvl;
         timer                       m_timer;
+        region                      m_region;
         asserted_formulas           m_asserted_formulas;
+        th_rewriter                 m_rewriter;
         scoped_ptr<quantifier_manager>   m_qmanager;
         scoped_ptr<model_generator>      m_model_generator;
         scoped_ptr<relevancy_propagator> m_relevancy_propagator;
+        theory_user_propagator*          m_user_propagator;
         random_gen                  m_random;
         bool                        m_flushing; // (debug support) true when flushing
         mutable unsigned            m_lemma_id;
         progress_callback *         m_progress_callback;
         unsigned                    m_next_progress_sample;
-
-        region                      m_region;
-
+        clause_proof                m_clause_proof;
         fingerprint_set             m_fingerprints;
 
         expr_ref_vector             m_b_internalized_stack; // stack of the boolean expressions already internalized.
@@ -104,7 +131,20 @@ namespace smt {
 
         ptr_vector<justification>   m_justifications;
 
-        unsigned                    m_final_check_idx; // circular counter used for implementing fairness
+        unsigned                    m_final_check_idx = 0; // circular counter used for implementing fairness
+
+        bool                        m_is_auxiliary = false; // used to prevent unwanted information from being logged.
+        class parallel*             m_par = nullptr;
+        unsigned                    m_par_index = 0;
+        bool                        m_internalizing_assertions = false;
+        lbool                       m_internal_completed = l_undef;
+
+        scoped_ptr<dependent_expr_simplifier> m_simplifier;
+        scoped_ptr<base_dependent_expr_state> m_fmls;
+
+        svector<double> m_lit_scores[2];
+        svector<unsigned> m_birthdate;
+
 
         // -----------------------------------
         //
@@ -120,12 +160,12 @@ namespace smt {
         vector<enode_vector>        m_decl2enodes;  // decl -> enode (for decls with arity > 0)
         enode_vector                m_empty_vector;
         cg_table                    m_cg_table;
-        dyn_ack_manager             m_dyn_ack_manager;
+        enode_generation_table      m_sticky_generation_updates;
+        vector<std::pair<enode*, unsigned>>      m_r1_parent_generations; // temporary field used to cache generations between remove_parents_from_cg_table and reinsert_parents_into_cg_table
         struct new_eq {
             enode *                 m_lhs;
             enode *                 m_rhs;
             eq_justification        m_justification;
-            new_eq() {}
             new_eq(enode * lhs, enode * rhs, eq_justification const & js):
                 m_lhs(lhs), m_rhs(rhs), m_justification(js) {}
         };
@@ -134,7 +174,6 @@ namespace smt {
             theory_id  m_th_id;
             theory_var m_lhs;
             theory_var m_rhs;
-            new_th_eq():m_th_id(null_theory_id), m_lhs(null_theory_var), m_rhs(null_theory_var) {}
             new_th_eq(theory_id id, theory_var l, theory_var r):m_th_id(id), m_lhs(l), m_rhs(r) {}
         };
         svector<new_th_eq>          m_th_eq_propagation_queue;
@@ -144,7 +183,7 @@ namespace smt {
         svector<new_th_eq>          m_propagated_th_diseqs;
         svector<enode_pair>         m_diseq_vector;
 #endif
-        enode *                     m_is_diseq_tmp; // auxiliary enode used to find congruent equality atoms.
+        enode *                     m_is_diseq_tmp { nullptr }; // auxiliary enode used to find congruent equality atoms.
 
         tmp_enode                   m_tmp_enode;
         ptr_vector<almost_cg_table> m_almost_cg_tables; // temporary field for is_ext_diseq
@@ -162,29 +201,30 @@ namespace smt {
         ptr_vector<expr>            m_bool_var2expr;         // bool_var -> expr
         signed_char_vector          m_assignment;  //!< mapping literal id -> assignment lbool
         vector<watch_list>          m_watches;     //!< per literal
-        vector<clause_set>          m_lit_occs;    //!< index for backward subsumption
+        unsigned_vector             m_lit_occs;    //!< occurrence count of literals
         svector<bool_var_data>      m_bdata;       //!< mapping bool_var -> data
         svector<double>             m_activity;
         clause_vector               m_aux_clauses;
         clause_vector               m_lemmas;
         vector<clause_vector>       m_clauses_to_reinit;
-        expr_ref_vector             m_units_to_reassert;
-        svector<char>               m_units_to_reassert_sign;
+        vector<replay_unit>         m_units_to_reassert;
         literal_vector              m_assigned_literals;
         typedef std::pair<clause*, literal_vector> tmp_clause;
         vector<tmp_clause>          m_tmp_clauses;
-        unsigned                    m_qhead;
-        unsigned                    m_simp_qhead;
-        int                         m_simp_counter; //!< can become negative
+        unsigned                    m_qhead { 0 };
+        unsigned                    m_simp_qhead { 0 };
+        int                         m_simp_counter { 0 }; //!< can become negative
         scoped_ptr<case_split_queue> m_case_split_queue;
-        double                      m_bvar_inc;
-        bool                        m_phase_cache_on;
-        unsigned                    m_phase_counter; //!< auxiliary variable used to decide when to turn on/off phase caching
-        bool                        m_phase_default; //!< default phase when using phase caching
+        double                      m_bvar_inc { 1.0 };
+        bool                        m_phase_cache_on { true };
+        unsigned                    m_phase_counter { 0 }; //!< auxiliary variable used to decide when to turn on/off phase caching
+        bool                        m_phase_default { false }; //!< default phase when using phase caching
 
         // A conflict is usually a single justification. That is, a justification
         // for false. If m_not_l is not null_literal, then m_conflict is a
-        // justification for l, and the conflict is union of m_no_l and m_conflict;
+        // justification for l, and the conflict is union of m_not_l and m_conflict;
+        // m_empty_clause is set to ensure that an empty clause generated in deep scope 
+        // levels survives to the base level.
         b_justification             m_conflict;
         literal                     m_not_l;
         scoped_ptr<conflict_resolution> m_conflict_resolution;
@@ -193,8 +233,9 @@ namespace smt {
 
         literal_vector              m_atom_propagation_queue;
 
-        obj_map<expr, unsigned>      m_cached_generation;
-        obj_hashtable<expr>          m_cache_generation_visited;
+        obj_map<expr, unsigned>     m_cached_generation;
+        obj_hashtable<expr>         m_cache_generation_visited;
+        dyn_ack_manager             m_dyn_ack_manager;
 
         // -----------------------------------
         //
@@ -203,28 +244,9 @@ namespace smt {
         // -----------------------------------
         proto_model_ref            m_proto_model;
         model_ref                  m_model;
-        std::string                m_unknown;
-        void                       mk_proto_model(lbool r);
-        struct scoped_mk_model {
-            context & m_ctx;
-            scoped_mk_model(context & ctx):m_ctx(ctx) {
-                m_ctx.m_proto_model = nullptr;
-                m_ctx.m_model       = nullptr;
-            }
-            ~scoped_mk_model() {
-                if (m_ctx.m_proto_model.get() != nullptr) {
-                    m_ctx.m_model = m_ctx.m_proto_model->mk_model();
-                    try {
-                        m_ctx.add_rec_funs_to_model();
-                    }
-                    catch (...) {
-                        // no op
-                    }
-                    m_ctx.m_proto_model = nullptr; // proto_model is not needed anymore.
-                }
-            }
-        };
-
+        const char *               m_unknown;
+        void                       mk_proto_model();
+        void                       reset_model() { m_model = nullptr; m_proto_model = nullptr; }
 
         // -----------------------------------
         //
@@ -236,6 +258,9 @@ namespace smt {
         literal2assumption         m_literal2assumption; // maps an expression associated with a literal to the original assumption
         expr_ref_vector            m_unsat_core;
 
+        unsigned                   m_last_position_log { 0 };
+        svector<size_t>            m_last_positions;
+
         // -----------------------------------
         //
         // Theory case split
@@ -245,6 +270,17 @@ namespace smt {
         vector<literal_vector> m_th_case_split_sets;
         u_map< vector<literal_vector> > m_literal2casesplitsets; // returns the case split literal sets that a literal participates in
 
+
+        // ----------------------------------
+        //
+        // Value initialization
+        //
+        // ----------------------------------
+        vector<std::pair<expr_ref, expr_ref>> m_values;
+        void initialize_value(expr* var, expr* value);
+        void initialize_values();
+
+
         // -----------------------------------
         //
         // Accessors
@@ -252,14 +288,18 @@ namespace smt {
         // -----------------------------------
     public:
         ast_manager & get_manager() const {
-            return m_manager;
+            return m;
         }
 
         th_rewriter & get_rewriter() {
-            return m_asserted_formulas.get_rewriter();
+            return m_rewriter;
         }
 
         smt_params & get_fparams() {
+            return m_fparams;
+        }
+
+        smt_params const& get_fparams() const {
             return m_fparams;
         }
 
@@ -271,18 +311,30 @@ namespace smt {
 
         bool get_cancel_flag();
 
+        void set_internal_completed() {
+            if (m_internal_completed == l_undef)
+                m_internal_completed = l_true;
+        }
+
         region & get_region() {
             return m_region;
         }
 
         bool relevancy() const {
-            return m_fparams.m_relevancy_lvl > 0;
+            return relevancy_lvl() > 0;
+        }
+
+        unsigned relevancy_lvl() const {
+            return std::min(m_relevancy_lvl, m_fparams.m_relevancy_lvl);
         }
 
         enode * get_enode(expr const * n) const {
             SASSERT(e_internalized(n));
             return m_app2enode[n->get_id()];
         }
+
+        void get_specrels(func_decl_set& rels) const;
+
 
         /**
            \brief Similar to get_enode, but returns 0 if n is to e_internalized.
@@ -297,6 +349,10 @@ namespace smt {
 
         bool_var get_bool_var(expr const * n) const {
             return m_expr2bool_var[n->get_id()];
+        }
+
+        bool_var get_bool_var(enode const * n) const {
+            return get_bool_var(n->get_expr());
         }
 
         bool_var get_bool_var_of_id(unsigned id) const {
@@ -376,6 +432,10 @@ namespace smt {
             return m_assigned_literals;
         }
 
+        watch_list const& get_watch(literal l) const {
+            return m_watches[l.index()];
+        }
+
         lbool get_assignment(expr * n) const;
 
         // Similar to get_assignment, but returns l_undef if n is not internalized.
@@ -396,24 +456,27 @@ namespace smt {
             return js.get_kind() == b_justification::JUSTIFICATION && js.get_justification()->get_from_theory() == th_id;
         }
 
-        int get_random_value() {
-            return m_random();
-        }
+        void set_random_seed(unsigned s) { m_random.set_seed(s); }
 
-        bool is_searching() const {
-            return m_searching;
-        }
+        int get_random_value() { return m_random(); }
 
-        svector<double> const & get_activity_vector() const {
-            return m_activity;
-        }
+        bool is_searching() const { return m_searching; }
 
-        double get_activity(bool_var v) const {
-            return m_activity[v];
-        }
+        svector<double> const & get_activity_vector() const { return m_activity; }
 
-        void set_activity(bool_var v, double & act) {
-            m_activity[v] = act;
+        double get_activity(bool_var v) const { return m_activity[v]; }
+        unsigned get_num_assignments() const { return m_stats.m_num_assignments; }
+        unsigned get_birthdate(bool_var v) const { return m_birthdate[v]; }
+
+        void set_activity(bool_var v, double act) { m_activity[v] = act; }
+
+        void activity_changed(bool_var v, bool increased) {
+            if (increased) {
+                m_case_split_queue->activity_increased_eh(v);
+            }
+            else {
+                m_case_split_queue->activity_decreased_eh(v);
+            }
         }
 
         bool is_assumption(bool_var v) const {
@@ -490,8 +553,10 @@ namespace smt {
             return m_scope_lvl == m_search_lvl;
         }
 
+        void pop_to_search_level() { pop_to_search_lvl(); }
+
         bool tracking_assumptions() const {
-            return m_search_lvl > m_base_lvl;
+            return !m_assumptions.empty() && m_search_lvl > m_base_lvl;
         }
 
         expr * bool_var2expr(bool_var v) const {
@@ -500,13 +565,19 @@ namespace smt {
 
         void literal2expr(literal l, expr_ref & result) const {
             if (l == true_literal)
-                result = m_manager.mk_true();
+                result = m.mk_true();
             else if (l == false_literal)
-                result = m_manager.mk_false();
+                result = m.mk_false();
             else if (l.sign())
-                result = m_manager.mk_not(bool_var2expr(l.var()));
+                result = m.mk_not(bool_var2expr(l.var()));
             else
                 result = bool_var2expr(l.var());
+        }
+
+        expr_ref literal2expr(literal l) const {
+            expr_ref result(m);
+            literal2expr(l, result);
+            return result;
         }
 
         bool is_true(enode const * n) const {
@@ -518,22 +589,22 @@ namespace smt {
         }
 
         unsigned get_num_enodes_of(func_decl const * decl) const {
-            unsigned id = decl->get_decl_id();
+            unsigned id = decl->get_small_id();
             return id < m_decl2enodes.size() ? m_decl2enodes[id].size() : 0;
         }
 
         enode_vector const& enodes_of(func_decl const * d) const {
-            unsigned id = d->get_decl_id();
+            unsigned id = d->get_small_id();
             return id < m_decl2enodes.size() ? m_decl2enodes[id] : m_empty_vector;
         }
 
         enode_vector::const_iterator begin_enodes_of(func_decl const * decl) const {
-            unsigned id = decl->get_decl_id();
+            unsigned id = decl->get_small_id();
             return id < m_decl2enodes.size() ? m_decl2enodes[id].begin() : nullptr;
         }
 
         enode_vector::const_iterator end_enodes_of(func_decl const * decl) const {
-            unsigned id = decl->get_decl_id();
+            unsigned id = decl->get_small_id();
             return id < m_decl2enodes.size() ? m_decl2enodes[id].end() : nullptr;
         }
 
@@ -551,6 +622,26 @@ namespace smt {
             return m_qmanager->get_generation(q);
         }
 
+        unsigned get_generation(enode * e) const  {
+            // We don't support patterns with equality so there is no need to track generations for them.
+            if (e->is_eq())
+                return 0;
+
+            return get_cg_root(e)->m_generation;
+        }
+
+        unsigned get_max_generation(unsigned num_enodes, enode * const * enodes) {
+            unsigned max = 0;
+            for (unsigned i = 0; i < num_enodes; ++i) {
+                unsigned curr = get_generation(enodes[i]);
+                if (curr > max)
+                    max = curr;
+            }
+            return max;
+        }
+
+        void set_generation(enode * e, unsigned generation);
+
         /**
            \brief Return true if the logical context internalized universal quantifiers.
         */
@@ -565,16 +656,25 @@ namespace smt {
             return m_asserted_formulas.has_quantifiers();
         }
 
-        fingerprint * add_fingerprint(void * data, unsigned data_hash, unsigned num_args, enode * const * args, expr* def = 0) {
-            return m_fingerprints.insert(data, data_hash, num_args, args, def);
+        fingerprint * add_fingerprint(void * data, unsigned data_hash, unsigned num_args, enode * const * args) {
+            return m_fingerprints.insert(data, data_hash, num_args, args);
         }
 
         theory_id get_var_theory(bool_var v) const {
             return get_bdata(v).get_theory();
         }
 
+        /** 
+         * flag to toggle quantifier tracing.
+         */
+        bool m_coming_from_quant { false };
+
+
         friend class set_var_theory_trail;
         void set_var_theory(bool_var v, theory_id tid);
+
+
+        bool has_sls_model();
 
         // -----------------------------------
         //
@@ -582,31 +682,33 @@ namespace smt {
         //
         // -----------------------------------
     protected:
-        typedef ptr_vector<trail<context> >   trail_stack;
         trail_stack                           m_trail_stack;
 #ifdef Z3DEBUG
-        bool                                  m_trail_enabled;
+        bool                                  m_trail_enabled { true };
 #endif
 
     public:
         template<typename TrailObject>
         void push_trail(const TrailObject & obj) {
             SASSERT(m_trail_enabled);
-            m_trail_stack.push_back(new (m_region) TrailObject(obj));
+            m_trail_stack.push(obj);
         }
 
-        void push_trail_ptr(trail<context> * ptr) {
-            m_trail_stack.push_back(ptr);
+        void push_trail_ptr(trail * ptr) {
+            m_trail_stack.push_ptr(ptr);
+        }
+
+        trail_stack& get_trail_stack() {
+            return m_trail_stack;
         }
 
     protected:
 
-        unsigned                    m_scope_lvl;
-        unsigned                    m_base_lvl;
-        unsigned                    m_search_lvl; // It is greater than m_base_lvl when assumptions are used.  Otherwise, it is equals to m_base_lvl
+        unsigned                    m_scope_lvl { 0 };
+        unsigned                    m_base_lvl { 0 };
+        unsigned                    m_search_lvl { 0 }; // It is greater than m_base_lvl when assumptions are used.  Otherwise, it is equals to m_base_lvl
         struct scope {
             unsigned                m_assigned_literals_lim;
-            unsigned                m_trail_stack_lim;
             unsigned                m_aux_clauses_lim;
             unsigned                m_justifications_lim;
             unsigned                m_units_to_reassert_lim;
@@ -626,17 +728,13 @@ namespace smt {
 
         void pop_scope(unsigned num_scopes);
 
-        void undo_trail_stack(unsigned old_size);
-
         void unassign_vars(unsigned old_lim);
 
         void remove_watch_literal(clause * cls, unsigned idx);
 
-        void remove_lit_occs(clause * cls);
-
         void remove_cls_occs(clause * cls);
 
-        void del_clause(clause * cls);
+        void del_clause(bool log, clause * cls);
 
         void del_clauses(clause_vector & v, unsigned old_size);
 
@@ -665,9 +763,6 @@ namespace smt {
 
         void remove_watch(bool_var v);
 
-        void mark_as_deleted(clause * cls);
-
-
         // -----------------------------------
         //
         // Internalization
@@ -679,7 +774,7 @@ namespace smt {
         }
 
         bool lit_internalized(expr const * n) const {
-            return m_manager.is_false(n) || (m_manager.is_not(n) ? b_internalized(to_app(n)->get_arg(0)) : b_internalized(n));
+            return m.is_false(n) || (m.is_not(n) ? b_internalized(to_app(n)->get_arg(0)) : b_internalized(n));
         }
 
         bool e_internalized(expr const * n) const {
@@ -711,11 +806,11 @@ namespace smt {
         }
 
     protected:
-        unsigned m_generation; //!< temporary variable used during internalization
+        unsigned m_generation { 0 }; //!< temporary variable used during internalization
 
     public:
         bool binary_clause_opt_enabled() const {
-            return !m_manager.proofs_enabled() && m_fparams.m_binary_clause_opt;
+            return !m.proofs_enabled() && m_fparams.m_binary_clause_opt;
         }
     protected:
         bool_var_data & get_bdata(expr const * n) {
@@ -726,13 +821,31 @@ namespace smt {
             return get_bdata(get_bool_var(n));
         }
 
+        void update_generation(enode * n);
+
+        void update_generation(expr * e) {
+            if (is_app(e) && e_internalized(e))
+                update_generation(get_enode(to_app(e)));
+        }
+
         typedef std::pair<expr *, bool> expr_bool_pair;
 
-        void ts_visit_child(expr * n, bool gate_ctx, svector<int> & tcolors, svector<int> & fcolors, svector<expr_bool_pair> & todo, bool & visited);
+        void ts_visit_child(expr * n, bool gate_ctx, svector<expr_bool_pair> & todo, bool & visited);
 
-        bool ts_visit_children(expr * n, bool gate_ctx, svector<int> & tcolors, svector<int> & fcolors, svector<expr_bool_pair> & todo);
+        bool ts_visit_children(expr * n, bool gate_ctx, svector<expr_bool_pair> & todo);
 
-        void top_sort_expr(expr * n, svector<expr_bool_pair> & sorted_exprs);
+        svector<expr_bool_pair> ts_todo;
+        char_vector       tcolors;
+        char_vector       fcolors;
+
+        bool should_internalize_rec(expr* e) const;
+
+        void top_sort_expr(expr* const* exprs, unsigned num_exprs, svector<expr_bool_pair> & sorted_exprs);
+
+        void internalize_rec(expr * n, bool gate_ctx);
+
+        void internalize_deep(expr * n);
+        void internalize_deep(expr* const* n, unsigned num_exprs);
 
         void assert_default(expr * n, proof * pr);
 
@@ -748,6 +861,10 @@ namespace smt {
 
         void internalize_quantifier(quantifier * q, bool gate_ctx);
 
+        obj_map<enode, quantifier*> m_lambdas;
+
+        bool has_lambda();
+
         void internalize_lambda(quantifier * q);
 
         void internalize_formula_core(app * n, bool gate_ctx);
@@ -757,6 +874,7 @@ namespace smt {
         friend class set_enode_flag_trail;
 
     public:
+        
         void set_enode_flag(bool_var v, bool is_new_var);
 
     protected:
@@ -769,25 +887,27 @@ namespace smt {
         void internalize_uninterpreted(app * n);
 
         friend class mk_bool_var_trail;
-        class mk_bool_var_trail : public trail<context> {
+        class mk_bool_var_trail : public trail {
+            context& ctx;
         public:
-            void undo(context & ctx) override { ctx.undo_mk_bool_var(); }
+            mk_bool_var_trail(context& ctx) :ctx(ctx) {}
+            void undo() override { ctx.undo_mk_bool_var(); }
         };
         mk_bool_var_trail   m_mk_bool_var_trail;
-
         void undo_mk_bool_var();
 
         friend class mk_enode_trail;
-        class mk_enode_trail : public trail<context> {
+        class mk_enode_trail : public trail {
+            context& ctx;
         public:
-            void undo(context & ctx) override { ctx.undo_mk_enode(); }
+            mk_enode_trail(context& ctx) :ctx(ctx) {}
+            void undo() override { ctx.undo_mk_enode(); }
         };
-
         mk_enode_trail   m_mk_enode_trail;
-
         void undo_mk_enode();
 
-        void apply_sort_cnstr(app * term, enode * e);
+
+        void apply_sort_cnstr(expr * term, enode * e);
 
         bool simplify_aux_clause_literals(unsigned & num_lits, literal * lits, literal_buffer & simp_lits);
 
@@ -827,6 +947,8 @@ namespace smt {
 
         void add_or_rel_watches(app * n);
 
+        void add_implies_rel_watches(app* n);
+
         void add_ite_rel_watches(app * n);
 
         void mk_not_cnstr(app * n);
@@ -835,17 +957,35 @@ namespace smt {
 
         void mk_or_cnstr(app * n);
 
-        void mk_iff_cnstr(app * n);
+        void mk_implies_cnstr(app* n);
+
+        void mk_iff_cnstr(app * n, bool sign);
 
         void mk_ite_cnstr(app * n);
 
-        bool lit_occs_enabled() const { return m_fparams.m_phase_selection==PS_OCCURRENCE; }
+        bool track_occs() const { return m_fparams.m_phase_selection == PS_OCCURRENCE; }
+        
+        void dec_ref(literal l);
 
-        void add_lit_occs(clause * cls);
-    public:
+        void inc_ref(literal l);
+
+        void remove_lit_occs(clause const& cls, unsigned num_bool_vars);
+
+        void add_lit_occs(clause const& cls);
+
+        ast_pp_util m_lemma_visitor;
+        void dump_lemma(unsigned n, literal const* lits);
+        void dump_axiom(unsigned n, literal const* lits);
+    public:        
+
+        void ensure_internalized(expr* e);
+
         void internalize(expr * n, bool gate_ctx);
+        void internalize(expr* const* exprs, unsigned num_exprs, bool gate_ctx);
 
         void internalize(expr * n, bool gate_ctx, unsigned generation);
+
+        enode *non_ground_internalize(expr *e);
 
         clause * mk_clause(unsigned num_lits, literal * lits, justification * j, clause_kind k = CLS_AUX, clause_del_eh * del_eh = nullptr);
 
@@ -853,11 +993,39 @@ namespace smt {
 
         void mk_clause(literal l1, literal l2, literal l3, justification * j);
 
-        void mk_th_axiom(theory_id tid, unsigned num_lits, literal * lits, unsigned num_params = 0, parameter * params = nullptr);
+        void mk_th_clause(theory_id tid, unsigned num_lits, literal * lits, unsigned num_params, parameter * params, clause_kind k);
+
+        void mk_th_axiom(theory_id tid, unsigned num_lits, literal * lits, unsigned num_params = 0, parameter * params = nullptr) {
+            mk_th_clause(tid, num_lits, lits, num_params, params, CLS_TH_AXIOM);
+        }
+
+        void mk_th_axiom(theory_id tid, literal l1, unsigned num_params = 0, parameter * params = nullptr);
 
         void mk_th_axiom(theory_id tid, literal l1, literal l2, unsigned num_params = 0, parameter * params = nullptr);
 
         void mk_th_axiom(theory_id tid, literal l1, literal l2, literal l3, unsigned num_params = 0, parameter * params = nullptr);
+
+        void mk_th_axiom(theory_id tid, literal_vector const& ls, unsigned num_params = 0, parameter * params = nullptr) {
+            mk_th_axiom(tid, ls.size(), ls.data(), num_params, params);
+        }
+
+        void mk_th_lemma(theory_id tid, literal l1, literal l2, unsigned num_params = 0, parameter * params = nullptr) {
+            literal ls[2] = { l1, l2 };
+            mk_th_lemma(tid, 2, ls, num_params, params);
+        }
+
+        void mk_th_lemma(theory_id tid, literal l1, literal l2, literal l3, unsigned num_params = 0, parameter * params = nullptr) {
+            literal ls[3] = { l1, l2, l3 };
+            mk_th_lemma(tid, 3, ls, num_params, params);
+        }
+
+        void mk_th_lemma(theory_id tid, unsigned num_lits, literal * lits, unsigned num_params = 0, parameter * params = nullptr) {
+            mk_th_clause(tid, num_lits, lits, num_params, params, CLS_TH_LEMMA);
+        }
+
+        void mk_th_lemma(theory_id tid, literal_vector const& ls, unsigned num_params = 0, parameter * params = nullptr) {
+            mk_th_lemma(tid, ls.size(), ls.data(), num_params, params);
+        }
 
         /*
          * Provide a hint to the core solver that the specified literals form a "theory case split".
@@ -885,13 +1053,13 @@ namespace smt {
 
         bool_var mk_bool_var(expr * n);
 
-        enode * mk_enode(app * n, bool suppress_args, bool merge_tf, bool cgc_enabled);
+        enode * mk_enode(expr * n, bool suppress_args, bool merge_tf, bool cgc_enabled);
 
         void attach_th_var(enode * n, theory * th, theory_var v);
 
         template<typename Justification>
         justification * mk_justification(Justification const & j) {
-            justification * js = new (m_region) Justification(j);
+            justification * js = new (get_region()) Justification(j);
             SASSERT(js->in_region());
             if (js->has_del_eh())
                 m_justifications.push_back(js);
@@ -904,10 +1072,10 @@ namespace smt {
         //
         // -----------------------------------
     protected:
-        lbool              m_last_search_result;
-        failure            m_last_search_failure;
+        lbool              m_last_search_result { l_undef };
+        failure            m_last_search_failure { UNKNOWN };
         ptr_vector<theory> m_incomplete_theories; //!< theories that failed to produce a model
-        bool               m_searching;
+        bool               m_searching { false };
         unsigned           m_num_conflicts;
         unsigned           m_num_conflicts_since_restart;
         unsigned           m_num_conflicts_since_lemma_gc;
@@ -918,6 +1086,7 @@ namespace smt {
         unsigned           m_luby_idx;
         double             m_agility;
         unsigned           m_lemma_gc_threshold;
+        bool               m_has_research_theories = false;
 
         void assign_core(literal l, b_justification j, bool decision = false);
         void trace_assign(literal l, b_justification j, bool decision) const;
@@ -951,6 +1120,8 @@ namespace smt {
 
         bool is_shared(enode * n) const;
 
+        bool is_beta_redex(enode* p, enode* n) const;
+
         void assign_eq(enode * lhs, enode * rhs, eq_justification const & js) {
             push_eq(lhs, rhs, js);
         }
@@ -971,8 +1142,12 @@ namespace smt {
 
         bool contains_instance(quantifier * q, unsigned num_bindings, enode * const * bindings);
 
-        bool add_instance(quantifier * q, app * pat, unsigned num_bindings, enode * const * bindings, expr* def, unsigned max_generation,
-                          unsigned min_top_generation, unsigned max_top_generation, vector<std::tuple<enode *, enode*>> & used_enodes /*gives the equalities used for the pattern match, see mam.cpp for more info*/);
+        // true if a theory that can request a re-search (should_research) is registered:
+        // currently the recursive-function and sequence theories.
+        bool has_research_theories() const { return m_has_research_theories; }
+
+        bool add_instance(quantifier * q, app * pat, unsigned num_bindings, enode * const * bindings, 
+            unsigned max_generation, unsigned min_top_generation, unsigned max_top_generation, vector<std::tuple<enode *, enode*>> & used_enodes /*gives the equalities used for the pattern match, see mam.cpp for more info*/, bool mbqi_instance = false);
 
         void set_global_generation(unsigned generation) { m_generation = generation; }
 
@@ -982,18 +1157,23 @@ namespace smt {
         }
 #endif
 
+        void add_eq(enode * n1, enode * n2, eq_justification js);
+
     protected:
         void push_new_th_eq(theory_id th, theory_var lhs, theory_var rhs);
 
         void push_new_th_diseq(theory_id th, theory_var lhs, theory_var rhs);
 
         friend class add_eq_trail;
-
-        void add_eq(enode * n1, enode * n2, eq_justification js);
+        friend class merge_cgc_generations_trail;
 
         void remove_parents_from_cg_table(enode * r1);
 
         void reinsert_parents_into_cg_table(enode * r1, enode * r2, enode * n1, enode * n2, eq_justification js);
+
+        void merge_cgc_generations(enode * e1, unsigned e1_generation, enode * e2);
+
+        void set_generation_sticky(enode * e, unsigned generation);
 
         void invert_trans(enode * n);
 
@@ -1005,13 +1185,19 @@ namespace smt {
 
         void propagate_bool_enode_assignment_core(enode * source, enode * target);
 
+        void undo_merge_cgc_generations(enode * e1, unsigned e1_generation, enode * e2, unsigned e2_generation);
+
+        void apply_sticky_updates(enode * e1, unsigned e1_generation, enode * e2, unsigned e2_generation);
+
         void undo_add_eq(enode * r1, enode * n1, unsigned r2_num_parents);
 
         void restore_theory_vars(enode * r2, enode * r1);
 
         void push_eq(enode * lhs, enode * rhs, eq_justification const & js) {
-            SASSERT(lhs != rhs);
-            m_eq_propagation_queue.push_back(new_eq(lhs, rhs, js));
+            if (lhs->get_root() != rhs->get_root()) {
+                SASSERT(lhs->get_sort() == rhs->get_sort());
+                m_eq_propagation_queue.push_back(new_eq(lhs, rhs, js));
+            }
         }
 
         void push_new_congruence(enode * n1, enode * n2, bool used_commutativity) {
@@ -1037,8 +1223,11 @@ namespace smt {
         }
 
         bool inconsistent() const {
-            return m_conflict != null_b_justification;
+            return m_conflict != null_b_justification ||
+                m_asserted_formulas.inconsistent();
         }
+
+        bool has_case_splits();
 
         unsigned get_num_conflicts() const {
             return m_num_conflicts;
@@ -1046,7 +1235,22 @@ namespace smt {
 
         static bool is_eq(enode const * n1, enode const * n2) { return n1->get_root() == n2->get_root(); }
 
+        enode * get_cg_root(enode * n) const {
+            if (!n->uses_cg_table())
+                return n;
+            // Fast path: if e is already the congruence root, avoid table lookup.
+            // This is important for performance, since get_cg_root is called on every generation lookup.
+            if (n->is_cgr())
+                return n;
+            auto r = m_cg_table.find(n);
+            return r ? r : n;
+        }
+
         bool is_diseq(enode * n1, enode * n2) const;
+
+        // Check disequality using congruence and equality atoms, ignoring distinct root values.
+        // Array extensionality uses this to avoid suppressing its witness.
+        bool is_diseq_no_value_check(enode * n1, enode * n2) const;
 
         bool is_diseq_slow(enode * n1, enode * n2) const;
 
@@ -1054,9 +1258,12 @@ namespace smt {
 
         enode * get_enode_eq_to(func_decl * f, unsigned num_args, enode * const * args);
 
-        expr* next_decision();
+        bool guess(bool_var var, lbool phase);
 
     protected:
+        bool is_diseq_core(enode * n1, enode * n2, bool check_distinct_root_values) const;
+
+        bool m_has_case_split = true;
         bool decide();
 
         void update_phase_cache_counter();
@@ -1067,13 +1274,13 @@ namespace smt {
         void rescale_bool_var_activity();
 
     public:
-        void inc_bvar_activity(bool_var v) {
+        void inc_bvar_activity(bool_var v, double inc = 1.0) {
             double & act = m_activity[v];
-            act += m_bvar_inc;
+            act += m_bvar_inc * inc;
             if (act > ACTIVITY_LIMIT)
                 rescale_bool_var_activity();
             m_case_split_queue->activity_increased_eh(v);
-            TRACE("case_split", tout << "v" << v << " " << m_bvar_inc << " -> " << act << "\n";);
+            TRACE(case_split, tout << "v" << v << " " << m_bvar_inc << " -> " << act << "\n";);
         }
 
     protected:
@@ -1082,7 +1289,7 @@ namespace smt {
             m_bvar_inc *= m_fparams.m_inv_decay;
         }
 
-        bool simplify_clause(clause * cls);
+        bool simplify_clause(clause& cls);
 
         unsigned simplify_clauses(clause_vector & clauses, unsigned starting_at);
 
@@ -1092,9 +1299,9 @@ namespace smt {
            \brief Return true if the give clause is justifying some literal.
         */
         bool is_justifying(clause * cls) const {
-            for (unsigned i = 0; i < 2; i++) {
+            for (unsigned i = 0; i < 2; ++i) {
                 b_justification js;
-                js = get_justification(cls->get_literal(i).var());
+                js = get_justification((*cls)[i].var());
                 if (js.get_kind() == b_justification::CLAUSE && js.get_clause() == cls)
                     return true;
             }
@@ -1115,7 +1322,8 @@ namespace smt {
 
         bool more_than_k_unassigned_literals(clause * cls, unsigned k);
 
-        void internalize_assertions();
+
+        void asserted_inconsistent();
 
         bool validate_assumptions(expr_ref_vector const& asms);
 
@@ -1132,6 +1340,8 @@ namespace smt {
         void add_theory_assumptions(expr_ref_vector & theory_assumptions);
 
         lbool mk_unsat_core(lbool result);
+        
+        bool should_research(lbool result);
 
         void validate_unsat_core();
 
@@ -1157,6 +1367,9 @@ namespace smt {
 
         virtual bool resolve_conflict();
 
+        void add_scores(unsigned n, literal const *lits);
+
+
         // -----------------------------------
         //
         // Propagation
@@ -1175,7 +1388,7 @@ namespace smt {
 
         bool is_relevant_core(expr * n) const { return m_relevancy_propagator->is_relevant(n); }
 
-        svector<bool>  m_relevant_conflict_literals;
+        bool_vector  m_relevant_conflict_literals;
         void record_relevancy(unsigned n, literal const* lits);
         void restore_relevancy(unsigned n, literal const* lits);
 
@@ -1188,7 +1401,7 @@ namespace smt {
         }
 
         bool is_relevant(enode * n) const {
-            return is_relevant(n->get_owner());
+            return is_relevant(n->get_expr());
         }
 
         bool is_relevant(bool_var v) const {
@@ -1206,7 +1419,7 @@ namespace smt {
 
         void mark_as_relevant(expr * n) { m_relevancy_propagator->mark_as_relevant(n); m_relevancy_propagator->propagate(); }
 
-        void mark_as_relevant(enode * n) { mark_as_relevant(n->get_owner()); }
+        void mark_as_relevant(enode * n) { mark_as_relevant(n->get_expr()); }
 
         void mark_as_relevant(bool_var v) { mark_as_relevant(bool_var2expr(v)); }
 
@@ -1242,13 +1455,16 @@ namespace smt {
     public:
         bool can_propagate() const;
 
+
         // -----------------------------------
         //
-        // Model checking... (must be improved)
+        // Value extraction and solving
         //
         // -----------------------------------
     public:
         bool get_value(enode * n, expr_ref & value);
+
+        void solve_for(vector<solution>& sol);
 
         // -----------------------------------
         //
@@ -1267,37 +1483,49 @@ namespace smt {
 
         void display_asserted_formulas(std::ostream & out) const;
 
+        enode_pp pp(enode* n) { return enode_pp(n, *this); }
+
         std::ostream& display_literal(std::ostream & out, literal l) const;
 
-        std::ostream& display_detailed_literal(std::ostream & out, literal l) const { l.display(out, m_manager, m_bool_var2expr.c_ptr()); return out; }
+        std::ostream& display_detailed_literal(std::ostream & out, literal l) const { return smt::display(out, l, m, m_bool_var2expr.data()); }
 
         void display_literal_info(std::ostream & out, literal l) const;
 
         std::ostream& display_literals(std::ostream & out, unsigned num_lits, literal const * lits) const;
 
         std::ostream& display_literals(std::ostream & out, literal_vector const& lits) const {
-            return display_literals(out, lits.size(), lits.c_ptr());
+            return display_literals(out, lits.size(), lits.data());
         }
+
+        std::ostream& display_literal_smt2(std::ostream& out, literal lit) const;
+
+        std::ostream& display_literals_smt2(std::ostream& out, literal l1, literal l2) const { literal ls[2] = { l1, l2 }; return display_literals_smt2(out, 2, ls); }
+
+        std::ostream& display_literals_smt2(std::ostream& out, unsigned num_lits, literal const* lits) const;
+
+        std::ostream& display_literals_smt2(std::ostream& out, literal_vector const& ls) const { return display_literals_smt2(out, ls.size(), ls.data()); }
 
         std::ostream& display_literal_verbose(std::ostream & out, literal lit) const;
 
         std::ostream& display_literals_verbose(std::ostream & out, unsigned num_lits, literal const * lits) const;
         
         std::ostream& display_literals_verbose(std::ostream & out, literal_vector const& lits) const {
-            return display_literals_verbose(out, lits.size(), lits.c_ptr());
+            return display_literals_verbose(out, lits.size(), lits.data());
         }
 
         void display_watch_list(std::ostream & out, literal l) const;
 
         void display_watch_lists(std::ostream & out) const;
 
-        void display_clause_detail(std::ostream & out, clause const * cls) const;
+        std::ostream& display_clause_detail(std::ostream & out, clause const * cls) const;
 
-        void display_clause(std::ostream & out, clause const * cls) const;
+        std::ostream& display_clause(std::ostream & out, clause const * cls) const;
 
-        void display_clauses(std::ostream & out, ptr_vector<clause> const & v) const;
+        std::ostream& display_clause_smt2(std::ostream & out, clause const& cls) const;
 
-        void display_binary_clauses(std::ostream & out) const;
+        std::ostream& display_clauses(std::ostream & out, ptr_vector<clause> const & v) const;
+
+        std::ostream& display_binary_clauses(std::ostream & out) const;
 
         void display_assignment(std::ostream & out) const;
 
@@ -1322,11 +1550,13 @@ namespace smt {
         unsigned display_lemma_as_smt_problem(unsigned num_antecedents, literal const * antecedents, literal consequent = false_literal, symbol const& logic = symbol::null) const;
         void display_lemma_as_smt_problem(std::ostream & out, unsigned num_antecedents, literal const * antecedents,
                                           unsigned num_antecedent_eqs, enode_pair const * antecedent_eqs,
-                                          literal consequent = false_literal, symbol const& logic = symbol::null) const;
+                                          literal consequent = false_literal, symbol const& logic = symbol::null, enode* x = nullptr, enode* y = nullptr) const;
 
         unsigned display_lemma_as_smt_problem(unsigned num_antecedents, literal const * antecedents,
                                           unsigned num_antecedent_eqs, enode_pair const * antecedent_eqs,
                                           literal consequent = false_literal, symbol const& logic = symbol::null) const;
+
+        std::string mk_lemma_name() const;
 
         void display_assignment_as_smtlib2(std::ostream& out, symbol const& logic = symbol::null) const;
 
@@ -1346,7 +1576,9 @@ namespace smt {
 
         void display_profile(std::ostream & out) const;
 
-        void display(std::ostream& out, b_justification j) const;
+        std::ostream& display(std::ostream& out, b_justification j) const;
+
+        std::ostream& display_compact_j(std::ostream& out, b_justification j) const;
 
         // -----------------------------------
         //
@@ -1397,9 +1629,6 @@ namespace smt {
 
         bool check_missing_diseq_conflict() const;
 
-        bool check_lit_occs(literal l) const;
-
-        bool check_lit_occs() const;
 #endif
         // -----------------------------------
         //
@@ -1427,6 +1656,13 @@ namespace smt {
         bool already_internalized_theory_core(theory * th, expr_ref_vector const & s) const;
 #endif
         bool check_preamble(bool reset_cancel);
+
+        struct search_completion {
+            context& ctx;
+            search_completion(context& ctx) : ctx(ctx) { ctx.m_search_finalized = false; }
+            ~search_completion() { if (!ctx.m_search_finalized) ctx.m_last_search_failure = CANCELED; }
+        };
+        bool m_search_finalized = true;
         lbool check_finalize(lbool r);
 
         // -----------------------------------
@@ -1439,10 +1675,6 @@ namespace smt {
         // copy plugins into a fresh context.
         void copy_plugins(context& src, context& dst);
 
-        static literal translate_literal(
-            literal lit, context& src_ctx, context& dst_ctx,
-            vector<bool_var> b2v, ast_translation& tr);
-
         /*
           \brief Utilities for consequence finding.
         */
@@ -1450,7 +1682,7 @@ namespace smt {
         //typedef uint_set index_set;
         u_map<index_set> m_antecedents;
         obj_map<expr, expr*> m_var2orig;
-        obj_map<expr, expr*> m_assumption2orig;
+        u_map<expr*> m_assumption2orig;
         obj_map<expr, expr*> m_var2val;
         void extract_fixed_consequences(literal lit, index_set const& assumptions, expr_ref_vector& conseq);
         void extract_fixed_consequences(unsigned& idx, index_set const& assumptions, expr_ref_vector& conseq);
@@ -1479,6 +1711,10 @@ namespace smt {
 
         void display_partial_assignment(std::ostream& out, expr_ref_vector const& asms, unsigned min_core_size);
 
+        void log_stats();
+
+        void copy_user_propagator(context& src, bool copy_registered);
+
     public:
         context(ast_manager & m, smt_params & fp, params_ref const & p = params_ref());
 
@@ -1492,9 +1728,9 @@ namespace smt {
            If l == 0, then the logic of this context is used in the new context.
            If p == 0, then this->m_params is used
         */
-        context * mk_fresh(symbol const * l = nullptr,  smt_params * p = nullptr);
+        context * mk_fresh(symbol const * l = nullptr,  smt_params * smtp = nullptr, params_ref const & p = params_ref());
 
-        static void copy(context& src, context& dst);
+        static void copy(context& src, context& dst, bool override_base = false);
 
         /**
            \brief Translate context to use new manager m.
@@ -1506,15 +1742,19 @@ namespace smt {
 
         void register_plugin(theory * th);
 
+        void add_asserted(expr* e);
+
         void assert_expr(expr * e);
 
         void assert_expr(expr * e, proof * pr);
+
+        void internalize_assertions();
 
         void push();
 
         void pop(unsigned num_scopes);
 
-        lbool check(unsigned num_assumptions = 0, expr * const * assumptions = nullptr, bool reset_cancel = true, bool already_did_theory_assumptions = false);
+        lbool check(unsigned num_assumptions = 0, expr * const * assumptions = nullptr, bool reset_cancel = true);
 
         lbool check(expr_ref_vector const& cube, vector<expr_ref_vector> const& clauses);
 
@@ -1526,14 +1766,17 @@ namespace smt {
 
         lbool setup_and_check(bool reset_cancel = true);
 
-        // return 'true' if assertions are inconsistent.
-        bool reduce_assertions();
+        void setup_for_parallel();
+
+        void reduce_assertions();
 
         bool resource_limits_exceeded();
 
         failure get_last_search_failure() const;
 
         proof * get_proof();
+
+        conflict_resolution& get_cr() { return *m_conflict_resolution.get(); }
 
         void get_relevant_labels(expr* cnstr, buffer<symbol> & result);
 
@@ -1548,12 +1791,19 @@ namespace smt {
         void internalize_proxies(expr_ref_vector const& asms, vector<std::pair<expr*,expr_ref>>& asm2proxy);
 
         void internalize_instance(expr * body, proof * pr, unsigned generation) {
+            if (inconsistent())
+                return;
             internalize_assertion(body, pr, generation);
-            if (relevancy())
+            if (relevancy()) {
+                // if the instantiation creates a conflict, we backtrack immediately.
+                // to retain the conflict clause being relevant we mark it here.
+                // if the instantiation does not create a conflict, default relevancy propagation applies.
+                //if (inconsistent() && is_app(body)) 
+                //    for (auto arg: *to_app(body)) mark_as_relevant(arg);
+                
                 m_case_split_queue->internalize_instance_eh(body, generation);
+            }
         }
-
-        bool already_internalized() const { return m_e_internalized_stack.size() > 2 || m_b_internalized_stack.size() > 1; }
 
         unsigned get_unsat_core_size() const {
             return m_unsat_core.size();
@@ -1563,11 +1813,17 @@ namespace smt {
             return m_unsat_core.get(idx);
         }
 
-        void get_model(model_ref & m) const;
+        expr_ref_vector const& unsat_core() const { return m_unsat_core; }
+
+        void get_levels(ptr_vector<expr> const& vars, unsigned_vector& depth);
+
+        expr_ref_vector get_trail(unsigned max_level);
+
+        void get_model(model_ref & m);
+
+        void set_model(model* m) { m_model = m; }
 
         bool update_model(bool refinalize);
-
-        void get_proto_model(proto_model_ref & m) const;
 
         bool validate_model();
 
@@ -1584,6 +1840,95 @@ namespace smt {
         //proof * const * get_asserted_formula_proofs() const { return m_asserted_formulas.get_formula_proofs(); }
 
         void get_assertions(ptr_vector<expr> & result) { m_asserted_formulas.get_assertions(result); }
+
+        void get_units(expr_ref_vector& result);
+
+        bool clause_proof_active() const { return m_clause_proof.is_enabled(); }
+
+        clause_proof& get_clause_proof() { return m_clause_proof; }
+
+        void register_on_clause(void* ctx, user_propagator::on_clause_eh_t& on_clause) {
+            m_clause_proof.register_on_clause(ctx, on_clause);
+        }
+
+        /*
+         * user-propagator
+         */
+        void user_propagate_init(
+            void*                 ctx, 
+            user_propagator::push_eh_t&    push_eh,
+            user_propagator::pop_eh_t&     pop_eh,
+            user_propagator::fresh_eh_t&   fresh_eh);
+
+        void user_propagate_register_final(user_propagator::final_eh_t& final_eh) {
+            if (!m_user_propagator) 
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->register_final(final_eh);
+        }
+
+        void user_propagate_register_fixed(user_propagator::fixed_eh_t& fixed_eh) {
+            if (!m_user_propagator) 
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->register_fixed(fixed_eh);
+        }
+        
+        void user_propagate_register_eq(user_propagator::eq_eh_t& eq_eh) {
+            if (!m_user_propagator) 
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->register_eq(eq_eh);
+        }
+        
+        void user_propagate_register_diseq(user_propagator::eq_eh_t& diseq_eh) {
+            if (!m_user_propagator) 
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->register_diseq(diseq_eh);
+        }
+
+        void user_propagate_register_expr(expr* e) {
+            if (!m_user_propagator) 
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->add_expr(e, true);
+        }
+
+        void user_propagate_register_created(user_propagator::created_eh_t& r) {
+            if (!m_user_propagator)
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->register_created(r);
+        }
+
+        void user_propagate_register_decide(user_propagator::decide_eh_t& r) {
+            if (!m_user_propagator)
+                throw default_exception("user propagator must be initialized");
+            m_user_propagator->register_decide(r);
+        }
+
+        void user_propagate_register_on_binding(user_propagator::binding_eh_t& t) {
+            m_user_propagator->register_on_binding(t);
+        }
+
+        void register_on_binding(std::function<bool(quantifier* q, expr* inst)>& f) {
+            m_qmanager->register_on_binding(f);
+        }
+
+        void user_propagate_initialize_value(expr* var, expr* value);
+
+        bool watches_fixed(enode* n) const;
+
+        bool has_split_candidate(bool_var& var, bool& is_pos);
+        
+        bool decide_user_interference(bool_var& var, bool& is_pos);
+
+        void assign_fixed(enode* n, expr* val, unsigned sz, literal const* explain);
+
+        void assign_fixed(enode* n, expr* val, literal_vector const& explain) {
+            assign_fixed(n, val, explain.size(), explain.data());
+        }
+
+        void assign_fixed(enode* n, expr* val, literal explain) {
+            assign_fixed(n, val, 1, &explain);
+        }
+
+        bool is_fixed(enode* n, expr_ref& val, literal_vector& explain);
 
         void display(std::ostream & out) const;
 
@@ -1608,7 +1953,43 @@ namespace smt {
         void insert_macro(func_decl * f, quantifier * m, proof * pr, expr_dependency * dep) { m_asserted_formulas.insert_macro(f, m, pr, dep); }
     };
 
-};
+    struct pp_lit {
+        context & ctx;
+        literal lit;
+        pp_lit(context & ctx, literal lit) : ctx(ctx), lit(lit) {}
+    };
 
-#endif /* SMT_CONTEXT_H_ */
+    inline std::ostream & operator<<(std::ostream & out, pp_lit const & pp) {
+        return pp.ctx.display_detailed_literal(out, pp.lit);
+    }
 
+    struct pp_lits {
+        context & ctx;
+        literal const *lits;
+        unsigned len;
+        pp_lits(context & ctx, unsigned len, literal const *lits) : ctx(ctx), lits(lits), len(len) {}
+        pp_lits(context & ctx, literal_vector const& ls) : ctx(ctx), lits(ls.data()), len(ls.size()) {}
+    };
+
+    inline std::ostream & operator<<(std::ostream & out, pp_lits const & pp) {
+        out << "{";
+        bool first = true;
+        for (unsigned i = 0; i < pp.len; ++i) {
+            if (first) { first = false; } else { out << " or\n"; }
+            pp.ctx.display_detailed_literal(out, pp.lits[i]);
+        }
+        return out << "}";
+
+    }
+    struct enode_eq_pp {
+        context const&          ctx;
+        enode_pair const& p;
+        enode_eq_pp(enode_pair const& p, context const& ctx): ctx(ctx), p(p) {}        
+    };
+
+    std::ostream& operator<<(std::ostream& out, enode_eq_pp const& p);
+
+
+    std::ostream& operator<<(std::ostream& out, enode_pp const& p);
+
+}

@@ -17,6 +17,7 @@ Revision History:
 
 --*/
 #include<fstream>
+#include<iostream>
 #include<sstream>
 #include "parsers/util/simple_parser.h"
 #include "util/warning.h"
@@ -25,9 +26,6 @@ Revision History:
 simple_parser::simple_parser(ast_manager & m):
     m_manager(m),
     m_exprs(m) {
-}
-
-simple_parser::~simple_parser() {
 }
 
 void simple_parser::add_builtin_op(symbol const & s, family_id fid, decl_kind kind) {
@@ -79,7 +77,7 @@ expr * simple_parser::parse_expr(scanner & s) {
                     args.push_back(arg);
                 }
                 else {
-                    expr * r = m_manager.mk_app(op.m_family_id, op.m_kind, args.size(), args.c_ptr());
+                    expr * r = m_manager.mk_app(op.m_family_id, op.m_kind, args.size(), args.data());
                     m_exprs.push_back(r);
                     return r;
                 }
@@ -118,7 +116,7 @@ bool simple_parser::parse(std::istream & in, expr_ref & result) {
         if (!result)
             throw parser_error();
     }
-    catch (parser_error) {
+    catch (const parser_error &) {
         warning_msg("parser error");
         return false;
     } 

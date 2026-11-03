@@ -17,17 +17,16 @@ Author:
 Notes:
 
 --*/
-#ifndef APPROX_NAT_H_
-#define APPROX_NAT_H_
+#pragma once
 
-#include<iostream>
-#include<limits.h>
+#include<ostream>
+#include<climits>
 
 class approx_nat {
-    unsigned m_value;
+    unsigned m_value = 0;
     static const unsigned m_limit = UINT_MAX >> 2;
 public:
-    approx_nat():m_value(0) {}
+    approx_nat() = default;
     explicit approx_nat(unsigned val);
     bool is_huge() const { return m_value == UINT_MAX; }
     unsigned get_value() const { return m_value; }
@@ -42,4 +41,3 @@ public:
 
 std::ostream & operator<<(std::ostream & target, approx_nat const & w);
 
-#endif /* APPROX_NAT_H_ */

@@ -24,29 +24,10 @@ Notes:
 #include "util/scoped_timer.h"
 #include "util/scoped_ctrl_c.h"
 #include "util/cancel_eh.h"
-#include "ast/rewriter/seq_rewriter.h"
 #include<iomanip>
 
 class simplify_cmd : public parametric_cmd {
 
-    class th_solver : public expr_solver {
-        cmd_context& m_ctx;
-        params_ref   m_params;
-        ref<solver> m_solver;
-    public:
-        th_solver(cmd_context& ctx): m_ctx(ctx) {}
-        
-        lbool check_sat(expr* e) override {
-            if (!m_solver) {
-                m_solver = m_ctx.get_solver_factory()(m_ctx.m(), m_params, false, true, false, symbol::null);
-            }
-            m_solver->push();
-            m_solver->assert_expr(e);
-            lbool r = m_solver->check_sat(0,nullptr);
-            m_solver->pop(1);
-            return r;
-        }
-    };
 
     expr *                   m_target;
 public:
@@ -65,10 +46,7 @@ public:
         p.insert("print_proofs", CPK_BOOL, "(default: false) print a proof showing the original term is equal to the resultant one.");
         p.insert("print_statistics", CPK_BOOL, "(default: false) print statistics.");
     }
-    
-    ~simplify_cmd() override {
-    }
-    
+
     void prepare(cmd_context & ctx) override {
         parametric_cmd::prepare(ctx);
         m_target   = nullptr;
@@ -91,8 +69,6 @@ public:
         if (m_params.get_bool("som", false))
             m_params.set_bool("flat", true);
         th_rewriter s(ctx.m(), m_params);
-        th_solver solver(ctx);
-        s.set_solver(alloc(th_solver, ctx));
         unsigned cache_sz;
         unsigned num_steps = 0;
         unsigned timeout   = m_params.get_uint("timeout", UINT_MAX);
@@ -111,7 +87,7 @@ public:
                 throw ex;
             }
             catch (z3_exception & ex) {
-                ctx.regular_stream() << "(error \"simplifier failed: " << ex.msg() << "\")" << std::endl;
+                ctx.regular_stream() << "(error \"simplifier failed: " << ex.what() << "\")" << std::endl;
                 failed = true;
                 r = m_target;
             }
@@ -123,7 +99,7 @@ public:
             ctx.display(ctx.regular_stream(), r);
             ctx.regular_stream() << std::endl; 
         }
-        if (!failed && m_params.get_bool("print_proofs", false)) {
+        if (!failed && m_params.get_bool("print_proofs", false) && pr.get()) {
             ast_smt_pp pp(ctx.m());
             pp.set_logic(ctx.get_logic());
             pp.display_expr_smt2(ctx.regular_stream(), pr.get());

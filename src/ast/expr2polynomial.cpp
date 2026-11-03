@@ -22,8 +22,8 @@ Notes:
 #include "ast/arith_decl_plugin.h"
 #include "ast/ast_smt2_pp.h"
 #include "util/z3_exception.h"
-#include "util/cooperate.h"
 #include "util/common_msgs.h"
+#include <atomic>
 
 struct expr2polynomial::imp {
     struct frame {
@@ -52,7 +52,7 @@ struct expr2polynomial::imp {
 
     bool                               m_use_var_idxs;
 
-    volatile bool                      m_cancel;
+    std::atomic<bool>                  m_cancel;
 
     imp(expr2polynomial & w, ast_manager & am, polynomial::manager & pm, expr2var * e2v, bool use_var_idxs):
         m_wrapper(w),
@@ -96,7 +96,6 @@ struct expr2polynomial::imp {
     void checkpoint() {
         if (m_cancel)
             throw default_exception(Z3_CANCELED_MSG);
-        cooperate("expr2polynomial");
     }
 
     void throw_not_polynomial() {
@@ -183,7 +182,7 @@ struct expr2polynomial::imp {
         case OP_POWER: {
             rational k;
             SASSERT(t->get_num_args() == 2);
-            if (!m_autil.is_numeral(t->get_arg(1), k) || !k.is_int() || !k.is_unsigned()) {
+            if (!m_autil.is_numeral(t->get_arg(1), k) || !k.is_unsigned() || k.is_zero()) {
                 if (m_use_var_idxs)
                     throw_not_polynomial();
                 else
@@ -237,12 +236,12 @@ struct expr2polynomial::imp {
 
     polynomial::polynomial * const * polynomial_args(unsigned num_args) {
         SASSERT(m_presult_stack.size() >= num_args);
-        return m_presult_stack.c_ptr() + m_presult_stack.size() - num_args;
+        return m_presult_stack.data() + m_presult_stack.size() - num_args;
     }
 
     polynomial::numeral const * denominator_args(unsigned num_args) {
         SASSERT(m_dresult_stack.size() >= num_args);
-        return m_dresult_stack.c_ptr() + m_dresult_stack.size() - num_args;
+        return m_dresult_stack.data() + m_dresult_stack.size() - num_args;
     }
 
     template<bool is_add>
@@ -256,11 +255,11 @@ struct expr2polynomial::imp {
         polynomial::scoped_numeral d(nm());
         polynomial::scoped_numeral d_aux(nm());
         d = 1;
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             nm().lcm(d, d_args[i], d);
         }
         p = pm().mk_zero();
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             checkpoint();
             nm().div(d, d_args[i], d_aux);
             p_aux = pm().mul(d_aux, p_args[i]);
@@ -292,7 +291,7 @@ struct expr2polynomial::imp {
         polynomial::scoped_numeral d(nm());
         p = pm().mk_const(rational(1));
         d = 1;
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             checkpoint();
             p = pm().mul(p, p_args[i]);
             d = d * d_args[i];
@@ -369,7 +368,7 @@ struct expr2polynomial::imp {
                 checkpoint();
                 frame & fr = m_frame_stack.back();
                 app * a = fr.m_curr;
-                TRACE("expr2polynomial", tout << "processing: " << fr.m_idx << "\n" << mk_ismt2_pp(a, m()) << "\n";);
+                TRACE(expr2polynomial, tout << "processing: " << fr.m_idx << "\n" << mk_ismt2_pp(a, m()) << "\n";);
                 unsigned num_args = a->get_num_args();
                 while (fr.m_idx < num_args) {
                     expr * arg = a->get_arg(fr.m_idx);
@@ -389,10 +388,10 @@ struct expr2polynomial::imp {
 
     bool is_int_poly(polynomial::polynomial_ref const & p) {
         unsigned sz = size(p);
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             polynomial::monomial * m = pm().get_monomial(p, i);
             unsigned msz = pm().size(m);
-            for (unsigned j = 0; j < msz; j++) {
+            for (unsigned j = 0; j < msz; ++j) {
                 polynomial::var x = pm().get_var(m, j);
                 if (!m_wrapper.is_int(x))
                     return false;
@@ -407,7 +406,7 @@ struct expr2polynomial::imp {
         unsigned sz = size(p);
         bool is_int = is_int_poly(p);
 
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             margs.reset();
             polynomial::monomial * _m = pm().get_monomial(p, i);
             polynomial::numeral const & a = pm().coeff(p, i);
@@ -415,7 +414,7 @@ struct expr2polynomial::imp {
                 margs.push_back(m_autil.mk_numeral(rational(a), is_int));
             }
             unsigned msz = pm().size(_m);
-            for (unsigned j = 0; j < msz; j++) {
+            for (unsigned j = 0; j < msz; ++j) {
                 polynomial::var x = pm().get_var(_m, j);
                 expr * t;
                 if (m_use_var_idxs) {
@@ -432,29 +431,29 @@ struct expr2polynomial::imp {
                     margs.push_back(m_autil.mk_power(t, m_autil.mk_numeral(rational(d), is_int)));
                 }
                 else {
-                    for (unsigned k = 0; k < d; k++)
+                    for (unsigned k = 0; k < d; ++k)
                         margs.push_back(t);
                 }
             }
-            if (margs.size() == 0) {
+            if (margs.empty()) {
                 args.push_back(m_autil.mk_numeral(rational(1), is_int));
             }
             else if (margs.size() == 1) {
                 args.push_back(margs[0]);
             }
             else {
-                args.push_back(m_autil.mk_mul(margs.size(), margs.c_ptr()));
+                args.push_back(m_autil.mk_mul(margs.size(), margs.data()));
             }
         }
 
-        if (args.size() == 0) {
+        if (args.empty()) {
             r = m_autil.mk_numeral(rational(0), is_int);
         }
         else if (args.size() == 1) {
             r = args[0];
         }
         else {
-            r = m_autil.mk_add(args.size(), args.c_ptr());
+            r = m_autil.mk_add(args.size(), args.data());
         }
     }
 
@@ -503,9 +502,6 @@ void expr2polynomial::set_cancel(bool f) {
 
 default_expr2polynomial::default_expr2polynomial(ast_manager & am, polynomial::manager & pm):
     expr2polynomial(am, pm, nullptr) {
-}
-
-default_expr2polynomial::~default_expr2polynomial() {
 }
 
 bool default_expr2polynomial::is_int(polynomial::var x) const {

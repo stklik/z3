@@ -16,11 +16,10 @@ Author:
 Revision History:
 
 --*/
-#ifdef _WINDOWS
 #include "ast/substitution/matcher.h"
 #include "ast/ast_pp.h"
 #include "ast/reg_decl_plugins.h"
-
+#include <iostream>
 
 void tst_match(ast_manager & m, app * t, app * i) {
     substitution s(m);
@@ -43,7 +42,7 @@ void tst_match(ast_manager & m, app * t, app * i) {
         std::cout << "Are the arguments of " << mk_pp(i, m) << " an instance of the arguments of " << mk_pp(t, m) << "\n";
         unsigned num_args = t->get_num_args();
         unsigned j;
-        for (j = 0; j < num_args; j++) {
+        for (j = 0; j < num_args; ++j) {
             if (!match(t->get_arg(j), i->get_arg(j), s))
                 break;
         }
@@ -84,7 +83,7 @@ void tst1() {
     app_ref b(           m.mk_const(symbol("b"), s), m);
     expr_ref x(          m.mk_var(0, s), m);
     expr_ref y(          m.mk_var(1, s), m);
-    app_ref gx(          m.mk_app(g, x), m);
+    app_ref gx(          m.mk_app(g.get(), x.get()), m);
     app_ref fgx_x(       m.mk_app(f, gx.get(), x.get()), m);
     app_ref ha(          m.mk_app(h, a.get()), m);
     app_ref gha(         m.mk_app(g, ha.get()), m);
@@ -110,7 +109,3 @@ void tst1() {
 void tst_matcher() {
     tst1();
 }
-#else
-void tst_matcher() {
-}
-#endif

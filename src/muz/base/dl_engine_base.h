@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_ENGINE_BASE_H_
-#define DL_ENGINE_BASE_H_
+#pragma once
 
 #include "model/model.h"
 #include "muz/base/dl_util.h"
@@ -43,7 +42,7 @@ namespace datalog {
         std::string m_name;
     public:
         engine_base(ast_manager& m, char const* name): m(m), m_name(name) {}
-        virtual ~engine_base() {}
+        virtual ~engine_base() = default;
 
         virtual expr_ref get_answer() = 0;
         virtual expr_ref get_ground_sat_answer () {
@@ -64,9 +63,9 @@ namespace datalog {
             }
             sorts.reverse();
             names.reverse();
-            q = m.mk_app(r, args.size(), args.c_ptr());
+            q = m.mk_app(r, args.size(), args.data());
             if (!args.empty()) {
-                q = m.mk_exists(sorts.size(), sorts.c_ptr(), names.c_ptr(), q);
+                q = m.mk_exists(sorts.size(), sorts.data(), names.data(), q);
             }
             return query(q);
         }
@@ -96,13 +95,14 @@ namespace datalog {
             throw default_exception(std::string("certificates are not supported for ") + m_name);
         }
         virtual model_ref get_model() {
-            return model_ref(alloc(model, m));
+            return model_ref();
         }
+
         virtual void get_rules_along_trace (rule_ref_vector& rules) {
             throw default_exception(std::string("get_rules_along_trace is not supported for ") + m_name);
         }
         virtual proof_ref get_proof() {
-            return proof_ref(m.mk_asserted(m.mk_true()), m);
+            return proof_ref(m.mk_asserted(m.mk_false()), m);
         }
         virtual void add_callback(void *state,
                                   const t_new_lemma_eh new_lemma_eh,
@@ -122,9 +122,9 @@ namespace datalog {
 
     class register_engine_base {
     public:
+        virtual ~register_engine_base() = default;
         virtual engine_base* mk_engine(DL_ENGINE engine_type) = 0;
         virtual void set_context(context* ctx) = 0;
     };
 }
 
-#endif

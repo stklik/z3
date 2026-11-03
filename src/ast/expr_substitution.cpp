@@ -19,6 +19,7 @@ Notes:
 #include "util/ref_util.h"
 #include "ast/expr_substitution.h"
 #include "ast/ast_pp.h"
+#include "ast/ast_ll_pp.h"
 
 typedef obj_map<expr, proof*> expr2proof;
 typedef obj_map<expr, expr_dependency*> expr2expr_dependency;
@@ -58,19 +59,21 @@ expr_substitution::~expr_substitution() {
 }
 
 std::ostream& expr_substitution::display(std::ostream& out) {
-    for (auto & kv : m_subst) {
-        out << mk_pp(kv.m_key, m()) << " |-> " << mk_pp(kv.m_value, m()) << "\n";
+    for (auto & [k, v] : m_subst) {
+        out << mk_bounded_pp(k, m()) << " |-> " << mk_bounded_pp(v, m()) << "\n";
     }
     return out;
 }
 
 void expr_substitution::insert(expr * c, expr * def, proof * def_pr, expr_dependency * def_dep) {
-    obj_map<expr, expr*>::obj_map_entry * entry = m_subst.insert_if_not_there2(c, 0); 
-    if (entry->get_data().m_value == 0) {
+    expr*& value = m_subst.insert_if_not_there(c, nullptr); 
+    SASSERT(!def_pr || to_app(m_manager.get_fact(def_pr))->get_arg(0) == c);
+    SASSERT(!def_pr || to_app(m_manager.get_fact(def_pr))->get_arg(1) == def);
+    if (value == nullptr) {
         // new entry
         m_manager.inc_ref(c);
         m_manager.inc_ref(def);
-        entry->get_data().m_value = def;
+        value = def;
         if (proofs_enabled()) {
             SASSERT(!m_subst_pr->contains(c));
             m_subst_pr->insert(c, def_pr);
@@ -85,18 +88,18 @@ void expr_substitution::insert(expr * c, expr * def, proof * def_pr, expr_depend
     else {
         // replacing entry
         m_manager.inc_ref(def);
-        m_manager.dec_ref(entry->get_data().m_value);
-        entry->get_data().m_value = def;
+        m_manager.dec_ref(value);
+        value = def;
         if (proofs_enabled()) {
             obj_map<expr, proof*>::obj_map_entry * entry_pr = m_subst_pr->find_core(c);
-            SASSERT(entry_pr != 0);
+            SASSERT(entry_pr != nullptr);
             m_manager.inc_ref(def_pr);
             m_manager.dec_ref(entry_pr->get_data().m_value);
             entry_pr->get_data().m_value = def_pr;
         }
         if (unsat_core_enabled()) {
             obj_map<expr, expr_dependency*>::obj_map_entry * entry_dep = m_subst_dep->find_core(c);
-            SASSERT(entry_dep != 0);
+            SASSERT(entry_dep != nullptr);
             m_manager.inc_ref(def_dep);
             m_manager.dec_ref(entry_dep->get_data().m_value);
             entry_dep->get_data().m_value = def_dep;
@@ -121,9 +124,9 @@ void expr_substitution::erase(expr * c) {
     }
     expr * def = nullptr;
     if (m_subst.find(c, def)) {
-        m_manager.dec_ref(c);
         m_manager.dec_ref(def);
         m_subst.erase(c);
+        m_manager.dec_ref(c);
     }
 }
 

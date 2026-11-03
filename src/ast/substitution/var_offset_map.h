@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef VAR_OFFSET_MAP_H_
-#define VAR_OFFSET_MAP_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/vector.h"
@@ -30,8 +29,7 @@ class var_offset_map {
 protected:
     struct data {
         T        m_data;
-        unsigned m_timestamp;
-        data():m_timestamp(0) {}
+        unsigned m_timestamp = 0;
     };
     
     svector<data>           m_map;
@@ -111,4 +109,3 @@ public:
 
 };
 
-#endif /* VAR_OFFSET_MAP_H_ */

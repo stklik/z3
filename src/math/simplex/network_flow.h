@@ -25,12 +25,12 @@ Notes:
     A naive approach is to run an algorithm on max flow in order to get a spanning tree.
    
 --*/
-#ifndef NETWORK_FLOW_H_
-#define NETWORK_FLOW_H_
+#pragma once
 
 #include "util/inf_rational.h"
 #include "smt/diff_logic.h"
 #include "smt/spanning_tree.h"
+#include <optional>
 
 namespace smt {
 
@@ -88,7 +88,7 @@ namespace smt {
                   m_states(states),
                   m_enter_id(enter_id) {
             }
-            virtual ~pivot_rule_impl() {}
+            virtual ~pivot_rule_impl() = default;
             virtual bool choose_entering_edge() = 0;
             virtual pivot_rule rule() const = 0;
         };
@@ -148,12 +148,12 @@ namespace smt {
         vector<numeral>      m_potentials;   // nodes + 1 |-> initial: +/- 1  
                                              // Duals of flows which are convenient to compute dual solutions 
                                              // become solutions to Dual simplex.
-        vector<numeral>      m_flows;        // edges + nodes |-> assignemnt Basic feasible flows
+        vector<numeral>      m_flows;        // edges + nodes |-> assignment Basic feasible flows
         svector<edge_state>  m_states;
         unsigned             m_step;
         edge_id              m_enter_id;
         edge_id              m_leave_id;
-        optional<numeral>    m_delta;
+        std::optional<numeral>    m_delta;
 
         // Initialize the network with a feasible spanning tree
         void initialize();
@@ -197,4 +197,3 @@ namespace smt {
     };
 }
 
-#endif

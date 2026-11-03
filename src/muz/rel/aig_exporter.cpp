@@ -23,19 +23,16 @@ namespace datalog {
         m_latch_vars(m), m_latch_varsp(m), m_ruleid_var_set(m), m_ruleid_varp_set(m)
     {
         std::set<func_decl*> predicates;
-        for (rule_set::decl2rules::iterator I = m_rules.begin_grouped_rules(),
-            E = m_rules.end_grouped_rules(); I != E; ++I) {
-            predicates.insert(I->m_key);
-        }
+        for (auto it = m_rules.begin_grouped_rules(), end = m_rules.end_grouped_rules(); it != end; ++it)
+            predicates.insert(it->m_key);
 
-        for (fact_vector::const_iterator I = facts->begin(), E = facts->end(); I != E; ++I) {
-            predicates.insert(I->first);
-        }
+        for (auto& [pred, _] : *facts)
+            predicates.insert(pred);
 
         // reserve pred id = 0 for initialization purposes
         unsigned num_preds = (unsigned)predicates.size() + 1;
 
-        // poor's man round-up log2
+        // poor man's round-up log2
         unsigned preds_bitsize = log2(num_preds);
         if ((1U << preds_bitsize) < num_preds)
             ++preds_bitsize;
@@ -101,20 +98,15 @@ namespace datalog {
         expr_ref_vector exprs(m);
         substitution subst(m);
 
-        for (rule_set::decl2rules::iterator I = m_rules.begin_grouped_rules(),
-            E = m_rules.end_grouped_rules(); I != E; ++I) {
-            for (rule_vector::iterator II = I->get_value()->begin(),
-                EE = I->get_value()->end(); II != EE; ++II) {
-                rule *r = *II;
+        for (auto it = m_rules.begin_grouped_rules(), end = m_rules.end_grouped_rules(); it != end; ++it) {
+            for (rule* r : *it->get_value()) {
                 unsigned numqs = r->get_positive_tail_size();
                 if (numqs > 1) {
-                    std::cerr << "non-linear clauses not supported\n";
-                    exit(-1);
+                    throw default_exception("non-linear clauses not supported");
                 }
 
                 if (numqs != r->get_uninterpreted_tail_size()) {
-                    std::cerr << "negation of queries not supported\n";
-                    exit(-1);
+                    throw default_exception("negation of queries not supported");
                 }
 
                 exprs.reset();
@@ -133,7 +125,7 @@ namespace datalog {
                     exprs.push_back(e);
                 }
 
-                transition_function.push_back(m.mk_and(exprs.size(), exprs.c_ptr()));
+                transition_function.push_back(m.mk_and(exprs));
             }
         }
 
@@ -148,11 +140,11 @@ namespace datalog {
                     exprs.push_back(m.mk_eq(get_latch_var(i, m_latch_varsp), I->second[i]));
                 }
 
-                transition_function.push_back(m.mk_and(exprs.size(), exprs.c_ptr()));
+                transition_function.push_back(m.mk_and(exprs));
             }
         }
 
-        expr *tr = m.mk_or(transition_function.size(), transition_function.c_ptr());
+        expr *tr = m.mk_or(transition_function);
         aig_ref aig = m_aigm.mk_aig(tr);
         expr_ref aig_expr(m);
         m_aigm.to_formula(aig, aig_expr);
@@ -191,13 +183,13 @@ namespace datalog {
             expr_ref_vector output(m);
             const func_decl_set& preds = m_rules.get_output_predicates();
 
-            for (func_decl_set::iterator I = preds.begin(), E = preds.end(); I != E; ++I) {
+            for (func_decl* pred : preds) {
                 exprs.reset();
-                assert_pred_id(*I, m_ruleid_var_set, exprs);
-                output.push_back(m.mk_and(exprs.size(), exprs.c_ptr()));
+                assert_pred_id(pred, m_ruleid_var_set, exprs);
+                output.push_back(m.mk_and(exprs));
             }
 
-            expr *out = m.mk_or(output.size(), output.c_ptr());
+            expr *out = m.mk_or(output);
             aig = m_aigm.mk_aig(out);
             m_aigm.to_formula(aig, aig_expr);
             output_id = expr_to_aig(aig_expr);

@@ -18,6 +18,7 @@ Revision History:
 --*/
 #include "sat/sat_watched.h"
 #include "sat/sat_clause.h"
+#include "sat/sat_extension.h"
 
 namespace sat {
 
@@ -70,24 +71,6 @@ namespace sat {
         VERIFY(found);
     }
 
-    void erase_ternary_watch(watch_list& wlist, literal l1, literal l2) {
-        watched w(l1, l2);
-        watch_list::iterator it = wlist.begin(), end = wlist.end();
-        watch_list::iterator it2 = it;
-        bool found = false;
-        for (; it != end; ++it) {
-            if (!found && w == *it) {
-                found = true;
-            }
-            else {
-                *it2 = *it;
-                ++it2;    
-            }    
-        }
-        wlist.set_end(it2);
-        //VERIFY(found);
-    }
-
     void conflict_cleanup(watch_list::iterator it, watch_list::iterator it2, watch_list& wlist) {
         watch_list::iterator end = wlist.end();
         for (; it != end; ++it, ++it2) 
@@ -96,7 +79,7 @@ namespace sat {
     }
 
 
-    std::ostream& display_watch_list(std::ostream & out, clause_allocator const & ca, watch_list const & wlist) {
+    std::ostream& display_watch_list(std::ostream & out, clause_allocator const & ca, watch_list const & wlist, extension* ext) {
         bool first = true;
         for (watched const& w : wlist) {
             if (first)
@@ -109,20 +92,20 @@ namespace sat {
                 if (w.is_learned())
                     out << "*";
                 break;
-            case watched::TERNARY:
-                out << "(" << w.get_literal1() << " " << w.get_literal2() << ")";
-                break;
             case watched::CLAUSE:
                 out << "(" << w.get_blocked_literal() << " " << *(ca.get_clause(w.get_clause_offset())) << ")";
                 break;
             case watched::EXT_CONSTRAINT:
-                out << "ext: " << w.get_ext_constraint_idx();
+                if (ext) {
+                    ext->display_constraint(out, w.get_ext_constraint_idx());
+                }
+                else  {
+                    out << "ext: " << w.get_ext_constraint_idx();
+                }
                 break;
-            default: 
-                UNREACHABLE();
             }
         }
         return out;
     }
 
-};
+}

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_VECTOR_RELATION_H_
-#define DL_VECTOR_RELATION_H_
+#pragma once
 
 #include "ast/ast_pp.h"
 #include "muz/base/dl_context.h"
@@ -60,7 +59,7 @@ namespace datalog {
             dealloc(m_elems);
         }
 
-        void swap(relation_base& other) override {
+        void swap(relation_base& other) noexcept override {
             vector_relation& o = dynamic_cast<vector_relation&>(other);
             if (&o == this) return;
             std::swap(o.m_eqs, m_eqs);
@@ -197,7 +196,7 @@ namespace datalog {
                 equate(col1, sz1 + col2);
             }
 
-            TRACE("dl_relation",                   
+            TRACE(dl_relation,                   
                   r1.display(tout << "r1:\n");
                   r2.display(tout << "r2:\n");
                   display(tout << "dst:\n");
@@ -251,7 +250,7 @@ namespace datalog {
             }
 
 
-            TRACE("dl_relation",
+            TRACE(dl_relation,
                   ast_manager& m = r.get_plugin().get_ast_manager();
                   tout << "Signature: ";
                   for (unsigned i = 0; i < r.get_signature().size(); ++i) {
@@ -303,7 +302,7 @@ namespace datalog {
                 mk_rename_elem((*m_elems)[i], col_cnt, cycle);
             }            
 
-            TRACE("dl_relation", 
+            TRACE(dl_relation, 
                   ast_manager& m = r.get_plugin().get_ast_manager();
                   tout << "cycle: ";
                   for (unsigned i = 0; i < col_cnt; ++i) {
@@ -323,7 +322,7 @@ namespace datalog {
         }
 
         void mk_union(vector_relation const& src, vector_relation* delta, bool is_widen) {
-            TRACE("dl_relation", display(tout << "dst:\n"); src.display(tout  << "src:\n"););
+            TRACE(dl_relation, display(tout << "dst:\n"); src.display(tout  << "src:\n"););
 
             if (src.empty()) {
                 if (delta) {
@@ -375,7 +374,7 @@ namespace datalog {
                 else {
                     elems->push_back(mk_unite(t1, t2));
                 }
-                TRACE("dl_relation", tout << t1 << " u " << t2 << " = " << elems->back() << "\n";);
+                TRACE(dl_relation, tout << t1 << " u " << t2 << " = " << elems->back() << "\n";);
                 change = delta && (change || !((*elems)[i] == (*this)[i]));
             }
             dealloc(m_eqs);
@@ -385,7 +384,7 @@ namespace datalog {
             if (delta && change) {
                 delta->copy(*this);
             }
-            TRACE("dl_relation", display(tout << "dst':\n"););
+            TRACE(dl_relation, display(tout << "dst':\n"););
         }
 
         unsigned find(unsigned i) const { 
@@ -398,7 +397,6 @@ namespace datalog {
 
     };
         
-};
+}
 
-#endif 
 

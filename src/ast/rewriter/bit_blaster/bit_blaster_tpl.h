@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef BIT_BLASTER_TPL_H_
-#define BIT_BLASTER_TPL_H_
+#pragma once
 
 #include "util/rational.h"
 
@@ -36,16 +35,12 @@ protected:
     void mk_ext_rotate_left_right(unsigned sz, expr * const * a_bits, expr * const * b_bits, expr_ref_vector & out_bits);
 
     unsigned long long m_max_memory;
-    bool               m_use_wtm; /* Wallace Tree Multiplier */
-    bool               m_use_bcm; /* Booth Multiplier for constants */
     void checkpoint();
 
 public:
-    bit_blaster_tpl(Cfg const & cfg = Cfg(), unsigned long long max_memory = UINT64_MAX, bool use_wtm = false, bool use_bcm=false):
+    bit_blaster_tpl(Cfg const & cfg = Cfg(), unsigned long long max_memory = UINT64_MAX):
         Cfg(cfg),
-        m_max_memory(max_memory),
-        m_use_wtm(use_wtm),
-        m_use_bcm(use_bcm) {
+        m_max_memory(max_memory) {
     }
 
     void set_max_memory(unsigned long long max_memory) {
@@ -70,6 +65,7 @@ public:
     void mk_ite(expr * c, expr * t, expr * e, expr_ref & r) { Cfg::mk_ite(c, t, e, r); }
     void mk_nand(expr * a, expr * b, expr_ref & r) { Cfg::mk_nand(a, b, r); }
     void mk_nor(expr * a, expr * b, expr_ref & r) { Cfg::mk_nor(a, b, r); }
+    void mk_ge2(expr* a, expr* b, expr* c, expr_ref& r) { Cfg::mk_ge2(a, b, c, r); }
     //
 
 
@@ -121,7 +117,6 @@ public:
     void mk_comp(unsigned sz, expr * const * a_bits, expr * const * b_bits, expr_ref_vector & out_bits);
 
     void mk_carry_save_adder(unsigned sz, expr * const * a_bits, expr * const * b_bits, expr * const * c_bits, expr_ref_vector & sum_bits, expr_ref_vector & carry_bits);
-    bool mk_const_multiplier(unsigned sz, expr * const * a_bits, expr * const * b_bits, expr_ref_vector & out_bits);
     bool mk_const_case_multiplier(unsigned sz, expr * const * a_bits, expr * const * b_bits, expr_ref_vector & out_bits);
     void mk_const_case_multiplier(bool is_a, unsigned i, unsigned sz, ptr_buffer<expr, 128>& a_bits, ptr_buffer<expr, 128>& b_bits, expr_ref_vector & out_bits);
 
@@ -129,4 +124,3 @@ public:
     void mk_abs(unsigned sz, expr * const * a_bits, expr_ref_vector & out_bits);
 };
 
-#endif

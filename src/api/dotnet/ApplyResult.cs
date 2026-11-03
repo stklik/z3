@@ -17,8 +17,8 @@ Notes:
     
 --*/
 
+using System.Diagnostics;
 using System;
-using System.Diagnostics.Contracts;
 
 namespace Microsoft.Z3
 {
@@ -26,7 +26,6 @@ namespace Microsoft.Z3
     /// ApplyResult objects represent the result of an application of a 
     /// tactic to a goal. It contains the subgoals that were produced.
     /// </summary>
-    [ContractVerification(true)]
     public class ApplyResult : Z3Object
     {
         /// <summary>
@@ -44,8 +43,6 @@ namespace Microsoft.Z3
         {
             get
             {
-                Contract.Ensures(Contract.Result<Goal[]>() != null);
-                Contract.Ensures(Contract.Result<Goal[]>().Length == this.NumSubgoals);
 
                 uint n = NumSubgoals;
                 Goal[] res = new Goal[n];
@@ -67,34 +64,21 @@ namespace Microsoft.Z3
         internal ApplyResult(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
+            Debug.Assert(ctx != null);
         }
-
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_apply_result_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_apply_result_dec_ref(ctx.nCtx, obj);
-            }
-        };
 
         internal override void IncRef(IntPtr o)
         {
-            Context.ApplyResult_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_apply_result_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.ApplyResult_DRQ.Add(o);
-            base.DecRef(o);
+            lock(Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_apply_result_dec_ref(Context.nCtx, o);
+            }
         }
         #endregion
     }

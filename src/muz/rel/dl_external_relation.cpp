@@ -34,9 +34,6 @@ namespace datalog {
     {
     }
 
-    external_relation::~external_relation() {
-    }
-
     void external_relation::mk_accessor(decl_kind k, func_decl_ref& fn, const relation_fact& f, bool destructive, expr_ref& res) const {
         ast_manager& m = m_rel.get_manager();
         family_id fid = get_plugin().get_family_id();
@@ -46,14 +43,14 @@ namespace datalog {
             args.push_back(f[i]);
         }
         if (!fn.get()) {
-           fn = m.mk_func_decl(fid, k, 0, nullptr, args.size(), args.c_ptr());
+           fn = m.mk_func_decl(fid, k, 0, nullptr, args.size(), args.data());
         }        
         if (destructive) {
-            get_plugin().reduce_assign(fn, args.size(), args.c_ptr(), 1, args.c_ptr());
+            get_plugin().reduce_assign(fn, args.size(), args.data(), 1, args.data());
             res = m_rel;
         }
         else {
-            get_plugin().reduce(fn, args.size(), args.c_ptr(), res);
+            get_plugin().reduce(fn, args.size(), args.data(), res);
         }
     }
 
@@ -84,7 +81,7 @@ namespace datalog {
         ast_manager& m = m_rel.get_manager();
         family_id fid = get_plugin().get_family_id();
         expr* rel = m_rel.get();
-        expr_ref res(m.mk_fresh_const("T", m.get_sort(rel)), m);
+        expr_ref res(m.mk_fresh_const("T", rel->get_sort()), m);
         expr* rel_out = res.get();
         func_decl_ref fn(m.mk_func_decl(fid, OP_RA_CLONE,0,nullptr, 1, &rel), m);
         get_plugin().reduce_assign(fn, 1, &rel, 1, &rel_out);
@@ -152,7 +149,7 @@ namespace datalog {
         for (unsigned i = 0; i < sig.size(); ++i) {
             sorts.push_back(parameter(sig[i]));
         }
-        return m.mk_sort(fid, DL_RELATION_SORT, sorts.size(), sorts.c_ptr());
+        return m.mk_sort(fid, DL_RELATION_SORT, sorts.size(), sorts.data());
     }
     
     sort* external_relation_plugin::get_column_sort(unsigned col, sort* s) {
@@ -192,7 +189,7 @@ namespace datalog {
                 params.push_back(parameter(cols2[i]));
             }
             sort* domain[2] = { p.get_relation_sort(o1_sig), p.get_relation_sort(o2_sig) };
-            m_join_fn = m.mk_func_decl(fid, OP_RA_JOIN, params.size(), params.c_ptr(), 2, domain);
+            m_join_fn = m.mk_func_decl(fid, OP_RA_JOIN, params.size(), params.data(), 2, domain);
         }
 
         relation_base * operator()(const relation_base & r1, const relation_base & r2) override {
@@ -228,7 +225,7 @@ namespace datalog {
             for (unsigned i = 0; i < removed_col_cnt; ++i) {
                 params.push_back(parameter(removed_cols[i]));
             }            
-            m_project_fn = m.mk_func_decl(fid, OP_RA_PROJECT, params.size(), params.c_ptr(), 1, &relation_sort);
+            m_project_fn = m.mk_func_decl(fid, OP_RA_PROJECT, params.size(), params.data(), 1, &relation_sort);
         }
 
         relation_base * operator()(const relation_base & r) override {
@@ -262,7 +259,7 @@ namespace datalog {
                 SASSERT(cycle[i] < orig_sig.size());
                 params.push_back(parameter(cycle[i]));
             }
-            m_rename_fn = m.mk_func_decl(fid, OP_RA_RENAME, params.size(), params.c_ptr(), 1, &relation_sort);
+            m_rename_fn = m.mk_func_decl(fid, OP_RA_RENAME, params.size(), params.data(), 1, &relation_sort);
         }
 
         relation_base * operator()(const relation_base & r) override {
@@ -433,7 +430,7 @@ namespace datalog {
                 params.push_back(parameter(negated_cols[i]));
             }
             sort* domain[2] = { get(tgt).get_sort(), get(neg_t).get_sort() };
-            m_negated_filter_fn = m.mk_func_decl(fid, OP_RA_NEGATION_FILTER, params.size(), params.c_ptr(), 2, domain);            
+            m_negated_filter_fn = m.mk_func_decl(fid, OP_RA_NEGATION_FILTER, params.size(), params.data(), 2, domain);            
         }
 
         void operator()(relation_base & t, const relation_base & negated_obj) override {
@@ -452,4 +449,4 @@ namespace datalog {
         return alloc(negation_filter_fn, *this, t, negated_obj, joined_col_cnt, t_cols, negated_cols);
     }
 
-};
+}

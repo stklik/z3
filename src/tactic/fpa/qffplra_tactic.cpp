@@ -27,7 +27,7 @@ tactic * mk_qffplra_tactic(ast_manager & m, params_ref const & p) {
 }
 
 struct is_fpa_function {
-    struct found {};
+    struct found : public std::exception {};
     ast_manager & m;
     fpa_util      fu;
     
@@ -57,7 +57,7 @@ struct is_non_qffplra_predicate {
     void operator()(quantifier *) { throw found(); }
 
     void operator()(app * n) {
-        sort * s = get_sort(n);
+        sort * s = n->get_sort();
         if (!m.is_bool(s) && !fu.is_float(s) && !fu.is_rm(s) && !bu.is_bv_sort(s) && !au.is_real(s))
             throw found();
         family_id fid = n->get_family_id();
@@ -82,8 +82,6 @@ public:
             test<is_fpa_function>(g) && 
             !test<is_non_qffplra_predicate>(g);
     }
-
-    ~is_qffplra_probe() override {}
 };
 
 probe * mk_is_qffplra_probe() {

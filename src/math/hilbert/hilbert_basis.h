@@ -25,14 +25,14 @@ Revision History:
 
 --*/
 
-#ifndef HILBERT_BASIS_H_
-#define HILBERT_BASIS_H_
+#pragma once
 
 #include "util/rational.h"
 #include "util/lbool.h"
 #include "util/statistics.h"
 #include "util/checked_int64.h"
 #include "util/rlimit.h"
+#include <cstring>
 
 typedef vector<rational> rational_vector;
 
@@ -43,7 +43,7 @@ class hilbert_basis {
     typedef vector<numeral> num_vector;
     static checked_int64<check> to_numeral(rational const& r) {
         if (!r.is_int64()) {
-            throw checked_int64<check>::overflow_exception();
+            throw overflow_exception();
         }
         return checked_int64<check>(r.get_int64());
     }
@@ -88,8 +88,8 @@ class hilbert_basis {
 
     reslimit&          m_limit;
     vector<num_vector> m_ineqs;      // set of asserted inequalities
-    svector<bool>      m_iseq;       // inequalities that are equalities
-    num_vector         m_store;      // store of vectors
+    bool_vector      m_iseq;       // inequalities that are equalities
+    mutable num_vector         m_store;      // store of vectors
     svector<offset_t>  m_basis;      // vector of current basis
     svector<offset_t>  m_free_list;  // free list of unused storage
     svector<offset_t>  m_active;     // active set
@@ -115,7 +115,6 @@ class hilbert_basis {
         offset_t operator*() const { return hb.m_basis[m_idx]; }
         iterator& operator++() { ++m_idx; return *this; }
         iterator operator++(int) { iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(iterator const& it) const {return m_idx == it.m_idx; }
         bool operator!=(iterator const& it) const {return m_idx != it.m_idx; }
     };
 
@@ -198,6 +197,3 @@ public:
     void reset_statistics();     
 
 };
-
-
-#endif 

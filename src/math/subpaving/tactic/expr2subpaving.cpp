@@ -19,10 +19,10 @@ Notes:
 --*/
 #include "math/subpaving/tactic/expr2subpaving.h"
 #include "ast/expr2var.h"
+#include "ast/arith_decl_plugin.h"
+#include "ast/ast_pp.h"
 #include "util/ref_util.h"
 #include "util/z3_exception.h"
-#include "util/cooperate.h"
-#include "ast/arith_decl_plugin.h"
 #include "util/scoped_numeral_buffer.h"
 #include "util/common_msgs.h"
 
@@ -94,9 +94,8 @@ struct expr2subpaving::imp {
     }
 
     void checkpoint() {
-        if (m().canceled())
+        if (!m().inc())
             throw default_exception(Z3_CANCELED_MSG);
-        cooperate("expr2subpaving");
     }
 
     subpaving::var mk_var_for(expr * t) {
@@ -149,19 +148,20 @@ struct expr2subpaving::imp {
 
     // Put t as a^k.
     void as_power(expr * t, expr * & a, unsigned & k) {
-        if (!m_autil.is_power(t)) {
+        expr* p = nullptr;
+        if (!m_autil.is_power(t, a, p)) {
             a = t;
             k = 1;
             return;
         }
         rational _k;
-        if (!m_autil.is_numeral(to_app(t)->get_arg(1), _k) || !_k.is_int() || !_k.is_unsigned()) {
+        if (m_autil.is_numeral(p, _k) && _k.is_unsigned() && !_k.is_zero()) {
+            k = _k.get_unsigned();
+        }
+        else {
             a = t;
             k = 1;
-            return;
         }
-        a = to_app(t)->get_arg(0);
-        k = _k.get_unsigned();
     }
 
     subpaving::var process_mul(app * t, unsigned depth, mpz & n, mpz & d) {
@@ -170,7 +170,7 @@ struct expr2subpaving::imp {
             found_non_simplified();
         rational k;
         expr * m;
-        if (m_autil.is_numeral(t->get_arg(0), k)) {
+        if (m_autil.is_numeral(t->get_arg(0), k) && !k.is_zero()) {
             if (num_args != 2)
                 found_non_simplified();
             qm().set(n, k.to_mpq().numerator());
@@ -195,7 +195,7 @@ struct expr2subpaving::imp {
         scoped_mpz n_arg(qm());
         scoped_mpz d_arg(qm());
         sbuffer<subpaving::power> pws;
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             expr * arg = margs[i];
             unsigned k;
             as_power(arg, arg, k);
@@ -213,7 +213,7 @@ struct expr2subpaving::imp {
         else if (pws.size() == 1 && pws[0].degree() == 1)
             x = pws[0].get_var();
         else
-            x = s().mk_monomial(pws.size(), pws.c_ptr());
+            x = s().mk_monomial(pws.size(), pws.data());
         cache_result(t, x, n, d);
         return x;
     }
@@ -227,7 +227,7 @@ struct expr2subpaving::imp {
         var_buffer xs;
         scoped_mpq c(qm()), c_arg(qm());
         scoped_mpz n_arg(qm()), d_arg(qm());
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             expr * arg           = t->get_arg(i);
             subpaving::var x_arg = process(arg, depth+1, n_arg, d_arg);
             if (x_arg == subpaving::null_var) {
@@ -242,14 +242,14 @@ struct expr2subpaving::imp {
         }
         qm().set(d,  c.get().denominator());
         unsigned sz = xs.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             qm().lcm(d, ds[i], d);
         }
         scoped_mpz & k = d_arg;
         qm().div(d, c.get().denominator(), k);
         scoped_mpz sum_c(qm());
         qm().mul(c.get().numerator(), k, sum_c);
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             qm().div(d, ds[i], k);
             qm().mul(ns[i], k, ns[i]);
         }
@@ -259,7 +259,7 @@ struct expr2subpaving::imp {
             x = subpaving::null_var;
         }
         else {
-            x = s().mk_sum(sum_c, sz, ns.c_ptr(), xs.c_ptr());
+            x = s().mk_sum(sum_c, sz, ns.data(), xs.data());
             qm().set(n, 1);
         }
         cache_result(t, x, n, d);
@@ -269,12 +269,12 @@ struct expr2subpaving::imp {
     subpaving::var process_power(app * t, unsigned depth, mpz & n, mpz & d) {
         rational k;
         SASSERT(t->get_num_args() == 2);
-        if (!m_autil.is_numeral(t->get_arg(1), k) || !k.is_int() || !k.is_unsigned()) {
+        if (!m_autil.is_numeral(t->get_arg(1), k) || !k.is_int() || !k.is_unsigned() || k.is_zero()) {
             qm().set(n, 1);
             qm().set(d, 1);
             return mk_var_for(t);
         }
-        unsigned _k = k.get_unsigned();
+        unsigned _k = k.get_unsigned();        
         subpaving::var x = process(t->get_arg(0), depth+1, n, d);
         if (x != subpaving::null_var) {
             subpaving::power p(x, _k);
@@ -310,6 +310,9 @@ struct expr2subpaving::imp {
         case OP_MOD:
         case OP_REM:
         case OP_IRRATIONAL_ALGEBRAIC_NUM:
+        case OP_DIV0:
+        case OP_MOD0:
+        case OP_IDIV0:
             throw default_exception("you must apply arithmetic purifier before internalizing expressions into the subpaving module.");
         case OP_SIN:
         case OP_COS:
@@ -323,9 +326,13 @@ struct expr2subpaving::imp {
         case OP_ASINH:
         case OP_ACOSH:
         case OP_ATANH:
+        case OP_EXP:
+        case OP_ATAN2:
+        case OP_LOG:
             // TODO
             throw default_exception("transcendental and hyperbolic functions are not supported yet.");
         default:
+            throw default_exception("unhandled arithmetic operator in subpaving");
             UNREACHABLE();
         }
         return subpaving::null_var;

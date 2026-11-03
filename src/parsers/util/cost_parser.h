@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef COST_PARSER_H_
-#define COST_PARSER_H_
+#pragma once
 
 #include "parsers/util/simple_parser.h"
 #include "ast/arith_decl_plugin.h"
@@ -27,7 +26,6 @@ class cost_parser : public simple_parser {
     var_ref_vector m_vars;
 public:
     cost_parser(ast_manager & m);
-    ~cost_parser() override {}
     expr * parse_int(rational const & r) override;
     expr * parse_float(rational const & r) override;
     unsigned add_var(symbol name);
@@ -35,5 +33,4 @@ public:
     void reset_vars();
 };
 
-#endif /* COST_PARSER_H_ */
 

@@ -16,8 +16,7 @@ Revision History:
 
 
 --*/
-#ifndef _SPACER_UNSAT_CORE_LEARNER_H_
-#define _SPACER_UNSAT_CORE_LEARNER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "muz/spacer/spacer_util.h"
@@ -42,7 +41,7 @@ namespace spacer {
 
     public:
         unsat_core_learner(ast_manager& m, iuc_proof& pr) :
-            m(m), m_pr(pr), m_unsat_core(m) {};
+            m(m), m_pr(pr), m_unsat_core(m) {}
         virtual ~unsat_core_learner();
 
         ast_manager& get_manager() {return m;}
@@ -99,4 +98,3 @@ namespace spacer {
     };
 }
 
-#endif

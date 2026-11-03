@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef BV_DECL_PLUGIN_H_
-#define BV_DECL_PLUGIN_H_
+#pragma once
 
 #include "ast/ast.h"
 
@@ -94,10 +93,24 @@ enum bv_op_kind {
     OP_BSMUL_NO_OVFL, // no signed multiplication overflow predicate
     OP_BSMUL_NO_UDFL, // no signed multiplication underflow predicate
 
+    OP_BUMUL_OVFL, // unsigned multiplication overflow predicate (negation of OP_BUMUL_NO_OVFL)
+    OP_BSMUL_OVFL, // signed multiplication over/underflow predicate
+
+    OP_BSDIV_OVFL, // signed division overflow predicate
+
+    OP_BNEG_OVFL, // negation overflow predicate
+
+    OP_BUADD_OVFL, // unsigned addition overflow predicate
+    OP_BSADD_OVFL, // signed addition overflow predicate
+
+    OP_BUSUB_OVFL, // unsigned subtraction overflow predicate
+    OP_BSSUB_OVFL, // signed subtraction overflow predicate
+
     OP_BIT2BOOL, // predicate
     OP_MKBV,     // bools to bv
     OP_INT2BV,
-    OP_BV2INT,
+    OP_UBV2INT,
+    OP_SBV2INT,
 
     OP_CARRY,
     OP_XOR3,
@@ -105,27 +118,8 @@ enum bv_op_kind {
     LAST_BV_OP
 };
 
-// Assume k is a "div" operator. It returns the div0 uninterpreted function that
-// models the value of "div" it is underspecified (i.e., when the denominator is zero).
-inline bv_op_kind get_div0_op(bv_op_kind k) {
-    switch (k) {
-    case OP_BSDIV: return OP_BSDIV0;
-    case OP_BUDIV: return OP_BUDIV0;
-    case OP_BSREM: return OP_BSREM0;
-    case OP_BUREM: return OP_BUREM0;
-    case OP_BSMOD: return OP_BSMOD0;
-    default: UNREACHABLE(); return LAST_BV_OP;
-    }
-}
-
-// Assume decl is the declaration of a "div" operator. It returns the div0 declaration that
-// models the value of "div" it is underspecified (i.e., when the denominator is zero).
-inline func_decl * get_div0_decl(ast_manager & m, func_decl * decl) {
-    return m.mk_func_decl(decl->get_family_id(), get_div0_op(static_cast<bv_op_kind>(decl->get_decl_kind())),
-                          0, nullptr, 1, decl->get_domain());
-}
-
 class bv_decl_plugin : public decl_plugin {
+    friend class bv_util;
 protected:
     symbol m_bv_sym;
     symbol m_concat_sym;
@@ -189,9 +183,22 @@ protected:
     ptr_vector<func_decl>  m_bv_redand;
     ptr_vector<func_decl>  m_bv_comp;
 
-    ptr_vector<func_decl>  m_bv_mul_ovfl;
-    ptr_vector<func_decl>  m_bv_smul_ovfl;
-    ptr_vector<func_decl>  m_bv_smul_udfl;
+    ptr_vector<func_decl>  m_bv_mul_no_ovfl;
+    ptr_vector<func_decl>  m_bv_smul_no_ovfl;
+    ptr_vector<func_decl>  m_bv_smul_no_udfl;
+
+    ptr_vector<func_decl> m_bv_mul_ovfl;
+    ptr_vector<func_decl> m_bv_smul_ovfl;
+
+    ptr_vector<func_decl> m_bv_sdiv_ovfl;
+
+    ptr_vector<func_decl> m_bv_neg_ovfl;
+
+    ptr_vector<func_decl> m_bv_uadd_ovfl;
+    ptr_vector<func_decl> m_bv_sadd_ovfl;
+
+    ptr_vector<func_decl> m_bv_usub_ovfl;
+    ptr_vector<func_decl> m_bv_ssub_ovfl;
 
     ptr_vector<func_decl>  m_bv_shl;
     ptr_vector<func_decl>  m_bv_lshr;
@@ -199,7 +206,8 @@ protected:
     ptr_vector<func_decl>  m_ext_rotate_left;
     ptr_vector<func_decl>  m_ext_rotate_right;
 
-    ptr_vector<func_decl>  m_bv2int;
+    ptr_vector<func_decl>  m_ubv2int;
+    ptr_vector<func_decl>  m_sbv2int;
     ptr_vector<func_decl>  m_int2bv;
     vector<ptr_vector<func_decl> > m_bit2bool;
     ptr_vector<func_decl>  m_mkbv;
@@ -213,6 +221,7 @@ protected:
     func_decl * mk_unary(ptr_vector<func_decl> & decls, decl_kind k, char const * name, unsigned bv_size);
     func_decl * mk_pred(ptr_vector<func_decl> & decls, decl_kind k,
                         char const * name, unsigned bv_size);
+    func_decl * mk_unary_pred(ptr_vector<func_decl> & decls, decl_kind k, char const * name, unsigned bv_size);
     func_decl * mk_reduction(ptr_vector<func_decl> & decls, decl_kind k, char const * name, unsigned bv_size);
     func_decl * mk_comp(unsigned bv_size);
     bool get_bv_size(sort * t, int & result);
@@ -223,7 +232,9 @@ protected:
     bool get_extract_size(unsigned num_parameters, parameter const * parameters,
                           unsigned arity, sort * const * domain, int & result);
 
-    func_decl * mk_bv2int(unsigned bv_size, unsigned num_parameters, parameter const * parameters,
+    func_decl * mk_ubv2int(unsigned bv_size, unsigned num_parameters, parameter const * parameters,
+                          unsigned arity, sort * const * domain);
+    func_decl * mk_sbv2int(unsigned bv_size, unsigned num_parameters, parameter const * parameters,
                           unsigned arity, sort * const * domain);
 
     func_decl * mk_int2bv(unsigned bv_size, unsigned num_parameters, parameter const * parameters,
@@ -241,7 +252,6 @@ protected:
 public:
     bv_decl_plugin();
 
-    ~bv_decl_plugin() override {}
     void finalize() override;
 
     decl_plugin * mk_fresh() override { return alloc(bv_decl_plugin); }
@@ -298,8 +308,9 @@ public:
     bool is_numeral(expr const * n) const { return is_app_of(n, get_fid(), OP_BV_NUM); }
     bool is_allone(expr const * e) const;
     bool is_zero(expr const * e) const;
+    bool is_one(expr const* e) const;
     bool is_bv_sort(sort const * s) const;
-    bool is_bv(expr const* e) const {  return is_bv_sort(get_sort(e)); }
+    bool is_bv(expr const* e) const {  return is_bv_sort(e->get_sort()); }
 
     bool is_concat(expr const * e) const { return is_app_of(e, get_fid(), OP_CONCAT); }
     bool is_extract(func_decl const * f) const { return is_decl_of(f, get_fid(), OP_EXTRACT); }
@@ -309,7 +320,9 @@ public:
     unsigned get_extract_high(expr const * n) const { SASSERT(is_extract(n)); return get_extract_high(to_app(n)->get_decl()); }
     unsigned get_extract_low(expr const * n) const { SASSERT(is_extract(n)); return get_extract_low(to_app(n)->get_decl()); }
     bool is_extract(expr const * e, unsigned & low, unsigned & high, expr * & b) const;
-    bool is_bv2int(expr const * e, expr * & r) const;
+    bool is_repeat(expr const * e, expr*& arg, unsigned& n) const;
+    bool is_ubv2int(expr const * e, expr * & r) const;
+    bool is_sbv2int(expr const * e, expr * & r) const;
     bool is_bv_add(expr const * e) const { return is_app_of(e, get_fid(), OP_BADD); }
     bool is_bv_sub(expr const * e) const { return is_app_of(e, get_fid(), OP_BSUB); }
     bool is_bv_mul(expr const * e) const { return is_app_of(e, get_fid(), OP_BMUL); }
@@ -341,19 +354,65 @@ public:
     bool is_bv_not(expr const * e) const { return is_app_of(e, get_fid(), OP_BNOT); }
     bool is_bv_ule(expr const * e) const { return is_app_of(e, get_fid(), OP_ULEQ); }
     bool is_bv_sle(expr const * e) const { return is_app_of(e, get_fid(), OP_SLEQ); }
+    bool is_ule(expr const * e) const { return is_app_of(e, get_fid(), OP_ULEQ); }
+    bool is_sle(expr const * e) const { return is_app_of(e, get_fid(), OP_SLEQ); }
+    bool is_ult(expr const * e) const { return is_app_of(e, get_fid(), OP_ULT); }
+    bool is_slt(expr const * e) const { return is_app_of(e, get_fid(), OP_SLT); }
+    bool is_ugt(expr const * e) const { return is_app_of(e, get_fid(), OP_UGT); }
+    bool is_sgt(expr const * e) const { return is_app_of(e, get_fid(), OP_SGT); }
+    bool is_uge(expr const * e) const { return is_app_of(e, get_fid(), OP_UGEQ); }
+    bool is_sge(expr const * e) const { return is_app_of(e, get_fid(), OP_SGEQ); }
     bool is_bit2bool(expr const * e) const { return is_app_of(e, get_fid(), OP_BIT2BOOL); }
-    bool is_bv2int(expr const* e) const { return is_app_of(e, get_fid(), OP_BV2INT); }
+    bool is_ubv2int(expr const* e) const { return is_app_of(e, get_fid(), OP_UBV2INT); }
+    bool is_sbv2int(expr const* e) const { return is_app_of(e, get_fid(), OP_SBV2INT); }
     bool is_int2bv(expr const* e) const { return is_app_of(e, get_fid(), OP_INT2BV); }
     bool is_mkbv(expr const * e) const { return is_app_of(e, get_fid(), OP_MKBV); }
     bool is_bv_ashr(expr const * e) const { return is_app_of(e, get_fid(), OP_BASHR); }
     bool is_bv_lshr(expr const * e) const { return is_app_of(e, get_fid(), OP_BLSHR); }
     bool is_bv_shl(expr const * e) const { return is_app_of(e, get_fid(), OP_BSHL); }
     bool is_sign_ext(expr const * e) const { return is_app_of(e, get_fid(), OP_SIGN_EXT); }
+    bool is_bv_umul_no_ovfl(expr const* e) const { return is_app_of(e, get_fid(), OP_BUMUL_NO_OVFL); }
+    bool is_redand(expr const* e) const { return is_app_of(e, get_fid(), OP_BREDAND); }
+    bool is_redor(expr const* e) const { return is_app_of(e, get_fid(), OP_BREDOR); }
+    bool is_comp(expr const* e) const { return is_app_of(e, get_fid(), OP_BCOMP); }
+    bool is_rotate_left(expr const* e) const { return is_app_of(e, get_fid(), OP_ROTATE_LEFT); }
+    bool is_rotate_right(expr const* e) const { return is_app_of(e, get_fid(), OP_ROTATE_RIGHT); }
+    bool is_ext_rotate_left(expr const* e) const { return is_app_of(e, get_fid(), OP_EXT_ROTATE_LEFT); }
+    bool is_ext_rotate_right(expr const* e) const { return is_app_of(e, get_fid(), OP_EXT_ROTATE_RIGHT); }
 
+    bool is_rotate_left(expr const* e, unsigned& n, expr*& x) const {
+        return is_rotate_left(e) && (n = to_app(e)->get_parameter(0).get_int(), x = to_app(e)->get_arg(0), true);
+    }
+    bool is_rotate_right(expr const* e, unsigned& n, expr*& x) const {
+        return is_rotate_right(e) && (n = to_app(e)->get_parameter(0).get_int(), x = to_app(e)->get_arg(0), true);
+    }
+    bool is_int2bv(expr const* e, unsigned& n, expr*& x) const {
+        return is_int2bv(e) && (n = to_app(e)->get_parameter(0).get_int(), x = to_app(e)->get_arg(0), true);
+    }
+
+    START_DISABLE_EXTRA_SEMI_WARNING;
+    MATCH_UNARY(is_bv_not);
+    MATCH_UNARY(is_redand);
+    MATCH_UNARY(is_redor);
+    MATCH_UNARY(is_sign_ext);
+
+    MATCH_BINARY(is_ext_rotate_left);
+    MATCH_BINARY(is_ext_rotate_right);
+    MATCH_BINARY(is_comp);
     MATCH_BINARY(is_bv_add);
+    MATCH_BINARY(is_bv_sub);
     MATCH_BINARY(is_bv_mul);
     MATCH_BINARY(is_bv_sle);
     MATCH_BINARY(is_bv_ule);
+    MATCH_BINARY(is_ule);
+    MATCH_BINARY(is_sle);
+    MATCH_BINARY(is_ult);
+    MATCH_BINARY(is_slt);
+    MATCH_BINARY(is_uge);
+    MATCH_BINARY(is_sge);
+    MATCH_BINARY(is_ugt);
+    MATCH_BINARY(is_sgt);
+    MATCH_BINARY(is_bv_umul_no_ovfl);
     MATCH_BINARY(is_bv_ashr);
     MATCH_BINARY(is_bv_lshr);
     MATCH_BINARY(is_bv_shl);
@@ -362,17 +421,31 @@ public:
     MATCH_BINARY(is_bv_sdiv);
     MATCH_BINARY(is_bv_udiv);
     MATCH_BINARY(is_bv_smod);
+    MATCH_BINARY(is_bv_and);
+    MATCH_BINARY(is_bv_or);
+    MATCH_BINARY(is_bv_xor);
+    MATCH_BINARY(is_bv_nand);
+    MATCH_BINARY(is_bv_nor);
+    MATCH_BINARY(is_concat);
+
 
     MATCH_BINARY(is_bv_uremi);
     MATCH_BINARY(is_bv_sremi);
     MATCH_BINARY(is_bv_sdivi);
     MATCH_BINARY(is_bv_udivi);
     MATCH_BINARY(is_bv_smodi);
+    MATCH_BINARY(is_bv_urem0);
+    MATCH_BINARY(is_bv_srem0);
+    MATCH_BINARY(is_bv_sdiv0);
+    MATCH_BINARY(is_bv_udiv0);
+    MATCH_BINARY(is_bv_smod0);
+    MATCH_UNARY(is_bit2bool);
+    MATCH_UNARY(is_int2bv);
+    END_DISABLE_WARNING;
+    bool is_bit2bool(expr* e, expr*& bv, unsigned& idx) const;
 
-    rational norm(rational const & val, unsigned bv_size, bool is_signed) const ;
-    rational norm(rational const & val, unsigned bv_size) const { return norm(val, bv_size, false); }
+    rational norm(rational const & val, unsigned bv_size, bool is_signed = false) const ;
     bool has_sign_bit(rational const & n, unsigned bv_size) const;
-    bool mult_inverse(rational const & n, unsigned bv_size, rational & result);
 };
 
 class bv_util : public bv_recognizers {
@@ -387,33 +460,99 @@ public:
     app * mk_numeral(rational const & val, sort* s) const;
     app * mk_numeral(rational const & val, unsigned bv_size) const;
     app * mk_numeral(uint64_t u, unsigned bv_size) const { return mk_numeral(rational(u, rational::ui64()), bv_size); }
+    app * mk_zero(sort* s) const { return mk_numeral(rational::zero(), s); }
+    app * mk_zero(unsigned bv_size) const { return mk_numeral(rational::zero(), bv_size); }
+    app * mk_one(sort* s) const { return mk_numeral(rational::one(), s); }
+    app * mk_one(unsigned bv_size) const { return mk_numeral(rational::one(), bv_size); }
+
     sort * mk_sort(unsigned bv_size);
 
     unsigned get_bv_size(sort const * s) const {
         SASSERT(is_bv_sort(s));
         return static_cast<unsigned>(s->get_parameter(0).get_int());
     }
-    unsigned get_bv_size(expr const * n) const { return get_bv_size(m_manager.get_sort(n)); }
+    unsigned get_bv_size(expr const * n) const { return get_bv_size(n->get_sort()); }
     unsigned get_int2bv_size(parameter const& p);
 
 
     app * mk_ule(expr * arg1, expr * arg2) { return m_manager.mk_app(get_fid(), OP_ULEQ, arg1, arg2); }
+    app * mk_ult(expr * arg1, expr * arg2) { return m_manager.mk_app(get_fid(), OP_ULT, arg1, arg2); }
     app * mk_sle(expr * arg1, expr * arg2) { return m_manager.mk_app(get_fid(), OP_SLEQ, arg1, arg2); }
+    app * mk_slt(expr * arg1, expr * arg2) { return m_manager.mk_app(get_fid(), OP_SLT, arg1, arg2); }
     app * mk_extract(unsigned high, unsigned low, expr * n) {
         parameter params[2] = { parameter(high), parameter(low) };
         return m_manager.mk_app(get_fid(), OP_EXTRACT, 2, params, 1, &n);
     }
     app * mk_concat(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_CONCAT, num, args);  }
-    app * mk_concat(expr * arg1, expr * arg2) { expr * args[2] = { arg1, arg2 }; return mk_concat(2, args); }
+    app * mk_concat(std::initializer_list<expr*> args) { return m_manager.mk_app(get_fid(), OP_CONCAT, static_cast<unsigned>(args.size()), args.begin());  }
+    app * mk_concat(expr_ref_vector const& es) { return m_manager.mk_app(get_fid(), OP_CONCAT, es.size(), es.data());  }
+    app * mk_concat(expr_ref_buffer const& es) { return m_manager.mk_app(get_fid(), OP_CONCAT, es.size(), es.data());  }
+    app * mk_concat(ptr_buffer<expr> const& es) { return m_manager.mk_app(get_fid(), OP_CONCAT, es.size(), es.data());  }
+    app * mk_concat(ptr_vector<expr> const& es) { return m_manager.mk_app(get_fid(), OP_CONCAT, es.size(), es.data());  }
     app * mk_bv_or(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_BOR, num, args);  }
-    app * mk_bv_not(expr * arg) { return m_manager.mk_app(get_fid(), OP_BNOT, arg); }
+    app * mk_bv_or(std::initializer_list<expr*> args) { return m_manager.mk_app(get_fid(), OP_BOR, static_cast<unsigned>(args.size()), args.begin());  }
+    app * mk_bv_and(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_BAND, num, args);  }
+    app * mk_bv_and(std::initializer_list<expr*> args) { return m_manager.mk_app(get_fid(), OP_BAND, static_cast<unsigned>(args.size()), args.begin());  }
     app * mk_bv_xor(unsigned num, expr * const * args) { return m_manager.mk_app(get_fid(), OP_BXOR, num, args);  }
+    app * mk_bv_xor(std::initializer_list<expr*> args) { return m_manager.mk_app(get_fid(), OP_BXOR, static_cast<unsigned>(args.size()), args.begin());  }
+
+    app * mk_concat(expr * arg1, expr * arg2) { expr * args[2] = { arg1, arg2 }; return mk_concat(2, args); }
+    app * mk_bv_and(expr* x, expr* y) { expr* args[2] = { x, y }; return mk_bv_and(2, args); }
+    app * mk_bv_or(expr* x, expr* y) { expr* args[2] = { x, y }; return mk_bv_or(2, args); }
+    app * mk_bv_xor(expr* x, expr* y) { expr* args[2] = { x, y }; return mk_bv_xor(2, args); }
+
+    app * mk_bv_not(expr * arg) { return m_manager.mk_app(get_fid(), OP_BNOT, arg); }
     app * mk_bv_neg(expr * arg) { return m_manager.mk_app(get_fid(), OP_BNEG, arg); }
+    // absolute value: ite(arg <s 0, -arg, arg). Note mk_abs(INT_MIN) = INT_MIN.
+    // Uses ¬(0 ≤s arg) instead of (arg <s 0) so that the ITE condition is OP_NOT(OP_SLEQ)
+    // (handled by theory_bv::internalize_atom) rather than OP_SLT (not handled).
+    app * mk_abs(expr * arg) {
+        expr_ref nonneg(mk_sle(mk_zero(arg->get_sort()), arg), m_manager);
+        expr_ref neg(mk_bv_neg(arg), m_manager);
+        return m_manager.mk_ite(nonneg, arg, neg);
+    }
+    // Magnitude-bound clause for a division/remainder term t with a symbolic (non-numeral)
+    // divisor. Fills clause with the disjuncts { divisor = 0, bound }, encoding
+    // divisor != 0 => bound, where bound is expressed using only OP_ULEQ and OP_NOT(OP_ULEQ)
+    // (so it can be internalized by theory_bv::internalize_atom):
+    //   urem:      ¬(b ≤u t)          srem/smod: ¬(|b| ≤u |t|)
+    //   udiv:      t ≤u a             sdiv:      |t| ≤u |a|
+    // Leaves clause empty if t is not a division/remainder operator or the divisor is a
+    // numeral. The bound is a bit-vector theory axiom (implied for a non-zero divisor); the
+    // unsigned comparison on absolute values keeps it sound at INT_MIN.
+    bool is_bv_divrem(expr* t) const {
+        return is_bv_urem(t) || is_bv_uremi(t) || is_bv_srem(t) || is_bv_sremi(t) ||
+               is_bv_smod(t) || is_bv_smodi(t) || is_bv_udiv(t) || is_bv_udivi(t) ||
+               is_bv_sdiv(t) || is_bv_sdivi(t);
+    }
+    void mk_bv_divrem_bound(expr* t, expr_ref_vector& clause);
     app * mk_bv_urem(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUREM, arg1, arg2); }
     app * mk_bv_srem(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSREM, arg1, arg2); }
+    app * mk_bv_smod(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSMOD, arg1, arg2); }
     app * mk_bv_add(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BADD, arg1, arg2); }
+    app * mk_bv_add(ptr_buffer<expr> const & args) const { return m_manager.mk_app(get_fid(), OP_BADD, args.size(), args.data()); }
+    app * mk_bv_add(ptr_vector<expr> const & args) const { return m_manager.mk_app(get_fid(), OP_BADD, args.size(), args.data()); }
+    app * mk_bv_add(expr_ref_vector const & args) const { return m_manager.mk_app(get_fid(), OP_BADD, args.size(), args.data()); }
+    app * mk_bv_add(expr_ref_buffer const & args) const { return m_manager.mk_app(get_fid(), OP_BADD, args.size(), args.data()); }
     app * mk_bv_sub(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSUB, arg1, arg2); }
     app * mk_bv_mul(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BMUL, arg1, arg2); }
+    app * mk_bv_mul(unsigned n, expr* const* args) const { return m_manager.mk_app(get_fid(), OP_BMUL, n, args); }
+    app* mk_bv_mul(ptr_buffer<expr> const& args) const { return m_manager.mk_app(get_fid(), OP_BMUL, args.size(), args.data()); }
+    app* mk_bv_mul(ptr_vector<expr> const& args) const { return m_manager.mk_app(get_fid(), OP_BMUL, args.size(), args.data()); }
+    app* mk_bv_mul(expr_ref_vector const& args) const { return m_manager.mk_app(get_fid(), OP_BMUL, args.size(), args.data()); }
+    app* mk_bv_mul(expr_ref_buffer const& args) const { return m_manager.mk_app(get_fid(), OP_BMUL, args.size(), args.data()); }
+    app * mk_bv_udiv(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUDIV, arg1, arg2); }
+    app * mk_bv_udiv_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUDIV_I, arg1, arg2); }
+    app * mk_bv_udiv0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BUDIV0, arg); }
+    app * mk_bv_sdiv(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSDIV, arg1, arg2); }
+    app * mk_bv_sdiv_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSDIV_I, arg1, arg2); }
+    app * mk_bv_sdiv0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BSDIV0, arg); }
+    app * mk_bv_srem_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSREM_I, arg1, arg2); }
+    app * mk_bv_srem0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BSREM0, arg); }
+    app * mk_bv_urem_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BUREM_I, arg1, arg2); }
+    app * mk_bv_urem0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BUREM0, arg); }
+    app * mk_bv_smod_i(expr * arg1, expr * arg2) const { return m_manager.mk_app(get_fid(), OP_BSMOD_I, arg1, arg2); }
+    app * mk_bv_smod0(expr * arg) const { return m_manager.mk_app(get_fid(), OP_BSMOD0, arg); }
     app * mk_zero_extend(unsigned n, expr* e) {
         parameter p(n);
         return m_manager.mk_app(get_fid(), OP_ZERO_EXT, 1, &p, 1, &e);
@@ -426,15 +565,78 @@ public:
     app * mk_bv_ashr(expr* arg1, expr* arg2) { return m_manager.mk_app(get_fid(), OP_BASHR, arg1, arg2); }
     app * mk_bv_lshr(expr* arg1, expr* arg2) { return m_manager.mk_app(get_fid(), OP_BLSHR, arg1, arg2); }
 
-    app * mk_bv2int(expr* e);
+    app * mk_ubv2int(expr* e) const;
+    app * mk_sbv2int(expr* e) const;
+    app * mk_sbv2int_as_ubv2int(expr* e);
+    app * mk_int2bv(unsigned sz, expr* e) const;
 
-    app * mk_bvsmul_no_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_NO_OVFL, n, m); }
-    app * mk_bvsmul_no_udfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_NO_UDFL, n, m); }
-    app * mk_bvumul_no_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BUMUL_NO_OVFL, n, m); }
+    app* mk_bv_rotate_left(expr* arg1, expr* arg2) { return m_manager.mk_app(get_fid(), OP_EXT_ROTATE_LEFT, arg1, arg2); }
+    app* mk_bv_rotate_right(expr* arg1, expr* arg2) { return m_manager.mk_app(get_fid(), OP_EXT_ROTATE_RIGHT, arg1, arg2); }
+    app* mk_bv_rotate_left(expr* arg, unsigned n);
+    app* mk_bv_rotate_right(expr* arg, unsigned n);
 
-    app * mk_bv(unsigned n, expr* const* es) { return m_manager.mk_app(get_fid(), OP_MKBV, n, es); }
+    // TODO: all these binary ops commute (right?) but it'd be more logical to swap `n` & `m` in the `return`
+    app * mk_bvsmul_no_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_NO_OVFL, m, n); }
+    app * mk_bvsmul_no_udfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_NO_UDFL, m, n); }
+    app * mk_bvumul_no_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BUMUL_NO_OVFL, m, n); }
+    app * mk_bvsmul_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSMUL_OVFL, m, n); }
+    app * mk_bvumul_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BUMUL_OVFL, m, n); }
+    app * mk_bvsdiv_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSDIV_OVFL, m, n); }
+    app * mk_bvneg_ovfl(expr* m) { return m_manager.mk_app(get_fid(), OP_BNEG_OVFL, m); }
+    app * mk_bvuadd_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BUADD_OVFL, m, n); }
+    app * mk_bvsadd_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSADD_OVFL, m, n); }
+    app * mk_bvusub_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BUSUB_OVFL, m, n); }
+    app * mk_bvssub_ovfl(expr* m, expr* n) { return m_manager.mk_app(get_fid(), OP_BSSUB_OVFL, m, n); }
+
+    app * mk_bit2bool(expr* e, unsigned idx) { parameter p(idx); return m_manager.mk_app(get_fid(), OP_BIT2BOOL, 1, &p, 1, &e); }
+
+    private:
+    void log_bv_from_exprs(app * r, unsigned n, expr* const* es) {
+        if (m_manager.has_trace_stream()) {
+            for (unsigned i = 0; i < n; ++i) {
+                if (!m_manager.is_true(es[i]) && !m_manager.is_false(es[i]))
+                    return;
+            } 
+
+            if (m_plugin->log_constant_meaning_prelude(r)) {
+                if (n % 4 == 0) {
+                    m_manager.trace_stream() << " #x";
+
+                    m_manager.trace_stream() << std::hex;
+                    uint8_t hexDigit = 0;
+                    unsigned curLength = (4 - n % 4) % 4;
+                    for (unsigned i = 0; i < n; ++i) {
+                        hexDigit <<= 1;
+                        ++curLength;
+                        if (m_manager.is_true(es[i])) {
+                            hexDigit |= 1;
+                        }
+                        if (curLength == 4) {
+                            m_manager.trace_stream() << hexDigit;
+                            hexDigit = 0;
+                        }
+                    }
+                    m_manager.trace_stream() << std::dec;
+                } else {
+                    m_manager.trace_stream() << " #b";
+                    for (unsigned i = 0; i < n; ++i) {
+                        m_manager.trace_stream() << (m_manager.is_true(es[i]) ? 1 : 0);
+                    }
+                }
+
+                m_manager.trace_stream() << ")\n";
+            }
+        }
+    }
+
+public:
+    app * mk_bv(unsigned n, expr* const* es) {
+        app * r = m_manager.mk_app(get_fid(), OP_MKBV, n, es);
+
+        log_bv_from_exprs(r, n, es);
+
+        return r;
+    }
 
 };
-
-#endif /* BV_DECL_PLUGIN_H_ */
 

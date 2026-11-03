@@ -17,12 +17,15 @@ Author:
 Notes:
 
 --*/
-#ifndef _SAT_LOOKAHEAD_H_
-#define _SAT_LOOKAHEAD_H_
+#pragma once
 
-// #define OLD_NARY 0
 
-#include "sat_elim_eqs.h"
+#include "util/small_object_allocator.h"
+#include "sat/sat_elim_eqs.h"
+
+namespace pb {
+    class solver;
+}
 
 namespace sat {
 
@@ -43,7 +46,7 @@ namespace sat {
         return out;
     }
 
-    enum lookahead_mode {
+    enum class lookahead_mode {
         searching,         // normal search
         lookahead1,        // lookahead mode
         lookahead2         // double lookahead
@@ -54,7 +57,6 @@ namespace sat {
         case lookahead_mode::searching:  return out << "searching";
         case lookahead_mode::lookahead1: return out << "lookahead1";
         case lookahead_mode::lookahead2: return out << "lookahead2";
-        default: break;
         }
         return out;
     }
@@ -67,7 +69,7 @@ namespace sat {
         reslimit   m_rlimit;
 
         friend class ccc;
-        friend class ba_solver;
+        friend class pb::solver;
 
         struct config {
             double   m_dl_success;
@@ -101,8 +103,8 @@ namespace sat {
                 m_delta_rho = (double)0.7;
                 m_dl_max_iterations = 2;
                 m_tc1_limit = 10000000;
-                m_reward_type = ternary_reward;
-                m_cube_cutoff = adaptive_freevars_cutoff;
+                m_reward_type = reward_t::ternary_reward;
+                m_cube_cutoff = cutoff_t::adaptive_freevars_cutoff;
                 m_cube_depth = 10;
                 m_cube_fraction = 0.4;
                 m_cube_freevars = 0.8;
@@ -113,15 +115,13 @@ namespace sat {
         };
 
         struct prefix {
-            unsigned m_prefix;
-            unsigned m_length;
-            prefix(): m_prefix(0), m_length(0) {}            
+            unsigned m_prefix = 0;
+            unsigned m_length = 0;
         };
 
         struct lit_info {
-            double     m_lookahead_reward;
-            unsigned  m_double_lookahead;
-            lit_info(): m_lookahead_reward(0), m_double_lookahead(0) {}
+            double     m_lookahead_reward = 0;
+            unsigned  m_double_lookahead = 0;
         };
 
         struct stats {
@@ -175,12 +175,13 @@ namespace sat {
 
         struct cube_state {
             bool           m_first;
-            svector<bool>  m_is_decision;
+            bool_vector  m_is_decision;
             literal_vector m_cube;
             double         m_freevars_threshold;
             double         m_psat_threshold;
             unsigned       m_conflicts;
             unsigned       m_cutoffs;
+            unsigned       m_backtracks;
             cube_state() { reset(); }
             void reset() { 
                 m_first = true;
@@ -190,7 +191,7 @@ namespace sat {
                 m_psat_threshold = dbl_max;
                 reset_stats();
             }
-            void reset_stats() { m_conflicts = 0; m_cutoffs = 0; }
+            void reset_stats() { m_conflicts = 0; m_cutoffs = 0; m_backtracks = 0;}
             void inc_conflict() { ++m_conflicts; }
             void inc_cutoff() { ++m_cutoffs; }
         };
@@ -198,8 +199,8 @@ namespace sat {
         config                 m_config;
         double                 m_delta_trigger;
         double                 m_delta_decrease;
+        double                 m_delta_fraction;
 
-        drat                   m_drat;
         literal_vector         m_assumptions;
 
         literal_vector         m_trail;         // trail of units
@@ -246,6 +247,7 @@ namespace sat {
         stats                  m_stats;
         model                  m_model; 
         cube_state             m_cube_state;
+        unsigned               m_max_ops;       // cap number of operations used to compute lookahead reward.
         //scoped_ptr<extension>  m_ext;
  
         // ---------------------------------------
@@ -348,7 +350,7 @@ namespace sat {
             candidate(bool_var v, double r): m_var(v), m_rating(r) {}
         };
         svector<candidate> m_candidates;
-        uint_set           m_select_lookahead_vars;
+        tracked_uint_set   m_select_lookahead_vars;
 
         double get_rating(bool_var v) const { return m_rating[v]; }
         double get_rating(literal l) const { return get_rating(l.var()); }
@@ -433,7 +435,7 @@ namespace sat {
         void set_min(literal v, literal u) { m_dfs[v.index()].m_min = u; }
         void set_rank(literal v, unsigned r) { m_dfs[v.index()].m_rank = r; }
         void set_height(literal v, unsigned h) { m_dfs[v.index()].m_height = h; }
-        void set_parent(literal v, literal p) { TRACE("scc", tout << v << " <- " << p << "\n";); m_dfs[v.index()].m_parent = p; }
+        void set_parent(literal v, literal p) { TRACE(scc, tout << v << " <- " << p << "\n";); m_dfs[v.index()].m_parent = p; }
         void set_vcomp(literal v, literal u) { m_dfs[v.index()].m_vcomp = u; }
         void get_scc(literal v);
         void activate_scc(literal l);
@@ -471,7 +473,7 @@ namespace sat {
         watch_list& get_wlist(literal l) { return m_watches[l.index()]; }
         watch_list const& get_wlist(literal l) const { return m_watches[l.index()]; }
 
-        // new clause managment:
+        // new clause management:
         void add_ternary(literal u, literal v, literal w);
         void propagate_ternary(literal l);
         lbool propagate_ternary(literal l1, literal l2);
@@ -509,6 +511,7 @@ namespace sat {
         void propagate_binary(literal l);
         void propagate();
         literal choose();
+        literal choose_base();
         void compute_lookahead_reward();
         literal select_literal();
         void update_binary_clause_reward(literal l1, literal l2);
@@ -522,11 +525,11 @@ namespace sat {
         void update_lookahead_reward(literal l, unsigned level);
         bool dl_enabled(literal l) const { return m_lits[l.index()].m_double_lookahead != m_istamp_id; }
         void dl_disable(literal l) { m_lits[l.index()].m_double_lookahead = m_istamp_id; }
-        bool dl_no_overflow(unsigned base) const { return base + 2 * m_lookahead.size() * static_cast<uint64_t>(m_config.m_dl_max_iterations + 1) < c_fixed_truth; }
+        bool dl_no_overflow(unsigned base) const { return base + static_cast < uint64_t>(2 * m_lookahead.size()) * static_cast <uint64_t>(m_config.m_dl_max_iterations + 1) < c_fixed_truth; }
 
         unsigned do_double(literal l, unsigned& base);
         unsigned double_look(literal l, unsigned& base);
-        void set_conflict() { TRACE("sat", tout << "conflict\n";); m_inconsistent = true; }
+        void set_conflict() { TRACE(sat, tout << "conflict\n";); m_inconsistent = true; }
         bool inconsistent() const { return m_inconsistent; }
 
         unsigned scope_lvl() const { return m_trail_lim.size(); }
@@ -537,7 +540,7 @@ namespace sat {
         void assign(literal l);
         void propagated(literal l);
         bool backtrack(literal_vector& trail);
-        bool backtrack(literal_vector& trail, svector<bool> & is_decision);
+        bool backtrack(literal_vector& trail, bool_vector & is_decision);
         lbool search();
         void init_model();
         std::ostream& display_binary(std::ostream& out) const;
@@ -558,11 +561,12 @@ namespace sat {
 
         double psat_heur();
 
+        bool should_cutoff(unsigned depth);
+
     public:
         lookahead(solver& s) : 
             m_s(s),
             m_num_vars(s.num_vars()),
-            m_drat(s),
             m_num_tc1(0),
             m_level(2),
             m_last_prefix_length(0),
@@ -603,6 +607,13 @@ namespace sat {
 
         std::ostream& display(std::ostream& out) const;
         std::ostream& display_summary(std::ostream& out) const;
+
+        /**
+           \brief display lookahead scores as a sequence of:
+           <variable_id:uint> <true_branch_score:double> <false_branch_score:double>\n
+        */
+        void display_lookahead_scores(std::ostream& out);
+
         model const& get_model();
 
         void collect_statistics(statistics& st) const;
@@ -610,10 +621,15 @@ namespace sat {
         double literal_occs(literal l);
         double literal_big_occs(literal l);
 
+        /**
+           \brief retrieve clauses as one vector of literals.
+           clauses are separated by null-literal
+        */
+        void get_clauses(literal_vector& clauses, unsigned max_clause_size);
+
         sat::config const& get_config() const { return m_s.get_config(); }
               
     };
 }
 
-#endif
 

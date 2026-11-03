@@ -27,15 +27,15 @@ struct arith_bounds_tactic : public tactic {
                     /* out */ goal_ref_buffer & result) override {        
         bounds_arith_subsumption(in, result);
     }
+
+    char const* name() const override { return "arith_bounds"; }
     
     tactic* translate(ast_manager & mgr) override {
         return alloc(arith_bounds_tactic, mgr);
     }
     
     void checkpoint() {
-        if (m.canceled()) {
-            throw tactic_exception(m.limit().get_cancel_msg());
-        }
+        tactic::checkpoint(m);
     }
     
     
@@ -61,7 +61,7 @@ struct arith_bounds_tactic : public tactic {
             return true;
         }
         if ((!is_negated && (a.is_lt(e, e1, e2) || a.is_gt(e, e2, e1))) ||
-                 (is_negated && (a.is_le(e, e2, e1) || a.is_ge(e, e1, e2)))) {
+            (is_negated && (a.is_le(e, e2, e1) || a.is_ge(e, e1, e2)))) {
             is_strict = true;
             return true;
         }
@@ -76,7 +76,7 @@ struct arith_bounds_tactic : public tactic {
         goal_ref s(g); // initialize result.
         obj_map<expr, info> lower, upper;
         expr* e1, *e2;
-        TRACE("arith_subsumption", s->display(tout); );
+        TRACE(arith_subsumption, s->display(tout); );
         for (unsigned i = 0; i < s->size(); ++i) {
             checkpoint();
             expr* lemma = s->form(i);
@@ -140,7 +140,7 @@ struct arith_bounds_tactic : public tactic {
         }
         s->elim_true();
         result.push_back(s.get());
-        TRACE("arith_subsumption", s->display(tout); );
+        TRACE(arith_subsumption, s->display(tout); );
     }
 
     void cleanup() override {}

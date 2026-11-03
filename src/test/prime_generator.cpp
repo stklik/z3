@@ -18,13 +18,15 @@ Notes:
 --*/
 #include "util/mpz.h"
 #include "util/prime_generator.h"
+#include <iostream>
 
 void tst_prime_generator() {
     unsynch_mpz_manager m;
     scoped_mpz sqrt_p(m);
 
     prime_generator gen;
-    for (unsigned i = 0; i < 10000; i++) {
+    gen.initialize();
+    for (unsigned i = 0; i < 10000; ++i) {
         uint64_t p = gen(i);
         std::cout << p << ", ";
         if (i % 11 == 0) std::cout << "\n";
@@ -34,9 +36,10 @@ void tst_prime_generator() {
         m.set(sqrt_p, p);
         m.root(sqrt_p, 2);
         uint64_t k = m.get_uint64(sqrt_p);
-        for (uint64_t i = 2; i <= k; i++) {
+        for (uint64_t i = 2; i <= k; ++i) {
             ENSURE(p % i != 0);
         }
     }
+    gen.finalize();
     std::cout << std::endl;
 }

@@ -46,7 +46,7 @@ Copyright (c) 2015 Microsoft Corporation
 //   -> \/_i R_C(t_i) & phi[t_i/x]  \/ phi[false, true]
 // 
 //  Justification: 
-//  - We will asume that each of t_i, s_j are constructor terms.
+//  - We will assume that each of t_i, s_j are constructor terms.
 //  - We can assume that x \notin t_i, x \notin s_j, or otherwise use simplification.
 //  - We can assume that x occurs only in equalities or disequalities, or the recognizer, since 
 //    otherwise, we could simplify equalities, or QE does not apply.
@@ -139,7 +139,7 @@ namespace qe {
             func_decl* f = a->get_decl();
             if (m_util.is_recognizer(f) && a->get_arg(0) == x) {
                 m_recognizers.push_back(a);
-                TRACE("qe", tout << "add recognizer:" << mk_pp(a, m) << "\n";);
+                TRACE(qe, tout << "add recognizer:" << mk_pp(a, m) << "\n";);
                 return true;
             }
             if (!m.is_eq(a)) {
@@ -169,7 +169,7 @@ namespace qe {
 
         unsigned num_neq_terms() const { return m_neqs.size(); }
         expr* neq_term(unsigned i) const { return m_neqs[i]; }
-        expr* const* neq_terms() const { return m_neqs.c_ptr(); }
+        expr* const* neq_terms() const { return m_neqs.data(); }
 
         unsigned num_recognizers() { return m_recognizers.size(); }
         app*   recognizer(unsigned i) { return m_recognizers[i].get(); }
@@ -222,7 +222,7 @@ namespace qe {
         }
 
         void add_atom(app* a, bool is_pos) {
-            TRACE("qe", tout << "add atom:" << mk_pp(a, m) << " " << (is_pos?"pos":"neg") << "\n";);
+            TRACE(qe, tout << "add atom:" << mk_pp(a, m) << " " << (is_pos?"pos":"neg") << "\n";);
             if (is_pos) {
                 m_eq_atoms.push_back(a);
             }
@@ -336,7 +336,7 @@ namespace qe {
             for_each_expr(*this, fml.get());
             if (m_change) {
                 fml = get_expr(fml.get());  
-                TRACE("qe", tout << "lift:\n" << mk_pp(fml.get(), m) << "\n";);
+                TRACE(qe, tout << "lift:\n" << mk_pp(fml.get(), m) << "\n";);
             }
             return m_change;
         }
@@ -388,9 +388,9 @@ namespace qe {
                 expr* l_i = l->get_arg(i);
                 conj.push_back(m.mk_eq(l_i, r_i));                
             }
-            expr* e = m.mk_and(conj.size(), conj.c_ptr());
+            expr* e = m.mk_and(conj);
             m_map.insert(a, e, nullptr);
-            TRACE("qe", tout << "replace: " << mk_pp(a, m) << " ==> \n" << mk_pp(e, m) << "\n";);
+            TRACE(qe, tout << "replace: " << mk_pp(a, m) << " ==> \n" << mk_pp(e, m) << "\n";);
             return true;
         }
 
@@ -466,7 +466,7 @@ namespace qe {
         void assign(contains_app& x, expr* fml, rational const& vl) override {
             sort* s = x.x()->get_decl()->get_range();
             SASSERT(m_datatype_util.is_datatype(s));
-            TRACE("qe", tout << mk_pp(x.x(), m) << " " << vl << "\n";);
+            TRACE(qe, tout << mk_pp(x.x(), m) << " " << vl << "\n";);
             if (m_datatype_util.is_recursive(s)) {
                 assign_rec(x, fml, vl);
             }
@@ -478,7 +478,7 @@ namespace qe {
         void subst(contains_app& x, rational const& vl, expr_ref& fml, expr_ref* def) override {
             sort* s = x.x()->get_decl()->get_range();
             SASSERT(m_datatype_util.is_datatype(s));
-            TRACE("qe", tout << mk_pp(x.x(), m) << " " << vl << "\n";);
+            TRACE(qe, tout << mk_pp(x.x(), m) << " " << vl << "\n";);
             if (m_datatype_util.is_recursive(s)) {
                 subst_rec(x, vl, fml, def);
             }
@@ -541,7 +541,7 @@ namespace qe {
                 vars.push_back(fresh_x.get());
                 sub->second.push_back(fresh_x.get());
             }
-            app_ref t(m.mk_app(c, vars.size(), vars.c_ptr()), m);
+            app_ref t(m.mk_app(c, vars.size(), vars.data()), m);
             m_trail.push_back(x.x());
             m_trail.push_back(c);
             m_trail.push_back(t);
@@ -612,7 +612,7 @@ namespace qe {
                 num_branches = rational(eqs.num_eqs() + 1);
                 return true;
             }
-            TRACE("qe", tout << "could not get number of branches " << mk_pp(x.x(), m) << "\n";);
+            TRACE(qe, tout << "could not get number of branches " << mk_pp(x.x(), m) << "\n";);
             return false;
         }
 
@@ -650,13 +650,13 @@ namespace qe {
             SASSERT(idx <= eqs.num_eqs());
             
             if (idx < eqs.num_eqs()) {
-                expr* t = eqs.eq(idx);
-                m_ctx.add_constraint(true, m.mk_eq(x, t));
+                expr_ref eq(m.mk_eq(x, eqs.eq(idx)), m);
+                m_ctx.add_constraint(true, eq);
             }
             else {
                 for (unsigned i = 0; i < eqs.num_eqs(); ++i) {
-                    expr* t = eqs.eq(i);
-                    m_ctx.add_constraint(true, m.mk_not(m.mk_eq(x, t)));
+                    expr_ref ne(m.mk_not(m.mk_eq(x, eqs.eq(i))), m);
+                    m_ctx.add_constraint(true, ne);
                 }
             }
         }
@@ -667,7 +667,7 @@ namespace qe {
             SASSERT(m_datatype_util.is_datatype(s));
             func_decl* c = nullptr, *r = nullptr;
 
-            TRACE("qe", tout << mk_pp(x, m) << " " << vl << " " << mk_pp(fml, m) << " " << (def != 0) << "\n";);
+            TRACE(qe, tout << mk_pp(x, m) << " " << vl << " " << mk_pp(fml, m) << " " << (def != 0) << "\n";);
             //
             // Add recognizer to formula.
             // Introduce auxiliary variable to eliminate.
@@ -681,13 +681,13 @@ namespace qe {
                 m_ctx.add_var(fresh_x);
                 m_replace.apply_substitution(x, fresh_x, fml);
                 add_def(fresh_x, def);
-                TRACE("qe", tout << "Add recognizer " << mk_pp(is_c, m) << "\n";);
+                TRACE(qe, tout << "Add recognizer " << mk_pp(is_c, m) << "\n";);
                 return;
             }
 
 
             if (has_selector(contains_x, fml, c)) {
-                TRACE("qe", tout << "Eliminate selector " << mk_ll_pp(c, m) << "\n";);
+                TRACE(qe, tout << "Eliminate selector " << mk_ll_pp(c, m) << "\n";);
                 subst_constructor(contains_x, c, fml, def); 
                 return;
             }
@@ -732,16 +732,16 @@ namespace qe {
                     m_replace.apply_substitution(eqs.neq_atom(i), m.mk_false(), fml);
                 }
                 if (def) {
-                    sort* s = m.get_sort(x);
+                    sort* s = x->get_sort();
                     ptr_vector<sort> sorts;
                     sorts.resize(eqs.num_neq_terms(), s);
-                    func_decl* diag = m.mk_func_decl(symbol("diag"), sorts.size(), sorts.c_ptr(), s);
+                    func_decl* diag = m.mk_func_decl(symbol("diag"), sorts.size(), sorts.data(), s);
                     expr_ref t(m);
                     t = m.mk_app(diag, eqs.num_neq_terms(), eqs.neq_terms());
                     add_def(t, def);
                 }
             }
-            TRACE("qe", tout << "reduced " << mk_pp(fml.get(), m) << "\n";);
+            TRACE(qe, tout << "reduced " << mk_pp(fml.get(), m) << "\n";);
         }
 
         bool get_num_branches_nonrec( contains_app& x, expr* fml, rational& num_branches) {
@@ -751,10 +751,10 @@ namespace qe {
             func_decl* c = nullptr, *r = nullptr;
 
             if (sz != 1 && has_recognizer(x.x(), fml, r, c)) {
-                TRACE("qe", tout << mk_pp(x.x(), m) << " has a recognizer\n";);
+                TRACE(qe, tout << mk_pp(x.x(), m) << " has a recognizer\n";);
                 num_branches = rational(1);
             }        
-            TRACE("qe", tout << mk_pp(x.x(), m) << " branches: " << sz << "\n";);
+            TRACE(qe, tout << mk_pp(x.x(), m) << " branches: " << sz << "\n";);
             return true; 
         }
 
@@ -770,7 +770,7 @@ namespace qe {
             }
             func_decl* c = nullptr, *r = nullptr;
             if (has_recognizer(x, fml, r, c)) {
-                TRACE("qe", tout << mk_pp(x, m) << " has a recognizer\n";);
+                TRACE(qe, tout << mk_pp(x, m) << " has a recognizer\n";);
                 return;
             }
             
@@ -789,7 +789,7 @@ namespace qe {
             SASSERT(!m_datatype_util.is_recursive(s));
             func_decl* c = nullptr, *r = nullptr;
             if (has_recognizer(x.x(), fml, r, c)) {
-                TRACE("qe", tout << mk_pp(x.x(), m) << " has a recognizer\n";);
+                TRACE(qe, tout << mk_pp(x.x(), m) << " has a recognizer\n";);
             }
             else {
                 SASSERT(vl.is_unsigned());

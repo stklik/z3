@@ -4,16 +4,99 @@
 # This file is intended to be consumed by clients who wish to use Z3 from CMake.
 # It can be used by doing `find_package(Z3 config)` from within a
 # `CMakeLists.txt` file. If CMake doesn't find this package automatically you
-# can give it a hint by passing `-DZ3_DIR=<path>` to the CMake invocation where
-# `<path>` is the path to the directory containing this file.
+# can give it a prefix hint through the `Z3_ROOT` CMake variable or environment
+# variable.
 #
 # This file was built for the @CONFIG_FILE_TYPE@.
 ################################################################################
 
-# Exported targets
-include("${CMAKE_CURRENT_LIST_DIR}/Z3Targets.cmake")
 
 @PACKAGE_INIT@
+
+set(_Z3_known_components static shared)
+set(_Z3_find_static FALSE)
+set(_Z3_find_shared FALSE)
+foreach (_Z3_component IN LISTS ${CMAKE_FIND_PACKAGE_NAME}_FIND_COMPONENTS)
+  if (_Z3_component IN_LIST _Z3_known_components)
+    set(_Z3_find_${_Z3_component} TRUE)
+  else()
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+      "Z3 does not recognize component `${_Z3_component}`.")
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    return()
+  endif()
+endforeach()
+
+if (_Z3_find_static AND _Z3_find_shared)
+  set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+    "Z3 components `static` and `shared` are mutually exclusive.")
+  set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+  return()
+endif()
+
+set(_Z3_static_targets "${CMAKE_CURRENT_LIST_DIR}/Z3-static-targets.cmake")
+set(_Z3_shared_targets "${CMAKE_CURRENT_LIST_DIR}/Z3-shared-targets.cmake")
+
+if (_Z3_find_static)
+  set(_Z3_variant static)
+elseif (_Z3_find_shared)
+  set(_Z3_variant shared)
+elseif (DEFINED Z3_SHARED_LIBS)
+  if (Z3_SHARED_LIBS)
+    set(_Z3_variant shared)
+  else()
+    set(_Z3_variant static)
+  endif()
+elseif (DEFINED BUILD_SHARED_LIBS)
+  if (BUILD_SHARED_LIBS AND EXISTS "${_Z3_shared_targets}")
+    set(_Z3_variant shared)
+  elseif (NOT BUILD_SHARED_LIBS AND EXISTS "${_Z3_static_targets}")
+    set(_Z3_variant static)
+  elseif (EXISTS "${_Z3_shared_targets}")
+    set(_Z3_variant shared)
+  else()
+    set(_Z3_variant static)
+  endif()
+elseif (EXISTS "${_Z3_shared_targets}")
+  set(_Z3_variant shared)
+else()
+  set(_Z3_variant static)
+endif()
+
+set(_Z3_targets "${_Z3_${_Z3_variant}_targets}")
+if (NOT EXISTS "${_Z3_targets}")
+  set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+    "Z3 `${_Z3_variant}` libraries were requested but not found.")
+  set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+  return()
+endif()
+
+if (TARGET z3::libz3)
+  get_target_property(_Z3_loaded_type z3::libz3 TYPE)
+  if (_Z3_variant STREQUAL "static")
+    set(_Z3_requested_type STATIC_LIBRARY)
+  else()
+    set(_Z3_requested_type SHARED_LIBRARY)
+  endif()
+  if (NOT _Z3_loaded_type STREQUAL _Z3_requested_type)
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+      "Z3 `${_Z3_variant}` libraries were requested, but z3::libz3 was already loaded as a ${_Z3_loaded_type} target.")
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    return()
+  endif()
+endif()
+
+if (_Z3_variant STREQUAL "static")
+  include("${CMAKE_CURRENT_LIST_DIR}/Z3-static-dependencies.cmake")
+  if (DEFINED ${CMAKE_FIND_PACKAGE_NAME}_FOUND
+      AND NOT ${CMAKE_FIND_PACKAGE_NAME}_FOUND)
+    return()
+  endif()
+  set(Z3_SHARED_LIBS FALSE)
+else()
+  set(Z3_SHARED_LIBS TRUE)
+endif()
+include("${_Z3_targets}")
 
 # Version information
 set(Z3_VERSION_MAJOR @Z3_VERSION_MAJOR@)

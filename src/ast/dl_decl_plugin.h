@@ -16,9 +16,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_DECL_PLUGIN_H_
-#define DL_DECL_PLUGIN_H_
+#pragma once
 
+#include <optional>
 #include "ast/ast.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/bv_decl_plugin.h"
@@ -102,7 +102,6 @@ namespace datalog {
     public:
 
         dl_decl_plugin();
-        ~dl_decl_plugin() override {}
 
         decl_plugin * mk_fresh() override { return alloc(dl_decl_plugin); }
         
@@ -139,28 +138,14 @@ namespace datalog {
     };
 
     class dl_decl_util {
-        /**
-        Some plugins need to be registered in the ast_manager before we 
-        create some of the member objects (the bv_util requires bv plugin 
-        installed).
-        
-        Doing this in the constructor of the dl_decl_plugin object is too late (as
-        member objects are created before we get into the constructor), so we 
-        have this auxiliary object that is the first object of the context,
-        so that it gets created first. It's only purpose is that in its 
-        constructor the required plugins are added to the ast manager.
-        */
-        class ast_plugin_registrator {
-        public:
-            ast_plugin_registrator(ast_manager& m);
-        };
-
-        ast_plugin_registrator m_plugin_registrator;
 
         ast_manager& m;
-        arith_util   m_arith;
-        bv_util      m_bv;
-        family_id    m_fid;
+        mutable scoped_ptr<arith_util>   m_arith;
+        mutable scoped_ptr<bv_util>      m_bv;
+        mutable family_id                m_fid;
+
+        bv_util& bv() const;
+        arith_util& arith() const;
 
     public:
         dl_decl_util(ast_manager& m);
@@ -172,9 +157,9 @@ namespace datalog {
 
         app* mk_le(expr* a, expr* b);
 
-        bool is_lt(const expr* a) const { return is_app_of(a, m_fid, OP_DL_LT); }
+        bool is_lt(const expr* a) const { return is_app_of(a, get_family_id(), OP_DL_LT); }
 
-        bool is_numeral(const expr* c) const { return is_app_of(c, m_fid, OP_DL_CONSTANT); }
+        bool is_numeral(const expr* c) const { return is_app_of(c, get_family_id(), OP_DL_CONSTANT); }
 
         bool is_numeral(const expr* e, uint64_t& v) const;
 
@@ -188,18 +173,18 @@ namespace datalog {
 
         sort* mk_sort(const symbol& name, uint64_t  domain_size);
 
-        bool try_get_size(const sort *, uint64_t& size) const;
+        std::optional<uint64_t> try_get_size(const sort *) const;
 
         bool is_finite_sort(sort* s) const { 
-            return is_sort_of(s, m_fid, DL_FINITE_SORT); 
+            return is_sort_of(s, get_family_id(), DL_FINITE_SORT); 
         }
 
         bool is_finite_sort(expr* e) const { 
-            return is_finite_sort(m.get_sort(e)); 
+            return is_finite_sort(e->get_sort()); 
         }
 
         bool is_rule_sort(sort* s) const { 
-            return is_sort_of(s, m_fid, DL_RULE_SORT); 
+            return is_sort_of(s, get_family_id(), DL_RULE_SORT); 
         }
 
         sort* mk_rule_sort();
@@ -210,10 +195,9 @@ namespace datalog {
 
         ast_manager& get_manager() const { return m; }
 
-        family_id get_family_id() const { return m_fid; }
+        family_id get_family_id() const;
 
     };
     
-};
-#endif /* DL_DECL_PLUGIN_H_ */
+}
 

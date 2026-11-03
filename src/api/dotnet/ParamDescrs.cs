@@ -17,15 +17,14 @@ Notes:
     
 --*/
 
+using System.Diagnostics;
 using System;
-using System.Diagnostics.Contracts;
 
 namespace Microsoft.Z3
 {
     /// <summary>
     /// A ParamDescrs describes a set of parameters.
     /// </summary>
-    [ContractVerification(true)]
     public class ParamDescrs : Z3Object
     {
         /// <summary>
@@ -33,7 +32,7 @@ namespace Microsoft.Z3
         /// </summary>
         public void Validate(Params p)
         {
-            Contract.Requires(p != null);
+            Debug.Assert(p != null);
             Native.Z3_params_validate(Context.nCtx, p.NativeObject, NativeObject);
         }
 
@@ -42,7 +41,7 @@ namespace Microsoft.Z3
         /// </summary>
         public Z3_param_kind GetKind(Symbol name)
         {
-            Contract.Requires(name != null);
+            Debug.Assert(name != null);
             return (Z3_param_kind)Native.Z3_param_descrs_get_kind(Context.nCtx, NativeObject, name.NativeObject);
         }
 
@@ -51,7 +50,7 @@ namespace Microsoft.Z3
         /// </summary>
         public string GetDocumentation(Symbol name)
         {
-            Contract.Requires(name != null);
+            Debug.Assert(name != null);
             return Native.Z3_param_descrs_get_documentation(Context.nCtx, NativeObject, name.NativeObject);
         }
 
@@ -91,34 +90,21 @@ namespace Microsoft.Z3
         internal ParamDescrs(Context ctx, IntPtr obj)
             : base(ctx, obj)
         {
-            Contract.Requires(ctx != null);
-        }
-
-        internal class DecRefQueue : IDecRefQueue
-        {
-            public DecRefQueue() : base() { }
-            public DecRefQueue(uint move_limit) : base(move_limit) { }
-            internal override void IncRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_param_descrs_inc_ref(ctx.nCtx, obj);
-            }
-
-            internal override void DecRef(Context ctx, IntPtr obj)
-            {
-                Native.Z3_param_descrs_dec_ref(ctx.nCtx, obj);
-            }
-        };        
+            Debug.Assert(ctx != null);
+        }       
 
         internal override void IncRef(IntPtr o)
         {
-            Context.ParamDescrs_DRQ.IncAndClear(Context, o);
-            base.IncRef(o);
+            Native.Z3_param_descrs_inc_ref(Context.nCtx, o);
         }
 
         internal override void DecRef(IntPtr o)
         {
-            Context.ParamDescrs_DRQ.Add(o);
-            base.DecRef(o);
+            lock (Context)
+            {
+                if (Context.nCtx != IntPtr.Zero)
+                    Native.Z3_param_descrs_dec_ref(Context.nCtx, o);
+            }
         }
         #endregion
     }

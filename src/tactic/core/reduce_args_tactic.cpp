@@ -17,12 +17,13 @@ Notes:
 
 --*/
 #include "tactic/tactical.h"
-#include "util/cooperate.h"
 #include "ast/ast_smt2_pp.h"
+#include "ast/ast_util.h"
+#include "ast/array_decl_plugin.h"
 #include "ast/has_free_vars.h"
 #include "util/map.h"
 #include "ast/rewriter/rewriter_def.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 
 /**
    \brief Reduce the number of arguments in function applications.
@@ -61,36 +62,13 @@ Notes:
    where f_1_2, f_1_3 and f_2_3 are new function symbols.
    Using the new map, we can replace the occurrences of f.
 */
+namespace {
+
 class reduce_args_tactic : public tactic {
-    struct     imp;
-    imp *      m_imp;
-public:
-    reduce_args_tactic(ast_manager & m);
-
-    tactic * translate(ast_manager & m) override {
-        return alloc(reduce_args_tactic, m);
-    }
-
-    ~reduce_args_tactic() override;
-    
-    void operator()(goal_ref const & g, goal_ref_buffer & result) override;
-    void cleanup() override;
-};
-
-tactic * mk_reduce_args_tactic(ast_manager & m, params_ref const & p) {
-    return clean(alloc(reduce_args_tactic, m));
-}
-
-struct reduce_args_tactic::imp {
-    ast_manager &            m_manager;
+    expr_ref_vector          m_vars;
+    ast_manager &            m;
     bv_util                  m_bv;
-
-    ast_manager & m() const { return m_manager; }
-    
-    imp(ast_manager & m):
-        m_manager(m),
-        m_bv(m) {
-    }
+    array_util               m_ar;
 
     static bool is_var_plus_offset(ast_manager& m, bv_util& bv, expr* e, expr*& base) {
         expr *lhs, *rhs;
@@ -113,76 +91,81 @@ struct reduce_args_tactic::imp {
     }
 
     void checkpoint() { 
-        if (m_manager.canceled())
-            throw tactic_exception(m_manager.limit().get_cancel_msg());
-        cooperate("reduce-args");
+        tactic::checkpoint(m);
     }
     
     struct find_non_candidates_proc {
-        ast_manager &              m_manager;
+        ast_manager &              m;
         bv_util &                  m_bv;
-        obj_hashtable<func_decl> & m_non_cadidates;
+        array_util &               m_ar;
+        obj_hashtable<func_decl> & m_non_candidates;
         
-        find_non_candidates_proc(ast_manager & m, bv_util & bv, obj_hashtable<func_decl> & non_cadidates):
-            m_manager(m),
+        find_non_candidates_proc(ast_manager & m, bv_util & bv, array_util& ar, obj_hashtable<func_decl> & non_candidates):
+            m(m),
             m_bv(bv),
-            m_non_cadidates(non_cadidates) {
+            m_ar(ar),
+            m_non_candidates(non_candidates) {
         }
         
         void operator()(var * n) {}
         
-        void operator()(quantifier * n) {}
+        void operator()(quantifier *n) {}
         
         void operator()(app * n) {
+            func_decl * d;
+            if (m_ar.is_as_array(n, d)) {
+                m_non_candidates.insert(d);
+                return;
+            }
             if (n->get_num_args() == 0)
                 return; // ignore constants
-            func_decl * d = n->get_decl();
+            d = n->get_decl();
             if (d->get_family_id() != null_family_id)
                 return; // ignore interpreted symbols
-            if (m_non_cadidates.contains(d))
+            if (m_non_candidates.contains(d))
                 return; // it is already in the set.
             unsigned j    = n->get_num_args();        
             while (j > 0) {
                 --j;
-                if (may_be_unique(m_manager, m_bv, n->get_arg(j)))
+                if (may_be_unique(m, m_bv, n->get_arg(j)))
                     return;
             }  
-            m_non_cadidates.insert(d);
+            m_non_candidates.insert(d);
         }
     };
 
     /**
-       \brief Populate the table non_cadidates with function declarations \c f
+       \brief Populate the table non_candidates with function declarations \c f
        such that there is a function application (f t1 ... tn) where t1 ... tn are not values.
     */
     void find_non_candidates(goal const & g, obj_hashtable<func_decl> & non_candidates) {
         non_candidates.reset();
-        find_non_candidates_proc proc(m_manager, m_bv, non_candidates);
+        for (expr* v : m_vars)
+            if (is_app(v))
+                non_candidates.insert(to_app(v)->get_decl());
+        find_non_candidates_proc proc(m, m_bv, m_ar, non_candidates);
         expr_fast_mark1 visited;
         unsigned sz = g.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             checkpoint();
             quick_for_each_expr(proc, visited, g.form(i));
         }
         
-        TRACE("reduce_args", tout << "non_candidates:\n";
-              obj_hashtable<func_decl>::iterator it  = non_candidates.begin();
-              obj_hashtable<func_decl>::iterator end = non_candidates.end();
-              for (; it != end; ++it) {
-                  func_decl * d = *it;
-                  tout << d->get_name() << "\n";
-              });
+        TRACE(reduce_args, tout << "non_candidates:\n";
+                for (func_decl* d : non_candidates)
+                    tout << d->get_name() << "\n";
+              );
     }
 
     struct populate_decl2args_proc {
-        ast_manager &                     m_manager;
+        ast_manager &                     m;
         bv_util &                         m_bv;
-        obj_hashtable<func_decl> &        m_non_cadidates;
+        obj_hashtable<func_decl> &        m_non_candidates;
         obj_map<func_decl, bit_vector> &  m_decl2args;    
         obj_map<func_decl, svector<expr*> > m_decl2base; // for args = base + offset
 
         populate_decl2args_proc(ast_manager & m, bv_util & bv, obj_hashtable<func_decl> & nc, obj_map<func_decl, bit_vector> & d):
-            m_manager(m), m_bv(bv), m_non_cadidates(nc), m_decl2args(d) {}
+            m(m), m_bv(bv), m_non_candidates(nc), m_decl2args(d) {}
         
         void operator()(var * n) {}
         void operator()(quantifier * n) {}
@@ -192,21 +175,21 @@ struct reduce_args_tactic::imp {
             func_decl * d = n->get_decl();
             if (d->get_family_id() != null_family_id)
                 return; // ignore interpreted symbols
-            if (m_non_cadidates.contains(d))
+            if (m_non_candidates.contains(d))
                 return; // declaration is not a candidate
             unsigned j = n->get_num_args();
             obj_map<func_decl, bit_vector>::iterator it = m_decl2args.find_iterator(d);
             expr* base;
             if (it == m_decl2args.end()) {
                 m_decl2args.insert(d, bit_vector());
-                svector<expr*>& bases = m_decl2base.insert_if_not_there2(d, svector<expr*>())->get_data().m_value;
+                svector<expr*>& bases = m_decl2base.insert_if_not_there(d, svector<expr*>());
                 bases.resize(j);
                 it = m_decl2args.find_iterator(d);
                 SASSERT(it != m_decl2args.end());
                 it->m_value.reserve(j);
                 while (j > 0) {
                     --j;
-                    it->m_value.set(j, may_be_unique(m_manager, m_bv, n->get_arg(j), base));
+                    it->m_value.set(j, may_be_unique(m, m_bv, n->get_arg(j), base));
                     bases[j] = base;
                 }
             } else {
@@ -214,7 +197,7 @@ struct reduce_args_tactic::imp {
                 SASSERT(j == it->m_value.size());                        
                 while (j > 0) {
                     --j;
-                    it->m_value.set(j, it->m_value.get(j) && may_be_unique(m_manager, m_bv, n->get_arg(j), base) && bases[j] == base);
+                    it->m_value.set(j, it->m_value.get(j) && may_be_unique(m, m_bv, n->get_arg(j), base) && bases[j] == base);
                 }
             }
         }
@@ -225,37 +208,33 @@ struct reduce_args_tactic::imp {
                             obj_map<func_decl, bit_vector> & decl2args) {
         expr_fast_mark1 visited;
         decl2args.reset();
-        populate_decl2args_proc proc(m_manager, m_bv, non_candidates, decl2args);
+        populate_decl2args_proc proc(m, m_bv, non_candidates, decl2args);
         unsigned sz = g.size();
-        for (unsigned i = 0; i < sz; i++) {
+        for (unsigned i = 0; i < sz; ++i) {
             checkpoint();
             quick_for_each_expr(proc, visited, g.form(i));
         }
         
         // Remove all cases where the simplification is not applicable.
         ptr_buffer<func_decl> bad_decls;
-        obj_map<func_decl, bit_vector>::iterator it  = decl2args.begin();
-        obj_map<func_decl, bit_vector>::iterator end = decl2args.end();
-        for (; it != end; it++) {
+        for (auto const& [k, v] : decl2args) {
             bool is_zero = true;
-            for (unsigned i = 0; i < it->m_value.size() && is_zero ; i++) {
-                if (it->m_value.get(i)) 
+            for (unsigned i = 0; i < v.size() && is_zero; ++i) {
+                if (v.get(i))
                     is_zero = false;
             }
-            if (is_zero) 
-                bad_decls.push_back(it->m_key);
+            if (is_zero)
+                bad_decls.push_back(k);
         }
     
-        ptr_buffer<func_decl>::iterator it2  = bad_decls.begin();
-        ptr_buffer<func_decl>::iterator end2 = bad_decls.end();
-        for (; it2 != end2; ++it2)
-            decl2args.erase(*it2);
+        for (func_decl* a : bad_decls)
+            decl2args.erase(a);
 
-        TRACE("reduce_args", tout << "decl2args:" << std::endl;
-              for (obj_map<func_decl, bit_vector>::iterator it = decl2args.begin() ; it != decl2args.end() ; it++) {
-                  tout << it->m_key->get_name() << ": ";
-                  for (unsigned i = 0 ; i < it->m_value.size() ; i++)
-                      tout << (it->m_value.get(i) ? "1" : "0");                            
+        TRACE(reduce_args, tout << "decl2args:" << std::endl;
+              for (auto const& [k, v] : decl2args) {
+                  tout << k->get_name() << ": ";
+                  for (unsigned i = 0; i < v.size(); ++i)
+                      tout << (v.get(i) ? "1" : "0");
                   tout << std::endl;
               });
     }
@@ -268,7 +247,7 @@ struct reduce_args_tactic::imp {
             // compute the hash-code using only the arguments where m_bv is true.
             unsigned a = 0x9e3779b9;
             unsigned num_args = n->get_num_args();
-            for (unsigned i = 0; i < num_args; i++) {
+            for (unsigned i = 0; i < num_args; ++i) {
                 if (!m_bv.get(i)) 
                     continue; // ignore argument
                 a = hash_u_u(a, n->get_arg(i)->get_id());
@@ -285,7 +264,7 @@ struct reduce_args_tactic::imp {
             // compare only the arguments where m_bv is true
             SASSERT(n1->get_num_args() == n2->get_num_args());
             unsigned num_args = n1->get_num_args();
-            for (unsigned i = 0; i < num_args; i++) {
+            for (unsigned i = 0; i < num_args; ++i) {
                 if (!m_bv.get(i)) 
                     continue; // ignore argument
                 if (n1->get_arg(i) != n2->get_arg(i))
@@ -299,36 +278,34 @@ struct reduce_args_tactic::imp {
     typedef obj_map<func_decl, arg2func *> decl2arg2func_map;
 
     struct reduce_args_ctx { 
-        ast_manager &           m_manager;
+        ast_manager &           m;
         decl2arg2func_map       m_decl2arg2funcs;
 
-        reduce_args_ctx(ast_manager & m): m_manager(m) {
+        reduce_args_ctx(ast_manager & m): m(m) {
         }
         
         ~reduce_args_ctx() {
-            obj_map<func_decl, arg2func *>::iterator it  = m_decl2arg2funcs.begin();
-            obj_map<func_decl, arg2func *>::iterator end = m_decl2arg2funcs.end();
-            for (; it != end; ++it) {
-                arg2func * map = it->m_value;
-                arg2func::iterator it2  = map->begin();
-                arg2func::iterator end2 = map->end();
-                for (; it2 != end2; ++it2) {
-                    m_manager.dec_ref(it2->m_key);
-                    m_manager.dec_ref(it2->m_value);
+            for (auto const& [_, map] : m_decl2arg2funcs) {
+                for (auto const& [k, v] : *map) {
+                    m.dec_ref(k);
+                    m.dec_ref(v);
                 }
                 dealloc(map);
             }
         }
     };
+
+    friend struct reduce_args_rw_cfg;
+    friend struct reduce_args_rw;
     
     struct reduce_args_rw_cfg : public default_rewriter_cfg {
         ast_manager &                    m;
-        imp &                            m_owner;
+        reduce_args_tactic &             m_owner;
         obj_map<func_decl, bit_vector> & m_decl2args;
         decl2arg2func_map &              m_decl2arg2funcs;
         
-        reduce_args_rw_cfg(imp & owner, obj_map<func_decl, bit_vector> & decl2args, decl2arg2func_map & decl2arg2funcs):
-            m(owner.m_manager),
+        reduce_args_rw_cfg(reduce_args_tactic & owner, obj_map<func_decl, bit_vector> & decl2args, decl2arg2func_map & decl2arg2funcs):
+            m(owner.m),
             m_owner(owner),
             m_decl2args(decl2args),
             m_decl2arg2funcs(decl2arg2funcs) {
@@ -350,13 +327,13 @@ struct reduce_args_tactic::imp {
                 return BR_FAILED;
 
             bit_vector & bv = it->m_value;
-            arg2func *& map = m_decl2arg2funcs.insert_if_not_there2(f, 0)->get_data().m_value;
+            arg2func *& map = m_decl2arg2funcs.insert_if_not_there(f, 0);
             if (!map) {
                 map = alloc(arg2func, arg2func_hash_proc(bv), arg2func_eq_proc(bv));
             }
 
             app_ref tmp(m.mk_app(f, num, args), m);
-            func_decl *& new_f = map->insert_if_not_there2(tmp, nullptr)->get_data().m_value;
+            func_decl *& new_f = map->insert_if_not_there(tmp, nullptr);
             if (!new_f) {
                 // create fresh symbol
                 ptr_buffer<sort> domain;
@@ -365,17 +342,17 @@ struct reduce_args_tactic::imp {
                     if (!bv.get(i))
                         domain.push_back(f->get_domain(i));
                 }
-                new_f = m.mk_fresh_func_decl(f->get_name(), symbol::null, domain.size(), domain.c_ptr(), f->get_range());
+                new_f = m.mk_fresh_func_decl(f->get_name(), symbol::null, domain.size(), domain.data(), f->get_range());
                 m.inc_ref(tmp);
                 m.inc_ref(new_f);
             }
 
             ptr_buffer<expr> new_args;
-            for (unsigned i = 0; i < num; i++) {
+            for (unsigned i = 0; i < num; ++i) {
                 if (!bv.get(i))
                     new_args.push_back(args[i]);
             }
-            result = m.mk_app(new_f, new_args.size(), new_args.c_ptr());
+            result = m.mk_app(new_f, new_args.size(), new_args.data());
             return BR_DONE;
         }
     };
@@ -383,54 +360,47 @@ struct reduce_args_tactic::imp {
     struct reduce_args_rw : rewriter_tpl<reduce_args_rw_cfg> {
         reduce_args_rw_cfg m_cfg;
     public:
-        reduce_args_rw(imp & owner, obj_map<func_decl, bit_vector> & decl2args, decl2arg2func_map & decl2arg2funcs):
-            rewriter_tpl<reduce_args_rw_cfg>(owner.m_manager, false, m_cfg),
+        reduce_args_rw(reduce_args_tactic & owner, obj_map<func_decl, bit_vector> & decl2args, decl2arg2func_map & decl2arg2funcs):
+            rewriter_tpl<reduce_args_rw_cfg>(owner.m, false, m_cfg),
             m_cfg(owner, decl2args, decl2arg2funcs) {
         }
     };
 
     model_converter * mk_mc(obj_map<func_decl, bit_vector> & decl2args, decl2arg2func_map & decl2arg2funcs) {
         ptr_buffer<expr> new_args;
-        var_ref_vector   new_vars(m_manager);
+        var_ref_vector   new_vars(m);
         ptr_buffer<expr> new_eqs;
-        generic_model_converter * f_mc    = alloc(generic_model_converter, m_manager, "reduce_args");
-        for (auto const& kv : decl2arg2funcs) {
-            func_decl * f  = kv.m_key;
-            arg2func * map = kv.m_value;
+        generic_model_converter * f_mc = alloc(generic_model_converter, m, "reduce_args");
+        for (auto const& [f, map] : decl2arg2funcs) 
+            for (auto const& [t, new_def] : *map) 
+                f_mc->hide(new_def);
+
+        for (auto const& [f, map] : decl2arg2funcs) {
             expr * def     = nullptr;
             SASSERT(decl2args.contains(f));
             bit_vector & bv = decl2args.find(f);
             new_vars.reset();
             new_args.reset();
-            for (unsigned i = 0; i < f->get_arity(); i++) {
-                new_vars.push_back(m_manager.mk_var(i, f->get_domain(i)));
+            for (unsigned i = 0; i < f->get_arity(); ++i) {
+                new_vars.push_back(m.mk_var(i, f->get_domain(i)));
                 if (!bv.get(i))
                     new_args.push_back(new_vars.back());
             }
-            arg2func::iterator it2  = map->begin();
-            arg2func::iterator end2 = map->end();
-            for (; it2 != end2; ++it2) {
-                app * t = it2->m_key;
-                func_decl * new_def = it2->m_value;
-                f_mc->hide(new_def);
+            for (auto const& [t, new_def] : *map) {
                 SASSERT(new_def->get_arity() == new_args.size());
-                app * new_t = m_manager.mk_app(new_def, new_args.size(), new_args.c_ptr());
+                app * new_t = m.mk_app(new_def, new_args);
                 if (def == nullptr) {
                     def = new_t;
                 }
                 else {
                     new_eqs.reset();
-                    for (unsigned i = 0; i < f->get_arity(); i++) {
+                    for (unsigned i = 0; i < f->get_arity(); ++i) {
                         if (bv.get(i))
-                            new_eqs.push_back(m_manager.mk_eq(new_vars.get(i), t->get_arg(i)));
+                            new_eqs.push_back(m.mk_eq(new_vars.get(i), t->get_arg(i)));
                     }
                     SASSERT(new_eqs.size() > 0);
-                    expr * cond;
-                    if (new_eqs.size() == 1)
-                        cond = new_eqs[0];
-                    else
-                        cond = m_manager.mk_and(new_eqs.size(), new_eqs.c_ptr());
-                    def = m_manager.mk_ite(cond, new_t, def);
+                    expr * cond = mk_and(m, new_eqs);
+                    def = m.mk_ite(cond, new_t, def);
                 }
             }
             SASSERT(def);
@@ -442,7 +412,7 @@ struct reduce_args_tactic::imp {
     void operator()(goal & g) {
         if (g.inconsistent())
             return;
-        TRACE("reduce_args", g.display(tout););
+        TRACE(reduce_args, g.display(tout););
         tactic_report report("reduce-args", g);
         obj_hashtable<func_decl> non_candidates;
         obj_map<func_decl, bit_vector> decl2args;
@@ -452,17 +422,16 @@ struct reduce_args_tactic::imp {
         if (decl2args.empty())
             return;
         
-        reduce_args_ctx ctx(m_manager);
+        reduce_args_ctx ctx(m);
         reduce_args_rw rw(*this, decl2args, ctx.m_decl2arg2funcs);
         
-        unsigned sz = g.size();
-        for (unsigned i = 0; i < sz; i++) {
+        unsigned idx = 0;
+        for (auto [f, dep, pr] : g) {
             if (g.inconsistent())
                 break;
-            expr * f = g.form(i);
-            expr_ref new_f(m_manager);
+            expr_ref new_f(m);
             rw(f, new_f);
-            g.update(i, new_f);
+            g.update(idx++, new_f);
         }
 
         report_tactic_progress(":reduced-funcs", decl2args.size());
@@ -470,33 +439,45 @@ struct reduce_args_tactic::imp {
         if (g.models_enabled())
             g.add(mk_mc(decl2args, ctx.m_decl2arg2funcs));
 
-        TRACE("reduce_args", g.display(tout); if (g.mc()) g.mc()->display(tout););
+        TRACE(reduce_args, g.display(tout); if (g.mc()) g.mc()->display(tout););
+    }
+
+public:
+    reduce_args_tactic(ast_manager & m) :
+        m_vars(m),
+        m(m),
+        m_bv(m),
+        m_ar(m) {
+    }
+
+    tactic * translate(ast_manager & m) override {
+        return alloc(reduce_args_tactic, m);
+    }
+
+    char const* name() const override { return "reduce_args"; }
+
+    void operator()(goal_ref const & g, goal_ref_buffer & result) override {
+        fail_if_unsat_core_generation("reduce-args", g);
+        result.reset();
+        if (!m.proofs_enabled()) {
+            operator()(*(g.get()));
+        }
+        g->inc_depth();
+        result.push_back(g.get());
+    }
+
+    void cleanup() override {}
+
+    void user_propagate_register_expr(expr* e) override {
+        m_vars.push_back(e);
+    }
+
+    void user_propagate_clear() override {
+        m_vars.reset();
     }
 };
-
-reduce_args_tactic::reduce_args_tactic(ast_manager & m) {
-    m_imp = alloc(imp, m);
 }
 
-reduce_args_tactic::~reduce_args_tactic() {
-    dealloc(m_imp);
+tactic * mk_reduce_args_tactic(ast_manager & m, params_ref const & p) {
+    return clean(alloc(reduce_args_tactic, m));
 }
-
-void reduce_args_tactic::operator()(goal_ref const & g, 
-                                    goal_ref_buffer & result) {
-    SASSERT(g->is_well_sorted());
-    fail_if_proof_generation("reduce-args", g);
-    fail_if_unsat_core_generation("reduce-args", g);
-    result.reset();
-    m_imp->operator()(*(g.get()));
-    g->inc_depth();
-    result.push_back(g.get());
-    SASSERT(g->is_well_sorted());
-}
-
-void reduce_args_tactic::cleanup() {
-    ast_manager & m   = m_imp->m();
-    m_imp->~imp();
-    m_imp = new (m_imp) imp(m);
-}
-

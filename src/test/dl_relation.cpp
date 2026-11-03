@@ -4,7 +4,7 @@ Copyright (c) 2015 Microsoft Corporation
 
 --*/
 
-#ifdef _WINDOWS
+#include "ast/reg_decl_plugins.h"
 #include "muz/base/dl_context.h"
 #include "muz/fp/dl_register_engine.h"
 #include "muz/rel/dl_relation_manager.h"
@@ -12,12 +12,14 @@ Copyright (c) 2015 Microsoft Corporation
 #include "muz/rel/dl_bound_relation.h"
 #include "muz/rel/dl_product_relation.h"
 #include "util/util.h"
+#include <iostream>
 
 namespace datalog {
 
     static void test_interval_relation() {
         smt_params params;
         ast_manager ast_m;
+        reg_decl_plugins(ast_m);
         register_engine re;
         context ctx(ast_m, re, params);    
         arith_util autil(ast_m);
@@ -34,7 +36,7 @@ namespace datalog {
         sig.push_back(int_sort);
 
         interval_relation& i1 = dynamic_cast<interval_relation&>(*ip.mk_empty(sig));
-        interval_relation& i2 = dynamic_cast<interval_relation&>(*ip.mk_full(0, sig));
+        interval_relation& i2 = dynamic_cast<interval_relation&>(*ip.mk_full(nullptr, sig));
 
         i1.display(std::cout);
         i2.display(std::cout);
@@ -44,12 +46,36 @@ namespace datalog {
         app_ref cond1(ast_m), cond2(ast_m), cond3(ast_m);
         app_ref cond4(ast_m), cond5(ast_m), cond6(ast_m);
         app_ref num1(ast_m);
-        cond1 = autil.mk_le(ast_m.mk_var(0, int_sort), autil.mk_numeral(rational(0), true));
-        cond2 = autil.mk_le(ast_m.mk_var(1, int_sort), autil.mk_numeral(rational(1), true));
-        cond3 = autil.mk_le(ast_m.mk_var(2, int_sort), autil.mk_numeral(rational(2), true));
-        cond4 = autil.mk_ge(ast_m.mk_var(0, int_sort), autil.mk_numeral(rational(0), true));
-        cond5 = autil.mk_ge(ast_m.mk_var(1, int_sort), autil.mk_numeral(rational(0), true));
-        cond6 = autil.mk_ge(ast_m.mk_var(2, int_sort), autil.mk_numeral(rational(5), true));
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(0), true), ast_m);
+            cond1 = autil.mk_le(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(1, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(1), true), ast_m);
+            cond2 = autil.mk_le(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(2, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(2), true), ast_m);
+            cond3 = autil.mk_le(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(0), true), ast_m);
+            cond4 = autil.mk_ge(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(1, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(0), true), ast_m);
+            cond5 = autil.mk_ge(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(2, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(5), true), ast_m);
+            cond6 = autil.mk_ge(lhs, rhs);
+        }
         num1 = autil.mk_numeral(rational(4), true);
         i2.filter_interpreted(cond1);
         i2.display(std::cout);
@@ -109,6 +135,7 @@ namespace datalog {
         i5->deallocate();
         dealloc(join1);
         dealloc(proj1);
+        dealloc(proj2);
         dealloc(ren1);
         dealloc(union1);
         dealloc(filterId1);
@@ -122,6 +149,7 @@ namespace datalog {
 
         smt_params params;
         ast_manager ast_m;
+        reg_decl_plugins(ast_m);
         register_engine re;
         context ctx(ast_m, re, params);    
         arith_util autil(ast_m);
@@ -138,7 +166,7 @@ namespace datalog {
         sig.push_back(int_sort);
 
         bound_relation& i1 = dynamic_cast<bound_relation&>(*br.mk_empty(sig));
-        bound_relation& i2 = dynamic_cast<bound_relation&>(*br.mk_full(0, sig));
+        bound_relation& i2 = dynamic_cast<bound_relation&>(*br.mk_full(nullptr, sig));
 
         i1.display(std::cout << "empty:\n");
         i2.display(std::cout << "full:\n");
@@ -148,18 +176,58 @@ namespace datalog {
         app_ref cond1(ast_m), cond2(ast_m), cond3(ast_m);
         app_ref cond4(ast_m), cond5(ast_m), cond6(ast_m);
         app_ref num1(ast_m);
-        cond1 = autil.mk_lt(ast_m.mk_var(0, int_sort), autil.mk_numeral(rational(0), true));
-        cond2 = autil.mk_lt(ast_m.mk_var(1, int_sort), autil.mk_numeral(rational(1), true));
-        cond3 = autil.mk_lt(ast_m.mk_var(2, int_sort), ast_m.mk_var(3, int_sort));
-        cond4 = autil.mk_ge(ast_m.mk_var(0, int_sort), autil.mk_numeral(rational(0), true));
-        cond5 = autil.mk_ge(ast_m.mk_var(1, int_sort), autil.mk_numeral(rational(0), true));
-        cond6 = autil.mk_ge(ast_m.mk_var(2, int_sort), autil.mk_numeral(rational(5), true));
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(0), true), ast_m);
+            cond1 = autil.mk_lt(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(1, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(1), true), ast_m);
+            cond2 = autil.mk_lt(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(2, int_sort), ast_m);
+            expr_ref rhs(ast_m.mk_var(3, int_sort), ast_m);
+            cond3 = autil.mk_lt(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(0), true), ast_m);
+            cond4 = autil.mk_ge(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(1, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(0), true), ast_m);
+            cond5 = autil.mk_ge(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(2, int_sort), ast_m);
+            expr_ref rhs(autil.mk_numeral(rational(5), true), ast_m);
+            cond6 = autil.mk_ge(lhs, rhs);
+        }
 
         app_ref lt_x0x1(ast_m), lt_x1x2(ast_m), lt_x0x3(ast_m), lt_x0x2(ast_m);
-        lt_x0x1 = autil.mk_lt(ast_m.mk_var(0, int_sort), ast_m.mk_var(1, int_sort));
-        lt_x1x2 = autil.mk_lt(ast_m.mk_var(1, int_sort), ast_m.mk_var(2, int_sort));
-        lt_x0x2 = autil.mk_lt(ast_m.mk_var(0, int_sort), ast_m.mk_var(2, int_sort));
-        lt_x0x3 = autil.mk_lt(ast_m.mk_var(0, int_sort), ast_m.mk_var(3, int_sort));
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(ast_m.mk_var(1, int_sort), ast_m);
+            lt_x0x1 = autil.mk_lt(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(1, int_sort), ast_m);
+            expr_ref rhs(ast_m.mk_var(2, int_sort), ast_m);
+            lt_x1x2 = autil.mk_lt(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(ast_m.mk_var(2, int_sort), ast_m);
+            lt_x0x2 = autil.mk_lt(lhs, rhs);
+        }
+        {
+            expr_ref lhs(ast_m.mk_var(0, int_sort), ast_m);
+            expr_ref rhs(ast_m.mk_var(3, int_sort), ast_m);
+            lt_x0x3 = autil.mk_lt(lhs, rhs);
+        }
 
         num1 = autil.mk_numeral(rational(4), true);
         
@@ -209,8 +277,8 @@ namespace datalog {
         // test that equivalence classes are expanded.
         // { x1 = x3, x0 < x1 x1 < x2} u { x2 = x3, x0 < x3 } = { x0 < x3 }
         {
-            relation_base* b1 = br.mk_full(0, sig);
-            relation_base* b2 = br.mk_full(0, sig);
+            relation_base* b1 = br.mk_full(nullptr, sig);
+            relation_base* b2 = br.mk_full(nullptr, sig);
             unsigned x1x3[2] = { 1, 3 };
             unsigned x2x3[2] = { 2, 3 };
             scoped_ptr<relation_mutator_fn> id1 = br.mk_filter_identical_fn(*b1, 2, x1x3);
@@ -226,10 +294,10 @@ namespace datalog {
             b2->display(std::cout << "b2:\n");
             (*ltx0x3)(*b2);
             b2->display(std::cout << "b2:\n");
-            scoped_ptr<relation_union_fn> u = br.mk_union_fn(*b1, *b2, 0);
+            scoped_ptr<relation_union_fn> u = br.mk_union_fn(*b1, *b2, nullptr);
             b1->display(std::cout << "b1:\n");
             b2->display(std::cout << "b2:\n");
-            (*u)(*b1, *b2, 0);
+            (*u)(*b1, *b2, nullptr);
 
             b1->display(std::cout << "b1 u b2:\n");
 
@@ -242,9 +310,9 @@ namespace datalog {
         // test that equivalence classes are expanded.
         // { x1 = x2 = x3, x0 < x1} u { x1 = x3, x0 < x3, x0 < x2 } = { x0 < x2, x0 < x3 }
         {
-            relation_base* b1 = br.mk_full(0, sig);
-            relation_base* b2 = br.mk_full(0, sig);
-            unsigned x0x3[2] = { 0, 3 };
+            relation_base* b1 = br.mk_full(nullptr, sig);
+            relation_base* b2 = br.mk_full(nullptr, sig);
+            // unsigned x0x3[2] = { 0, 3 };
             unsigned x1x3[2] = { 1, 3 };
             unsigned x2x3[2] = { 2, 3 };
             scoped_ptr<relation_mutator_fn> id1 = br.mk_filter_identical_fn(*b1, 2, x1x3);
@@ -259,10 +327,10 @@ namespace datalog {
             (*id3)(*b2);
             (*ltx0x2)(*b2);
             (*ltx0x3)(*b2);
-            scoped_ptr<relation_union_fn> u = br.mk_union_fn(*b1, *b2, 0);
+            scoped_ptr<relation_union_fn> u = br.mk_union_fn(*b1, *b2, nullptr);
             b1->display(std::cout << "b1:\n");
             b2->display(std::cout << "b2:\n");
-            (*u)(*b1, *b2, 0);
+            (*u)(*b1, *b2, nullptr);
             b1->display(std::cout << "b1 u b2:\n");
 
             // TBD check property;
@@ -278,6 +346,7 @@ namespace datalog {
         i5->deallocate();
         dealloc(join1);
         dealloc(proj1);
+        dealloc(proj2);
         dealloc(ren1);
         dealloc(union1);
         dealloc(filterId1);
@@ -291,8 +360,3 @@ void tst_dl_relation() {
     datalog::test_interval_relation();
     datalog::test_bound_relation();
 }
-
-#else
-void tst_dl_relation() {
-}
-#endif

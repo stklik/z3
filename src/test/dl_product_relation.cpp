@@ -4,12 +4,13 @@ Copyright (c) 2015 Microsoft Corporation
 
 --*/
 
-#ifdef _WINDOWS
+#include "ast/reg_decl_plugins.h"
 #include "muz/base/dl_context.h"
 #include "muz/fp/dl_register_engine.h"
 #include "muz/rel/dl_finite_product_relation.h"
 #include "muz/rel/dl_sparse_table.h"
 #include "muz/rel/rel_context.h"
+#include <iostream>
 
 namespace datalog {
 
@@ -21,7 +22,7 @@ namespace datalog {
     public:
         collector_of_reduced(idx_set & accumulator) : m_acc(accumulator) {}
 
-        virtual void operator()(table_element * func_columns, const table_element * merged_func_columns) {
+        void operator()(table_element * func_columns, const table_element * merged_func_columns) override {
             m_acc.insert(static_cast<unsigned>(merged_func_columns[0]));
         }
     };
@@ -29,6 +30,7 @@ namespace datalog {
 
     void test_functional_columns(smt_params fparams, params_ref& params) {
         ast_manager m;
+        reg_decl_plugins(m);
         register_engine re;
         context ctx(m, re, fparams);
         rel_context_base& rctx = *ctx.get_rel_context();
@@ -133,6 +135,7 @@ namespace datalog {
 
     void test_finite_product_relation(smt_params fparams, params_ref& params) {
         ast_manager m;
+        reg_decl_plugins(m);
         register_engine re;
         context ctx(m, re, fparams);
         ctx.updt_params(params);
@@ -307,10 +310,16 @@ namespace datalog {
         r41->add_fact(f7797);
         r41->add_fact(f7997);
 
-        app_ref cond(m.mk_and(
-                m.mk_not(m.mk_eq(m.mk_var(1,byte_srt), m.mk_var(2,byte_srt))), //#1!=#2
-                m.mk_not(m.mk_eq(m.mk_var(3,byte_srt), m.mk_var(2,byte_srt)))  //#3!=#2
-            ), m);
+        expr_ref lhs(m.mk_var(1, byte_srt), m);
+        expr_ref rhs(m.mk_var(2, byte_srt), m);
+        expr_ref lhs1(m.mk_not(m.mk_eq(lhs, rhs)), m);
+        expr_ref lhs2(m.mk_var(3, byte_srt), m);
+        expr_ref rhs1(m.mk_var(2, byte_srt), m);
+        expr_ref rhs2(m.mk_not(m.mk_eq(lhs2, rhs1)), m);
+        app_ref cond(m.mk_and(lhs1,  // #1!=#2
+                              rhs2   // #3!=#2
+                              ),
+                     m);
         scoped_ptr<relation_mutator_fn> i_filter = rmgr.mk_filter_interpreted_fn(*r41, cond);
         (*i_filter)(*r41);
 
@@ -358,7 +367,3 @@ void tst_dl_product_relation() {
     test_finite_product_relation(fparams, params);
     
 }
-#else
-void tst_dl_product_relation() {
-}
-#endif

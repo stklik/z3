@@ -17,8 +17,7 @@ Notes:
 
 --*/
 
-#ifndef Z3NATIVE_STUBS_H_
-#define Z3NATIVE_STUBS_H_
+#pragma once
 
 #if defined _WIN32 || defined __CYGWIN__
   #ifdef __GNUC__
@@ -26,15 +25,11 @@ Notes:
   #else
     #define DLL_PUBLIC __declspec(dllexport)
   #endif
-  #define DLL_LOCAL
 #else
   #if __GNUC__ >= 4
     #define DLL_PUBLIC __attribute__ ((visibility ("default")))
-    #define DLL_LOCAL  __attribute__ ((visibility ("hidden")))
   #else
     #define DLL_PUBLIC
-    #define DLL_LOCAL
   #endif
 #endif
     
-#endif

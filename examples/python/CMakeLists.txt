@@ -5,25 +5,35 @@ set(python_example_files
   hamiltonian/hamiltonian.py
   mus/marco.py
   mus/mss.py
+  proof_certificate.py
+  proof_clause_log.py
+  proof_preprocessing.py
+  proof_to_lean.py
   socrates.py
+  test_proof_certificate.py
+  test_complex.py
+  test_proof_to_lean.py
+  test_proof_to_lean_arith.py
+  test_proof_to_lean_integration.py
   visitor.py
 )
 
-set(z3py_bindings_build_dest "${CMAKE_BINARY_DIR}/python")
+set(z3py_bindings_build_dest "${PROJECT_BINARY_DIR}/python")
 
 set(build_z3_python_examples_target_depends "")
 foreach (example_file ${python_example_files})
-  add_custom_command(OUTPUT "${z3py_bindings_build_dest}/${example_file}"
+  get_filename_component(example_file_name "${example_file}" NAME)
+  add_custom_command(OUTPUT "${z3py_bindings_build_dest}/${example_file_name}"
     COMMAND "${CMAKE_COMMAND}" "-E" "copy"
       "${CMAKE_CURRENT_SOURCE_DIR}/${example_file}"
       # We flatten the hierarchy so that all python files have
       # the `z3` directory in their directory so that their import
       # statements "just work".
-      "${z3py_bindings_build_dest}/"
+      "${z3py_bindings_build_dest}/${example_file_name}"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${example_file}"
-    COMMENT "Copying \"${example_file}\" to ${z3py_bindings_build_dest}/${example_file}"
+    COMMENT "Copying \"${example_file}\" to ${z3py_bindings_build_dest}/${example_file_name}"
   )
-  list(APPEND build_z3_python_examples_target_depends "${z3py_bindings_build_dest}/${example_file}")
+  list(APPEND build_z3_python_examples_target_depends "${z3py_bindings_build_dest}/${example_file_name}")
 endforeach()
 
 add_custom_target(build_z3_python_examples

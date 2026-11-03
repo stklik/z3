@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SAT_CLAUSE_SET_H_
-#define SAT_CLAUSE_SET_H_
+#pragma once
 
 #include "sat/sat_clause.h"
 
@@ -51,6 +50,5 @@ namespace sat {
         bool check_invariant() const;
     };
     
-};
+}
 
-#endif

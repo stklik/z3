@@ -19,15 +19,16 @@ Revision History:
     Rewrote using stopwatches, added support for tracking memory
 
 --*/
-#ifndef TIMEIT_H_
-#define TIMEIT_H_
+#pragma once
+
+#include<ostream>
 
 class timeit {
     struct imp;
     imp *  m_imp;
 public:
-    timeit(bool enable, char const * msg, std::ostream & out = std::cerr);
+    timeit(bool enable, char const * msg, std::ostream * out = nullptr);
+    timeit(bool enable, char const * msg, std::ostream & out) : timeit(enable, msg, &out) {}
     ~timeit();
 };
 
-#endif

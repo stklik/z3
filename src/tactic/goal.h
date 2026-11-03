@@ -25,8 +25,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef GOAL_H_
-#define GOAL_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "ast/ast_translation.h"
@@ -35,8 +34,8 @@ Revision History:
 #include "util/ref.h"
 #include "util/ref_vector.h"
 #include "util/ref_buffer.h"
-#include "tactic/model_converter.h"
-#include "tactic/proof_converter.h"
+#include "ast/converters/model_converter.h"
+#include "ast/converters/proof_converter.h"
 #include "tactic/dependency_converter.h"
 
 class goal {
@@ -56,6 +55,7 @@ protected:
     proof_converter_ref   m_pc;
     dependency_converter_ref m_dc;
     unsigned              m_ref_count;
+    std::string           m_reason_unknown;
     expr_array            m_forms;
     expr_array            m_proofs;
     expr_dependency_array m_dependencies;
@@ -120,14 +120,16 @@ public:
 
     unsigned num_exprs() const;
   
-    expr * form(unsigned i) const { return m().get(m_forms, i); }
-    proof * pr(unsigned i) const { return proofs_enabled() ? static_cast<proof*>(m().get(m_proofs, i)) : nullptr; }
-    expr_dependency * dep(unsigned i) const { return unsat_core_enabled() ? m().get(m_dependencies, i) : nullptr; }
+    expr * form(unsigned i) const { return inconsistent() ? m().mk_false() : m().get(m_forms, i); }
+    proof * pr(unsigned i) const { return m().size(m_proofs) > i ? static_cast<proof*>(m().get(m_proofs, i)) : nullptr; }
+    expr_dependency *dep(unsigned i) const {
+        return unsat_core_enabled() && i < m().size(m_dependencies) ? m().get(m_dependencies, i) : nullptr;
+    }
 
     void update(unsigned i, expr * f, proof * pr = nullptr, expr_dependency * dep = nullptr);
 
-    void get_formulas(ptr_vector<expr> & result);
-    void get_formulas(expr_ref_vector & result);
+    void get_formulas(ptr_vector<expr> & result) const;
+    void get_formulas(expr_ref_vector & result) const;
     
     void elim_true();
     void elim_redundancies();
@@ -137,21 +139,26 @@ public:
     void display(std::ostream & out) const;
     void display_ll(std::ostream & out) const;
     void display_as_and(std::ostream & out) const;
-    void display_dimacs(std::ostream & out) const;
+    void display_dimacs(std::ostream & out, bool include_names) const;
     void display_with_dependencies(ast_printer & prn, std::ostream & out) const;
     void display_with_dependencies(ast_printer_context & ctx) const;
     void display_with_dependencies(std::ostream & out) const;
+    void display_with_proofs(std::ostream& out) const;
 
     bool sat_preserved() const;
     bool unsat_preserved() const;
     bool is_decided_sat() const;
     bool is_decided_unsat() const;
     bool is_decided() const;
-    bool is_well_sorted() const;
+    bool is_well_formed() const;
 
     dependency_converter* dc() { return m_dc.get(); }
     model_converter* mc() const { return m_mc.get(); }
-    proof_converter* pc() const { return inconsistent() ? proof2proof_converter(m(), pr(0)) : m_pc.get(); }
+    proof_converter* pc() const {
+        if (!inconsistent())
+            return m_pc.get();
+        return pr(0) ? concat(m_pc.get(), proof2proof_converter(m(), pr(0))) : nullptr;
+    }
     void add(dependency_converter* d) { m_dc = dependency_converter::concat(m_dc.get(), d); }
     void add(model_converter* m) { m_mc = concat(m_mc.get(), m); }
     void add(proof_converter* p) { m_pc = concat(m_pc.get(), p); }
@@ -159,9 +166,46 @@ public:
     void set(model_converter* m) { m_mc = m; }
     void set(proof_converter* p) { m_pc = p; }
 
+    void set_reason_unknown(std::string const& reason_unknown) { m_reason_unknown = reason_unknown; }
+    std::string const& get_reason_unknown() { return m_reason_unknown; }
     bool is_cnf() const;
 
     goal * translate(ast_translation & translator) const;
+
+    class iterator {
+    public:
+        using value_type = std::tuple<expr*, expr_dependency*, proof*>;
+        using reference = value_type&;
+        using pointer = value_type*;
+        using difference_type = std::ptrdiff_t;
+        using iterator_category = std::forward_iterator_tag;
+
+        iterator(goal const* g, unsigned idx) : m_goal(g), m_idx(idx) {}
+
+        value_type operator*() const {
+            return std::make_tuple(m_goal->form(m_idx), m_goal->dep(m_idx), m_goal->pr(m_idx));
+        }
+
+        iterator& operator++() {
+            ++m_idx;
+            return *this;
+        }
+
+        bool operator==(const iterator& other) const {
+            return m_goal == other.m_goal && m_idx == other.m_idx;
+        }
+
+        bool operator!=(const iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+        goal const* m_goal;
+        unsigned m_idx;
+    };
+
+    iterator begin() const { return iterator(this, 0); }
+    iterator end() const { return iterator(this, size()); }
 };
 
 std::ostream & operator<<(std::ostream & out, goal::precision p);
@@ -176,6 +220,8 @@ template<typename GoalCollection>
 inline bool is_decided_sat(GoalCollection const & c) { return c.size() == 1 && c[0]->is_decided_sat(); }
 template<typename GoalCollection>
 inline bool is_decided_unsat(GoalCollection const & c) { return c.size() == 1 && c[0]->is_decided_unsat(); }
+template<typename GoalCollection>
+inline std::string get_reason_unknown(GoalCollection const & c) { return c.size() == 1 ? c[0]->get_reason_unknown() : std::string("unknown"); }
 
 template<typename ForEachProc>
 void for_each_expr_at(ForEachProc& proc, goal const & s) {
@@ -192,10 +238,10 @@ bool test(goal const & g, Predicate & proc) {
     expr_fast_mark1 visited;
     try {
         unsigned sz = g.size();
-        for (unsigned i = 0; i < sz; i++)
+        for (unsigned i = 0; i < sz; ++i)
             quick_for_each_expr(proc, visited, g.form(i));
     }
-    catch (typename Predicate::found) {
+    catch (const typename Predicate::found &) {
         return true;
     }
     return false;
@@ -206,5 +252,3 @@ bool test(goal const & g) {
     Predicate proc(g.m());
     return test(g, proc);
 }
-
-#endif

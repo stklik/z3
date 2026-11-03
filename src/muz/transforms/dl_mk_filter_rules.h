@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_FILTER_RULES_H_
-#define DL_MK_FILTER_RULES_H_
+#pragma once
 
 #include "util/map.h"
 
@@ -80,8 +79,7 @@ namespace datalog {
         rule_set * operator()(rule_set const & source) override;
     };
 
-};
+}
 
 
-#endif /* DL_MK_FILTER_RULES_H_ */
 

@@ -103,7 +103,7 @@ namespace datalog {
                 for (unsigned i = 0; i < M.size(); ++i) {
                     to_formula(M.A[i], M.b[i], M.eq[i], conj);
                 }
-                bool_rewriter(m).mk_and(conj.size(), conj.c_ptr(), fml);
+                bool_rewriter(m).mk_and(conj.size(), conj.data(), fml);
             }
         }
 
@@ -174,11 +174,11 @@ namespace datalog {
                     processed = false;
                 }
                 (void)processed;
-                TRACE("dl", tout << (processed?"+ ":"- ") << mk_pp(e, m) << "\n";
+                TRACE(dl, tout << (processed?"+ ":"- ") << mk_pp(e, m) << "\n";
                       if (processed) matrix::display_ineq(tout, row, M.b.back(), M.eq.back());
                       );
             }
-            TRACE("dl", display(tout););
+            TRACE(dl, display(tout););
         }
 
         void mk_join(karr_relation const& r1, karr_relation const& r2, 
@@ -259,7 +259,7 @@ namespace datalog {
             m_empty = false;
             m_fn = r.m_fn;
             
-            TRACE("dl", 
+            TRACE(dl, 
                   for (unsigned i = 0; i < cnt; ++i) {
                       tout << cols[i] << " ";
                   }
@@ -286,7 +286,7 @@ namespace datalog {
                 mk_rename(m_basis, col_cnt, cols);
             }
             m_fn = r.m_fn;
-            TRACE("dl", r.display(tout); display(tout););
+            TRACE(dl, r.display(tout); display(tout););
         }
 
         void mk_union(karr_relation const& src, karr_relation* delta) {
@@ -480,7 +480,7 @@ namespace datalog {
             if (!b.is_zero()) {
                 sum.push_back(a.mk_numeral(b, true));
             }
-            lhs = a.mk_add(sum.size(), sum.c_ptr());
+            lhs = a.mk_add(sum.size(), sum.data());
             if (is_eq) {
                 conj.push_back(m.mk_eq(lhs, zero));
             }
@@ -519,7 +519,7 @@ namespace datalog {
             karr_relation const& r2 = get(_r2);
             karr_relation_plugin& p = r1.get_plugin();
             karr_relation* result = dynamic_cast<karr_relation*>(p.mk_full(nullptr, get_result_signature()));
-            result->mk_join(r1, r2, m_cols1.size(), m_cols1.c_ptr(), m_cols2.c_ptr());
+            result->mk_join(r1, r2, m_cols1.size(), m_cols1.data(), m_cols2.data());
             return result;
         }
     };
@@ -544,7 +544,7 @@ namespace datalog {
             karr_relation const& r = get(_r);
             karr_relation_plugin& p = r.get_plugin();
             karr_relation* result = dynamic_cast<karr_relation*>(p.mk_full(nullptr, get_result_signature()));
-            result->mk_project(r, m_removed_cols.size(), m_removed_cols.c_ptr());
+            result->mk_project(r, m_removed_cols.size(), m_removed_cols.data());
             return result;
         }
     };
@@ -563,7 +563,7 @@ namespace datalog {
             karr_relation const& r = get(_r);
             karr_relation_plugin& p = r.get_plugin();
             karr_relation* result = dynamic_cast<karr_relation*>(p.mk_full(nullptr, get_result_signature()));
-            result->mk_rename(r, m_cycle.size(), m_cycle.c_ptr());
+            result->mk_rename(r, m_cycle.size(), m_cycle.data());
             return result;
         }
     };
@@ -598,7 +598,7 @@ namespace datalog {
         catch (...) {
             is_sat = l_undef;
         }
-        TRACE("dl_verbose", m_hb.display(tout););
+        TRACE(dl_verbose, m_hb.display(tout););
         if (is_sat == l_false) {
             return false;
         }
@@ -655,7 +655,7 @@ namespace datalog {
         if (is_sat != l_true) {
             return;
         }
-        TRACE("dl_verbose", m_hb.display(tout););
+        TRACE(dl_verbose, m_hb.display(tout););
         SASSERT(is_sat == l_true);
         unsigned basis_size = m_hb.get_basis_size();
         for (unsigned i = 0; i < basis_size; ++i) {
@@ -674,13 +674,11 @@ namespace datalog {
 
     class karr_relation_plugin::union_fn : public relation_union_fn {
     public:
-        union_fn() {}
-
         void operator()(relation_base & _r, const relation_base & _src, relation_base * _delta) override {
 
             karr_relation& r = get(_r);
             karr_relation const& src = get(_src);
-            TRACE("dl", r.display(tout << "dst:\n"); src.display(tout  << "src:\n"););
+            TRACE(dl, r.display(tout << "dst:\n"); src.display(tout  << "src:\n"););
 
             if (_delta) {
                 karr_relation& d = get(*_delta);
@@ -689,7 +687,7 @@ namespace datalog {
             else {
                 r.mk_union(src, nullptr);
             }            
-            TRACE("dl", r.display(tout << "result:\n"););
+            TRACE(dl, r.display(tout << "result:\n"););
         }
     };
 
@@ -709,7 +707,7 @@ namespace datalog {
 
         void operator()(relation_base & _r) override {
             karr_relation & r = get(_r);
-            TRACE("dl", r.display(tout << "src:\n"););
+            TRACE(dl, r.display(tout << "src:\n"););
             r.get_ineqs();
             for (unsigned i = 1; i < m_identical_cols.size(); ++i) {
                 unsigned c1 = m_identical_cols[0];
@@ -723,7 +721,7 @@ namespace datalog {
                 r.m_ineqs.eq.push_back(true);
                 r.m_basis_valid = false;
             }
-            TRACE("dl", r.display(tout << "result:\n"););
+            TRACE(dl, r.display(tout << "result:\n"););
         }
     };
 
@@ -759,7 +757,7 @@ namespace datalog {
                 r.m_ineqs.eq.push_back(true);
                 r.m_basis_valid = false;
             }
-            TRACE("dl", tout << m_value << "\n"; r.display(tout););            
+            TRACE(dl, tout << m_value << "\n"; r.display(tout););            
         }
     };
 
@@ -781,7 +779,7 @@ namespace datalog {
 
         void operator()(relation_base& t) override {
             get(t).filter_interpreted(m_cond);
-            TRACE("dl", tout << mk_pp(m_cond, m_cond.get_manager()) << "\n"; t.display(tout););
+            TRACE(dl, tout << mk_pp(m_cond, m_cond.get_manager()) << "\n"; t.display(tout););
         }
     };
 
@@ -791,4 +789,4 @@ namespace datalog {
         }
         return nullptr;
     }
-};
+}

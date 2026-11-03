@@ -16,17 +16,22 @@ Author:
 Revision History:
 
 --*/
-#ifndef SCOPED_TIMER_H_
-#define SCOPED_TIMER_H_
+#pragma once
 
 #include "util/event_handler.h"
+#include "util/memory_manager.h"
+
+struct scoped_timer_state;
 
 class scoped_timer {
-    struct imp;
-    imp *  m_imp;
+    scoped_timer_state *s = nullptr;
 public:
     scoped_timer(unsigned ms, event_handler * eh);
     ~scoped_timer();
+    static void initialize();
+    static void finalize();
+private:
+    void init_state(unsigned ms, event_handler * eh);
 };
 
-#endif
+Z3_ADD_INITIALIZER(scoped_timer, scoped_timer::initialize, 0);

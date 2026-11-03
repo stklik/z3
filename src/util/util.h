@@ -16,16 +16,20 @@ Author:
 Revision History:
 
 --*/
-#ifndef UTIL_H_
-#define UTIL_H_
+#pragma once
 
 #include "util/debug.h"
 #include "util/memory_manager.h"
-#include "util/z3_omp.h"
-#include<iostream>
-#include<climits>
-#include<limits>
-#include<stdint.h>
+#include <ostream>
+#include <climits>
+#include <limits>
+#include <stdint.h>
+#include <string>
+#include <functional>
+#include <algorithm>
+#include <bit>
+#include <iterator>
+#include <span>
 
 #ifndef SIZE_MAX
 #define SIZE_MAX std::numeric_limits<std::size_t>::max()
@@ -47,23 +51,17 @@ static_assert(sizeof(int64_t) == 8, "64 bits");
 #endif
 
 #ifdef _WINDOWS
-#define SSCANF sscanf_s
-#define SPRINTF sprintf_s
+#define SPRINTF_D(_buffer_, _i_) sprintf_s(_buffer_, Z3_ARRAYSIZE(_buffer_), "%d", _i_)
+#define SPRINTF_U(_buffer_, _u_) sprintf_s(_buffer_, Z3_ARRAYSIZE(_buffer_), "%u", _u_)
 #define _Exit exit
 #else
-#define SSCANF sscanf
-#define SPRINTF sprintf
+#define SPRINTF_D(_buffer_, _i_) sprintf(_buffer_, "%d", _i_)
+#define SPRINTF_U(_buffer_, _u_) sprintf(_buffer_, "%u", _u_)
 #endif
+
+
 
 #define VEC2PTR(_x_) ((_x_).size() ? &(_x_)[0] : 0)
-
-#ifdef _WINDOWS
-// Disable thread local declspec as it seems to not work downlevel.
-// #define THREAD_LOCAL __declspec(thread)
-#define THREAD_LOCAL 
-#else
-#define THREAD_LOCAL 
-#endif
 
 #ifdef _MSC_VER
 # define STD_CALL __cdecl
@@ -83,14 +81,21 @@ static_assert(sizeof(int64_t) == 8, "64 bits");
 # define Z3_fallthrough
 #endif
 
-inline bool is_power_of_two(unsigned v) { return !(v & (v - 1)) && v; }
+// UNREACHABLE is not defined in a way that makes it clear to the compiler
+// that it does not return (because it calls INVOKE_DEBUGGER() in debug builds,
+// and that *may* return).  Using this for unreachable switch cases avoids
+// any fall-through warnings.
+#define Z3_unreachable_case() UNREACHABLE(); Z3_fallthrough
+
+static inline bool is_power_of_two(unsigned v) { return std::has_single_bit(v); }
+static inline bool is_power_of_two(uint64_t v) { return std::has_single_bit(v); }
 
 /**
    \brief Return the next power of two that is greater than or equal to v.
    
    \warning This function returns 0 for v == 0.
 */
-inline unsigned next_power_of_two(unsigned v) {
+static inline unsigned next_power_of_two(unsigned v) {
     v--;
     v |= v >> 1;
     v |= v >> 2;
@@ -104,12 +109,16 @@ inline unsigned next_power_of_two(unsigned v) {
 /**
    \brief Return the position of the most significant bit.
 */
-unsigned log2(unsigned v);
-unsigned uint64_log2(uint64_t v);
+static inline unsigned log2(int v) { return v > 0 ? (std::bit_width(static_cast<unsigned>(v)) - 1) : 0; }
+static inline unsigned log2(unsigned v) { return v ? (std::bit_width(v) - 1) : 0; }
+static inline unsigned log2(uint64_t v) { return v ? (std::bit_width(v) - 1) : 0; }
+unsigned mul_truncate(unsigned a, unsigned b);
+unsigned add_truncate(unsigned a, unsigned b);
 
 static_assert(sizeof(unsigned) == 4, "unsigned are 32 bits");
 
 // Return the number of 1 bits in v.
+// see e.g. http://en.wikipedia.org/wiki/Hamming_weight
 static inline unsigned get_num_1bits(unsigned v) {
 #ifdef __GNUC__
     return __builtin_popcount(v);
@@ -117,7 +126,7 @@ static inline unsigned get_num_1bits(unsigned v) {
 #ifdef Z3DEBUG
     unsigned c;
     unsigned v1 = v;
-    for (c = 0; v1; c++) {
+    for (c = 0; v1; ++c) {
         v1 &= v1 - 1; 
     }
 #endif
@@ -126,6 +135,26 @@ static inline unsigned get_num_1bits(unsigned v) {
     unsigned r = (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24; 
     SASSERT(c == r);
     return r;
+#endif
+}
+
+static inline unsigned get_num_1bits(uint64_t v) {
+#ifdef __GNUC__
+    return __builtin_popcountll(v);
+#else
+#ifdef Z3DEBUG
+    unsigned c;
+    uint64_t v1 = v;
+    for (c = 0; v1; ++c) {
+        v1 &= v1 - 1; 
+    }
+#endif
+    v = v - (v >> 1) & 0x5555555555555555;
+    v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333); 
+    v = (v + (v >> 4)) & 0x0F0F0F0F0F0F0F0F;
+    uint64_t r = (v * 0x0101010101010101) >> 56;
+    SASSERT(c == r);
+    return static_cast<unsigned>(r);
 #endif
 }
 
@@ -142,9 +171,7 @@ static inline uint64_t shift_left(uint64_t x, uint64_t y) {
 template<class T, size_t N> char (*ArraySizer(T (&)[N]))[N]; 
 // For determining the length of an array. See ARRAYSIZE() macro. This function is never actually called.
 
-#ifndef ARRAYSIZE
-#define ARRAYSIZE(a) sizeof(*ArraySizer(a))
-#endif
+#define Z3_ARRAYSIZE(a) sizeof(*ArraySizer(a))
 
 template<typename IT>
 void display(std::ostream & out, const IT & begin, const IT & end, const char * sep, bool & first) {
@@ -168,48 +195,22 @@ void display(std::ostream & out, const IT & begin, const IT & end, const char * 
 template<typename T>
 struct delete_proc {
     void operator()(T * ptr) { 
-    if (ptr) {
-        dealloc(ptr);
-    }
+    if (ptr) 
+        dealloc(ptr);    
     }
 };
 
 void set_verbosity_level(unsigned lvl);
 unsigned get_verbosity_level();
+void set_suppress_platform_verbose(bool suppress);
+bool get_suppress_platform_verbose();
 std::ostream& verbose_stream();
 void set_verbose_stream(std::ostream& str);
-bool is_threaded();
 
   
-#define IF_VERBOSE(LVL, CODE) {                                 \
-    if (get_verbosity_level() >= LVL) {                         \
-        if (is_threaded()) {                                    \
-            LOCK_CODE(CODE);                                    \
-        }                                                       \
-        else {                                                  \
-            CODE;                                               \
-        }                                                       \
-    } } ((void) 0)              
+#define IF_VERBOSE(LVL, CODE) { if (get_verbosity_level() >= LVL) { THREAD_LOCK(CODE); } } ((void) 0)              
 
-#ifdef _MSC_VER
-#define DO_PRAGMA(x) __pragma(x)
-#define PRAGMA_LOCK __pragma(omp critical (verbose_lock))
-#else
-#define DO_PRAGMA(x) _Pragma(#x)
-#define PRAGMA_LOCK _Pragma("omp critical (verbose_lock)")
-#endif
 
-#ifdef _NO_OMP_
-#define LOCK_CODE(CODE) CODE;
-#else
-#define LOCK_CODE(CODE)                         \
-    {                                           \
-        PRAGMA_LOCK   \
-            {                                   \
-                CODE;                           \
-            }                                   \
-    }                      
-#endif
 
 template<typename T>
 struct default_eq {
@@ -241,6 +242,10 @@ class scoped_ptr {
 public:
     scoped_ptr(T * ptr=nullptr):
         m_ptr(ptr) {
+    }
+
+    scoped_ptr(scoped_ptr &&other) noexcept : m_ptr(other.m_ptr) {
+        other.m_ptr = nullptr;
     }
 
     ~scoped_ptr() {
@@ -275,13 +280,18 @@ public:
         return *this;
     }
 
+    scoped_ptr& operator=(scoped_ptr&& other) noexcept {
+        *this = other.detach();
+        return *this;
+    }
+
     T * detach() {
         T* tmp = m_ptr;
         m_ptr = nullptr;
         return tmp;
     }
 
-    void swap(scoped_ptr & p) {
+    void swap(scoped_ptr & p) noexcept {
         std::swap(m_ptr, p.m_ptr);
     }
 };
@@ -290,20 +300,6 @@ template<typename T1, typename T2>
 inline std::ostream & operator<<(std::ostream & out, std::pair<T1, T2> const & p) {
     out << "(" << p.first << ", " << p.second << ")";
     return out;
-}
-
-template<typename IT>
-bool has_duplicates(const IT & begin, const IT & end) {
-    for (IT it1 = begin; it1 != end; ++it1) {
-        IT it2 = it1;
-        ++it2;
-        for (; it2 != end; ++it2) {
-            if (*it1 == *it2) {
-                return true;
-            }
-        }
-    }
-    return false;
 }
 
 #ifndef _WINDOWS
@@ -329,7 +325,7 @@ public:
 
 template<typename T>
 bool compare_arrays(const T * array1, const T * array2, unsigned size) {
-    for (unsigned i = 0; i < size; i++) {
+    for (unsigned i = 0; i < size; ++i) {
         if (!(array1[i] == array2[i])) {
             return false;
         }
@@ -344,6 +340,16 @@ void force_ptr_array_size(T & v, unsigned sz) {
     }
 }
 
+template<typename T>
+class ptr_iterator {
+    T const* b;
+    T const* e;
+public:
+    ptr_iterator(T const* b, T const* e): b(b), e(e) {}
+    T const* begin() const { return b; }
+    T const* end() const { return e; }
+};
+
 class random_gen {
     unsigned m_data;
 public:
@@ -352,12 +358,29 @@ public:
     }
 
     void set_seed(unsigned s) { m_data = s; }
+    unsigned get_seed() const { return m_data; }
 
     int operator()() {
         return ((m_data = m_data * 214013L + 2531011L) >> 16) & 0x7fff; 
     }
 
+    // Assemble 32 bits from three 15-bit draws, most significant bits first.
+    uint32_t next_uint32() {
+        uint32_t r = (*this)();
+        r = (r << 15) | (*this)();
+        return (r << 2) | ((*this)() & 3);
+    }
+
+    // Draw the high half before the low half.
+    uint64_t next_uint64() {
+        uint64_t r = next_uint32();
+        return (r << 32) | next_uint32();
+    }
+
     unsigned operator()(unsigned u) {
+        SASSERT(u > 0);
+        if (u == 0)
+            return 0;
         unsigned r = static_cast<unsigned>((*this)());
         return r % u;
     }
@@ -368,24 +391,64 @@ public:
 };
 
 template<typename T>
-void shuffle(unsigned sz, T * array, random_gen & gen) {
-    int n = sz;
-    while (--n > 0) {
+void shuffle(std::span<T> array, random_gen & gen) {
+    auto n = array.size();
+    while (n-- > 0) {
         int k = gen() % (n + 1);
         std::swap(array[n], array[k]);
     }
 }
 
-#ifdef _EXTERNAL_RELEASE
-#define INTERNAL_CODE(CODE) ((void) 0)
-#else
-#define INTERNAL_CODE(CODE) { CODE } ((void) 0)
-#endif
+// Backward compatibility overload
+template<typename T>
+void shuffle(unsigned sz, T * array, random_gen & gen) {
+    shuffle(std::span<T>(array, sz), gen);
+}
 
 void fatal_error(int error_code);
 
 void set_fatal_error_handler(void (*pfn)(int error_code));
 
+
+template<typename S, typename T>
+bool any_of(S const& set, T const& p) {
+    for (auto const& s : set)
+        if (p(s))
+            return true;
+    return false;
+}
+
+template<typename S, typename T>
+bool all_of(S const& set, T const& p) {
+    for (auto const& s : set)
+        if (!p(s))
+            return false;
+    return true;
+}
+template<typename S, typename T>
+void filter(S& v, T const& p) {
+    unsigned i = 0;
+    for (auto const& e: v)
+        if (p(e))
+            v[i++] = e;
+    v.shrink(i);
+}
+
+template<typename S, typename T>
+bool xor_of(S const& set, T const& p) {
+    bool r = false;
+    for (auto const& s : set)
+        r ^= p(s);
+    return r;
+}
+
+template<typename S, typename R>
+R find(S const& set, std::function<bool(R)> p) {
+    for (auto const& s : set)
+        if (p(s))
+            return s;
+    throw default_exception("element not found");
+}
 
 /**
    \brief Iterator for the [0..sz[0]) X [0..sz[1]) X ... X [0..sz[n-1]).
@@ -406,6 +469,7 @@ class escaped {
     char const * end() const;
 public:
     escaped(char const * str, bool trim_nl = false, unsigned indent = 0):m_str(str), m_trim_nl(trim_nl), m_indent(indent) {}
+    escaped(const std::string &str, bool trim_nl = false, unsigned indent = 0):m_str(str.c_str()), m_trim_nl(trim_nl), m_indent(indent) {}
     void display(std::ostream & out) const;
 };
 
@@ -421,6 +485,35 @@ inline size_t megabytes_to_bytes(unsigned mb) {
     return r;
 }
 
+/** Compact version of std::count */
+template <typename Container, typename Item>
+std::size_t count(Container const& c, Item x)
+{
+    using std::begin, std::end;  // allows begin(c) to also find c.begin()
+    return std::count(begin(c), end(c), std::forward<Item>(x));
+}
 
-#endif /* UTIL_H_ */
+/** Compact version of std::count_if */
+template <typename Container, typename Predicate>
+std::size_t count_if(Container const& c, Predicate p)
+{
+    using std::begin, std::end;  // allows begin(c) to also find c.begin()
+    return std::count_if(begin(c), end(c), std::forward<Predicate>(p));
+}
 
+/** Basic version of https://en.cppreference.com/w/cpp/experimental/scope_exit */
+template <typename Callable>
+class on_scope_exit final {
+    Callable m_ef;
+public:
+    on_scope_exit(Callable&& ef)
+        : m_ef(std::forward<Callable>(ef))
+    { }
+    ~on_scope_exit() {
+        m_ef();
+    }
+};
+
+/** Helper type for std::visit, see examples on https://en.cppreference.com/w/cpp/utility/variant/visit */
+template <typename T>
+struct always_false : std::false_type {};

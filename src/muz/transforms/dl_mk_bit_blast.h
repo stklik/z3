@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_MK_BIT_BLAST_H_
-#define DL_MK_BIT_BLAST_H_
+#pragma once
 
 #include "muz/base/dl_rule_transformer.h"
 
@@ -32,7 +31,6 @@ namespace datalog {
         rule_set * operator()(rule_set const & source) override;
     };
 
-};
+}
 
-#endif /* DL_MK_BIT_BLAST_H_ */
 

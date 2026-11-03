@@ -24,7 +24,7 @@ Notes:
 #include "smt/smt_context.h"
 #include "opt/opt_context.h"
 #include "util/sorting_network.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 
 namespace opt {
 
@@ -36,61 +36,48 @@ namespace opt {
         expr_ref_vector   m_trail;
         func_decl_ref_vector m_fresh;
         ref<generic_model_converter> m_filter;
-        sortmax(maxsat_context& c, weights_t& ws, expr_ref_vector const& soft): 
-            maxsmt_solver_base(c, ws, soft), m_sort(*this), m_trail(m), m_fresh(m) {}
+        sortmax(maxsat_context& c, vector<soft>& s, unsigned index): 
+            maxsmt_solver_base(c, s, index), m_sort(*this), m_trail(m), m_fresh(m) {}
 
-        virtual ~sortmax() {}
+        lbool operator()() override {
+            if (!init()) 
+                return l_undef;
 
-        lbool operator()() {
-            obj_map<expr, rational> soft;            
-            if (!init()) {
-                return l_false;
-            }
-            lbool is_sat = find_mutexes(soft);
-            if (is_sat != l_true) {
-                return is_sat;
-            }
+            lbool is_sat = l_true;
             m_filter = alloc(generic_model_converter, m, "sortmax");
-            rational offset = m_lower;
-            m_upper = offset;
             expr_ref_vector in(m);
             expr_ref tmp(m);
             ptr_vector<expr> out;
-            obj_map<expr, rational>::iterator it = soft.begin(), end = soft.end();
-            for (; it != end; ++it) {
-                if (!it->m_value.is_unsigned()) {
+            for (auto const & [e, w, t] : m_soft) {
+                if (!w.is_unsigned()) {
                     throw default_exception("sortmax can only handle unsigned weights. Use a different heuristic.");
                 }
-                unsigned n = it->m_value.get_unsigned();
+                unsigned n = w.get_unsigned();
                 while (n > 0) {
-                    in.push_back(it->m_key);
+                    in.push_back(e);
                     --n;
                 }
             }
-            m_sort.sorting(in.size(), in.c_ptr(), out);
+            m_sort.sorting(in.size(), in.data(), out);
 
             // initialize sorting network outputs using the initial assignment.
             unsigned first = 0;
-            it = soft.begin();
-            for (; it != end; ++it) {
-                if (m_model->is_true(it->m_key)) {
-                    unsigned n = it->m_value.get_unsigned();
+            for (auto const & [e, w, t] : m_soft) {
+                if (t == l_true) {
+                    unsigned n = w.get_unsigned();
                     while (n > 0) {
                         s().assert_expr(out[first]);
                         ++first;
                         --n;
                     }
                 }
-                else {
-                    m_upper += it->m_value;
-                }
             }
             while (l_true == is_sat && first < out.size() && m_lower < m_upper) {
                 trace_bounds("sortmax");
                 s().assert_expr(out[first]);
                 is_sat = s().check_sat(0, nullptr);
-                TRACE("opt", tout << is_sat << "\n"; s().display(tout); tout << "\n";);
-                if (m.canceled()) {
+                TRACE(opt, tout << is_sat << "\n"; s().display(tout); tout << "\n";);
+                if (!m.inc()) {
                     is_sat = l_undef;
                 }
                 if (is_sat == l_true) {
@@ -100,7 +87,7 @@ namespace opt {
                     for (; first < out.size() && is_true(out[first]); ++first) { 
                         s().assert_expr(out[first]);
                     }
-                    TRACE("opt", model_smt2_pp(tout, m, *m_model.get(), 0););
+                    TRACE(opt, model_smt2_pp(tout, m, *m_model.get(), 0););
                     m_upper = m_lower + rational(out.size() - first);
                     (*m_filter)(m_model);
                 }
@@ -109,12 +96,12 @@ namespace opt {
                 is_sat = l_true;
                 m_lower = m_upper;
             }
-            TRACE("opt", tout << "min cost: " << m_upper << "\n";);
+            TRACE(opt, tout << "min cost: " << m_upper << "\n";);
             return is_sat;
         }
 
         void update_assignment() {
-            for (soft& s : m_soft) s.is_true = is_true(s.s);
+            for (soft& s : m_soft) s.set_value(is_true(s.s));
         }
 
         bool is_true(expr* e) {
@@ -125,7 +112,7 @@ namespace opt {
         pliteral mk_false() { return m.mk_false(); }
         pliteral mk_true() { return m.mk_true(); }
         pliteral mk_max(unsigned n, pliteral const* as) { return trail(m.mk_or(n, as)); }
-        pliteral mk_min(unsigned n, pliteral const* as) { return trail(m.mk_and(n, as)); }
+        pliteral mk_min(unsigned n, pliteral const* as) { return trail(m.mk_and(std::span<expr* const>(as, n))); }
         pliteral mk_not(pliteral a) { if (m.is_not(a,a)) return a; return trail(m.mk_not(a)); }
 
         std::ostream& pp(std::ostream& out, pliteral lit) {  return out << mk_pp(lit, m);  }
@@ -149,8 +136,8 @@ namespace opt {
     };
     
     
-    maxsmt_solver_base* mk_sortmax(maxsat_context& c, weights_t& ws, expr_ref_vector const& soft) {
-        return alloc(sortmax, c, ws, soft);
+    maxsmt_solver_base* mk_sortmax(maxsat_context& c, vector<soft>& s, unsigned index) {
+        return alloc(sortmax, c, s, index);
     }
 
 }

@@ -22,8 +22,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SUBPAVING_H_
-#define SUBPAVING_H_
+#pragma once
 
 #include "util/mpq.h"
 #include "math/subpaving/subpaving_types.h"
@@ -40,7 +39,7 @@ namespace subpaving {
 
 class context {
 public:
-    virtual ~context() {}
+    virtual ~context() = default;
 
     virtual unsynch_mpq_manager & qm() const = 0;
 
@@ -117,7 +116,6 @@ context * mk_hwf_context(reslimit& lim, f2n<hwf_manager> & m, unsynch_mpq_manage
 context * mk_mpff_context(reslimit& lim, mpff_manager & m, unsynch_mpq_manager & qm, params_ref const & p = params_ref(), small_object_allocator * a = nullptr);
 context * mk_mpfx_context(reslimit& lim, mpfx_manager & m, unsynch_mpq_manager & qm, params_ref const & p = params_ref(), small_object_allocator * a = nullptr);
 
-};
+}
 
 
-#endif

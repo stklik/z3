@@ -52,8 +52,6 @@ namespace format_ns {
             m_line_break_ext("cr++") {
         }
         
-        ~format_decl_plugin() override {}
-
         void finalize() override {
             if (m_format_sort)
                 m_manager->dec_ref(m_format_sort);
@@ -149,25 +147,13 @@ namespace format_ns {
         parameter p(s);
         return fm(m).mk_app(fid(m), OP_STRING, 1, &p, 0, nullptr);
     }
-    
+
     format * mk_int(ast_manager & m, int i) {
-        char buffer[128];
-#ifdef _WINDOWS
-        sprintf_s(buffer, ARRAYSIZE(buffer), "%d", i);
-#else
-        sprintf(buffer, "%d", i);
-#endif
-        return mk_string(m, buffer); 
+        return mk_string(m, std::to_string(i));         
     }
     
     format * mk_unsigned(ast_manager & m, unsigned u) {
-        char buffer[128];
-#ifdef _WINDOWS
-        sprintf_s(buffer, ARRAYSIZE(buffer), "%u", u);
-#else
-        sprintf(buffer, "%u", u);
-#endif
-        return mk_string(m, buffer); 
+        return mk_string(m, std::to_string(u));         
     }
     
     format * mk_indent(ast_manager & m, unsigned i, format * f) {
@@ -209,4 +195,4 @@ namespace format_ns {
         return fm(m).mk_app(fid(m), OP_NIL);
     }
 
-};
+}

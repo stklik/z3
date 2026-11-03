@@ -16,21 +16,18 @@ Author:
 Notes:
 
 --*/
-#ifndef QFBV_TACTIC_H_
-#define QFBV_TACTIC_H_
+#pragma once
 
 #include "util/params.h"
+#include "tactic/tactic.h"
 class ast_manager;
 class tactic;
 
 tactic * mk_qfbv_tactic(ast_manager & m, params_ref const & p = params_ref());
 
-/*
-  ADD_TACTIC("qfbv",  "builtin strategy for solving QF_BV problems.", "mk_qfbv_tactic(m, p)")
-*/
+Z3_ADD_TACTIC(qfbv, "qfbv", "builtin strategy for solving QF_BV problems.", mk_qfbv_tactic(m, p));
 
 tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p);
 
 tactic * mk_qfbv_tactic(ast_manager & m, params_ref const & p, tactic* sat, tactic* smt);
 
-#endif

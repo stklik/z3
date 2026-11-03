@@ -20,10 +20,10 @@ Revision History:
 #include<utility>
 #include<sstream>
 #include<limits>
-#include "muz/rel/dl_mk_simple_joins.h"
-#include "muz/rel/dl_relation_manager.h"
 #include "ast/ast_pp.h"
 #include "util/trace.h"
+#include "muz/rel/dl_mk_simple_joins.h"
+#include "muz/rel/dl_relation_manager.h"
 
 
 namespace datalog {
@@ -42,20 +42,19 @@ namespace datalog {
             /**
                \brief Number of rules longer than two that contain this pair.
 
-               This number is being updated by \c add_rule and \remove rule. Even though between
+               This number is being updated by \c add_rule and \c remove_rule. Even though between
                adding a rule and removing it, the length of a rule can decrease without this pair
                being notified about it, it will surely see the decrease from length 3 to 2 which
                the threshold for rule being counted in this counter.
              */
-            unsigned    m_consumers;
-            bool        m_stratified;
-            unsigned    m_src_stratum;
+            unsigned    m_consumers { 0 };
+            bool        m_stratified { true };
+            unsigned    m_src_stratum { 0 };
         public:
             var_idx_set m_all_nonlocal_vars;
             rule_vector m_rules;
 
-            pair_info() : m_consumers(0), m_stratified(true), m_src_stratum(0) {}
-
+            pair_info & operator=(const pair_info &) = delete;
             bool can_be_joined() const {
                 return m_consumers > 0;
             }
@@ -94,7 +93,7 @@ namespace datalog {
                     m_stratified = (head_stratum > m_src_stratum);
                 }
                 idx_set_union(m_all_nonlocal_vars, non_local_vars_normalized);
-                TRACE("dl", tout << "all-nonlocal: " << m_all_nonlocal_vars << "\n";);
+                TRACE(dl, tout << "all-nonlocal: " << m_all_nonlocal_vars << "\n";);
             }
 
             /**
@@ -110,8 +109,6 @@ namespace datalog {
                 SASSERT(!m_rules.empty() || m_consumers == 0);
                 return m_rules.empty();
             }
-        private:
-            pair_info & operator=(const pair_info &); //to avoid the implicit one
         };
         typedef std::pair<app*, app*> app_pair;
         typedef pair_hash<obj_ptr_hash<app>, obj_ptr_hash<app> > app_pair_hash;
@@ -136,13 +133,14 @@ namespace datalog {
 
     public:
         join_planner(context & ctx, rule_set & rs_aux_copy)
-            : m_context(ctx), m(ctx.get_manager()), 
+            : m_context(ctx), 
+              m(ctx.get_manager()), 
               rm(ctx.get_rule_manager()),
               m_var_subst(ctx.get_var_subst()),
               m_rs_aux_copy(rs_aux_copy), 
-              m_introduced_rules(ctx.get_rule_manager()),
+              m_introduced_rules(rm),
               m_modified_rules(false),
-              m_pinned(ctx.get_manager())
+              m_pinned(m)
         {
         }
 
@@ -155,19 +153,19 @@ namespace datalog {
 
     private:
 
-        void get_normalizer(app * t, unsigned & next_var, expr_ref_vector & result) const {
+        void get_normalizer(app * t, unsigned & next_var, var_ref_vector & result) const {
             SASSERT(!result.empty());
             unsigned res_ofs = result.size()-1;
             for (expr* arg : *t) {
                 unsigned var_idx = to_var(arg)->get_idx();
                 if (!result.get(res_ofs - var_idx)) {
-                    result[res_ofs - var_idx] = m.mk_var(next_var++, m.get_sort(arg));
+                    result[res_ofs - var_idx] = m.mk_var(next_var++, arg->get_sort());
                 }
             }
         }
 
-        expr_ref_vector get_normalizer(app * t1, app * t2) const {
-            expr_ref_vector result(m);
+        var_ref_vector get_normalizer(app * t1, app * t2) const {
+            var_ref_vector result(m);
             if (t1->get_num_args() == 0 && t2->get_num_args() == 0) {
                 return result; //nothing to normalize
             }
@@ -225,7 +223,7 @@ namespace datalog {
                 //so the order should not matter
             }
 
-            result.resize(max_var_idx + 1, static_cast<expr *>(nullptr));
+            result.resize(max_var_idx + 1, static_cast<var *>(nullptr));
             unsigned next_var = 0;
             get_normalizer(t1, next_var, result);
             get_normalizer(t2, next_var, result);
@@ -234,11 +232,9 @@ namespace datalog {
 
 
         app_pair get_key(app * t1, app * t2) {
-            expr_ref_vector norm_subst = get_normalizer(t1, t2);
-            expr_ref t1n_ref(m);
-            expr_ref t2n_ref(m);
-            t1n_ref = m_var_subst(t1, norm_subst.size(), norm_subst.c_ptr());
-            t2n_ref = m_var_subst(t2, norm_subst.size(), norm_subst.c_ptr());
+            var_ref_vector norm_subst = get_normalizer(t1, t2);
+            expr_ref t1n_ref = m_var_subst(t1, norm_subst);
+            expr_ref t2n_ref = m_var_subst(t2, norm_subst);
             app * t1n = to_app(t1n_ref);
             app * t2n = to_app(t2n_ref);
             if (t1n->get_id() > t2n->get_id()) {
@@ -247,7 +243,7 @@ namespace datalog {
 
             m_pinned.push_back(t1n);
             m_pinned.push_back(t2n);
-            TRACE("dl", tout << mk_pp(t1, m) << " " << mk_pp(t2, m) << " |-> " << t1n_ref << " " << t2n_ref << "\n";);
+            TRACE(dl_verbose, tout << mk_pp(t1, m) << " " << mk_pp(t2, m) << " |-> " << t1n_ref << " " << t2n_ref << "\n";);
             
             return app_pair(t1n, t2n);
         }
@@ -259,24 +255,23 @@ namespace datalog {
             by the time of a call to this function
             */
         void register_pair(app * t1, app * t2, rule * r, const var_idx_set & non_local_vars) {
-            SASSERT (t1!=t2);
-            cost_map::entry * e = m_costs.insert_if_not_there2(get_key(t1, t2), nullptr);
-            pair_info * & ptr_inf = e->get_data().m_value;
+            SASSERT (t1 != t2);
+            pair_info * & ptr_inf = m_costs.insert_if_not_there(get_key(t1, t2), nullptr);
             if (ptr_inf == nullptr) {
                 ptr_inf = alloc(pair_info);
             }
             pair_info & inf = *ptr_inf;
 
-            expr_ref_vector normalizer = get_normalizer(t1, t2);
+            var_ref_vector normalizer = get_normalizer(t1, t2);
             unsigned norm_ofs = normalizer.size()-1;
             var_idx_set normalized_vars;
             for (auto idx : non_local_vars) {
-                unsigned norm_var = to_var(normalizer.get(norm_ofs - idx))->get_idx();
+                unsigned norm_var = normalizer.get(norm_ofs - idx)->get_idx();
                 normalized_vars.insert(norm_var);
             }
 
             inf.add_rule(*this, t1, t2, r, normalized_vars, non_local_vars);
-            TRACE("dl", tout << mk_pp(t1, m) << " " << mk_pp(t2, m) << " ";
+            TRACE(dl, tout << mk_pp(t1, m) << " " << mk_pp(t2, m) << " ";
                   tout << non_local_vars << "\n";
                   r->display(m_context, tout); 
                   if (inf.can_be_joined()) tout << "cost: " << inf.get_cost() << "\n";);
@@ -295,24 +290,28 @@ namespace datalog {
         void register_rule(rule * r) {
             rule_counter counter;
             counter.count_rule_vars(r, 1);
-            TRACE("dl", tout << "counter: "; for (auto const& kv: counter) tout << kv.m_key << ": " << kv.m_value << " "; tout << "\n";);
-
-            ptr_vector<app> & rule_content = 
-                m_rules_content.insert_if_not_there2(r, ptr_vector<app>())->get_data().m_value;
+            TRACE(dl, tout << "counter: "; for (auto const& kv: counter) tout << kv.m_key << ": " << kv.m_value << " "; tout << "\n";);            
+            ptr_vector<app> & rule_content = m_rules_content.insert_if_not_there(r, ptr_vector<app>());
             SASSERT(rule_content.empty());
-
-            TRACE("dl", r->display(m_context, tout << "register ");); 
-
+            
+            TRACE(dl, r->display(m_context, tout << "register ");); 
+            
             unsigned pos_tail_size = r->get_positive_tail_size();
-            for (unsigned i = 0; i < pos_tail_size; i++) {
-                rule_content.push_back(r->get_tail(i));
+            for (unsigned i = 0; i < pos_tail_size; ++i) {
+                app* t = r->get_tail(i);
+                if (!rule_content.contains(t))
+                    rule_content.push_back(t);
+                else
+                    m_modified_rules = true;
             }
-            for (unsigned i = 0; i+1 < pos_tail_size; i++) {
-                app * t1 = r->get_tail(i);
+            pos_tail_size = rule_content.size();
+            for (unsigned i = 0; i+1 < pos_tail_size; ++i) {
+                app * t1 = rule_content[i];
                 var_idx_set t1_vars = rm.collect_vars(t1);
                 counter.count_vars(t1, -1);  //temporarily remove t1 variables from counter
-                for (unsigned j = i+1; j < pos_tail_size; j++) {
-                    app * t2 = r->get_tail(j);
+                for (unsigned j = i+1; j < pos_tail_size; ++j) {
+                    app * t2 = rule_content[j];
+                    SASSERT(t1 != t2);
                     counter.count_vars(t2, -1);  //temporarily remove t2 variables from counter
                     var_idx_set t2_vars = rm.collect_vars(t2);
                     t2_vars |= t1_vars;
@@ -320,7 +319,7 @@ namespace datalog {
                     counter.collect_positive(non_local_vars);
                     counter.count_vars(t2, 1);  //restore t2 variables in counter
                     set_intersection(non_local_vars, t2_vars);
-                    TRACE("dl", tout << "non-local vars: " << non_local_vars << "\n";);
+                    TRACE(dl, tout << "non-local vars: " << non_local_vars << "\n";);
                     register_pair(t1, t2, r, non_local_vars);
                 }
                 counter.count_vars(t1, 1);  //restore t1 variables in counter
@@ -333,7 +332,7 @@ namespace datalog {
                 var * v = to_var(arg);
                 if (v->get_idx() == var_idx) {
                     args.push_back(v);
-                    domain.push_back(m.get_sort(v));
+                    domain.push_back(v->get_sort());
                     return true;
                 }
             }
@@ -357,7 +356,7 @@ namespace datalog {
                 }
                 SASSERT(found);
             }
-            TRACE("dl", 
+            TRACE(dl, 
                   tout << mk_pp(t1, m) << " " << mk_pp(t2, m) << " arity: " << arity << "\n";
                   tout << "output: " << output_vars << "\n";
                   tout << "args:   " << args << "\n";);
@@ -368,7 +367,7 @@ namespace datalog {
             rule * one_parent = inf.m_rules.back();
 
             func_decl* parent_head = one_parent->get_decl();
-            const char * one_parent_name = parent_head->get_name().bare_str();
+            std::string one_parent_name = parent_head->get_name().str();
             std::string parent_name;
             if (inf.m_rules.size() > 1) {
                 parent_name = one_parent_name + std::string("_and_") + to_string(inf.m_rules.size()-1);
@@ -378,14 +377,14 @@ namespace datalog {
             }
 
             func_decl * decl = m_context.mk_fresh_head_predicate(
-                symbol(parent_name.c_str()), symbol("split"), 
-                arity, domain.c_ptr(), parent_head);
+                symbol(parent_name), symbol("split"), 
+                arity, domain.data(), parent_head);
 
-            app_ref head(m.mk_app(decl, arity, args.c_ptr()), m);
+            app_ref head(m.mk_app(decl, arity, args.data()), m);
 
-            app * tail[] = {t1, t2};
+            app * tail[] = { t1, t2 };
 
-            rule * new_rule = m_context.get_rule_manager().mk(head, 2, tail, nullptr);
+            rule * new_rule = rm.mk(head, 2, tail, nullptr);
 
             //TODO: update accounting so that it can handle multiple parents
             new_rule->set_accounting_parent_object(m_context, one_parent);
@@ -409,26 +408,26 @@ namespace datalog {
 
         void replace_edges(rule * r, const app_ref_vector & removed_tails, 
                            const app_ref_vector & added_tails0, const ptr_vector<app> & rule_content) {
-            SASSERT(removed_tails.size()>=added_tails0.size());
+            SASSERT(removed_tails.size() >= added_tails0.size());
             unsigned len = rule_content.size();
             unsigned original_len = len+removed_tails.size()-added_tails0.size();
             app_ref_vector added_tails(added_tails0); //we need a copy since we'll be modifying it
-            TRACE("dl", tout << added_tails << "\n";);
+            TRACE(dl, tout << added_tails << "\n";);
 
             unsigned rt_sz = removed_tails.size();
             //remove edges between removed tails
-            for (unsigned i = 0; i < rt_sz; i++) {
-                for (unsigned j = i+1; j < rt_sz; j++) {
+            for (unsigned i = 0; i < rt_sz; ++i) {
+                for (unsigned j = i+1; j < rt_sz; ++j) {
                     app_pair pair_key = get_key(removed_tails[i], removed_tails[j]);
                     remove_rule_from_pair(pair_key, r, original_len);
                 }
             }
             //remove edges between surviving tails and removed tails
-            for (unsigned i = 0; i < len; i++) {
+            for (unsigned i = 0; i < len; ++i) {
                 if (added_tails.contains(rule_content[i])) {
                     continue;
                 }
-                for (unsigned ri = 0; ri < rt_sz; ri++) {
+                for (unsigned ri = 0; ri < rt_sz; ++ri) {
                     app_pair pair_key = get_key(rule_content[i], removed_tails[ri]);
                     remove_rule_from_pair(pair_key, r, original_len);
                 }
@@ -446,10 +445,10 @@ namespace datalog {
             unsigned tail_size = r->get_tail_size();
             unsigned pos_tail_size = r->get_positive_tail_size();
 
-            for (unsigned i = pos_tail_size; i < tail_size; i++) {
+            for (unsigned i = pos_tail_size; i < tail_size; ++i) {
                 counter.count_vars(r->get_tail(i), 1);
             }
-            for (unsigned i = 0; i < len; i++) {
+            for (unsigned i = 0; i < len; ++i) {
                 counter.count_vars(rule_content[i], 1);
             }
 
@@ -457,12 +456,12 @@ namespace datalog {
             while (!added_tails.empty()) {
                 app * a_tail = added_tails.back();  //added tail
                 
-                TRACE("dl", tout << "replace edges " << mk_pp(a_tail, m) << "\n";);
+                TRACE(dl, tout << "replace edges " << mk_pp(a_tail, m) << "\n";);
 
                 var_idx_set a_tail_vars = rm.collect_vars(a_tail);
                 counter.count_vars(a_tail, -1);  //temporarily remove a_tail variables from counter
 
-                for (unsigned i = 0; i < len; i++) {
+                for (unsigned i = 0; i < len; ++i) {
                     app * o_tail = rule_content[i]; //other tail
                     if (added_tails.contains(o_tail)) {
                         //this avoids adding edges between new tails twice
@@ -492,21 +491,23 @@ namespace datalog {
             if (len == 1) {
                 return;
             }
-            TRACE("dl", 
-                  r->display(m_context, tout << "rule ");
+            TRACE(dl, 
                   tout << "pair: " << mk_pp(t1, m) << " " << mk_pp(t2, m) << "\n";
                   tout << mk_pp(t_new, m) << "\n";
                   tout << "all-non-local: " << m_costs[pair_key]->m_all_nonlocal_vars << "\n";
-                  for (app* a : rule_content) tout << mk_pp(a, m) << " "; tout << "\n";);
+                  tout << mk_pp(r->get_head(), m) << " :-\n";
+                  for (app* a : rule_content) tout << " " << mk_pp(a, m) << "\n";);
 
             rule_counter counter;
-            counter.count_rule_vars(r, 1);
+            for (app* t : rule_content)
+                counter.count_vars(t, +1);
+            counter.count_vars(r->get_head(), +1);
 
             func_decl * t1_pred = t1->get_decl();
             func_decl * t2_pred = t2->get_decl();
             app_ref_vector removed_tails(m);
             app_ref_vector added_tails(m);
-            for (unsigned i1 = 0; i1 < len; i1++) {
+            for (unsigned i1 = 0; i1 < len; ++i1) {
                 app * rt1 = rule_content[i1];
                 if (rt1->get_decl() != t1_pred) {
                     continue;
@@ -514,10 +515,9 @@ namespace datalog {
                 var_idx_set rt1_vars = rm.collect_vars(rt1);
                 counter.count_vars(rt1, -1);
 
-
                 var_idx_set t1_vars = rm.collect_vars(t1);
-                unsigned i2start = (t1_pred==t2_pred) ? (i1+1) : 0;
-                for (unsigned i2 = i2start; i2 < len; i2++) {
+                unsigned i2start = (t1_pred == t2_pred) ? (i1+1) : 0;
+                for (unsigned i2 = i2start; i2 < len; ++i2) {
                     app * rt2 = rule_content[i2];
                     if (i1 == i2 || rt2->get_decl() != t2_pred) {
                         continue;
@@ -526,13 +526,12 @@ namespace datalog {
                         continue;
                     }                    
 
-                    expr_ref_vector denormalizer(m);
-                    expr_ref_vector normalizer = get_normalizer(rt1, rt2);
-                    reverse_renaming(m, normalizer, denormalizer);
+                    var_ref_vector denormalizer(m);
+                    var_ref_vector normalizer = get_normalizer(rt1, rt2);
+                    reverse_renaming(normalizer, denormalizer);
                     expr_ref new_transf(m);
-                    new_transf = m_var_subst(t_new, denormalizer.size(), denormalizer.c_ptr());
-                    var_idx_set transf_vars = rm.collect_vars(new_transf);
-                    TRACE("dl", tout  << mk_pp(rt1, m) << " " << mk_pp(rt2, m) << " -> " << new_transf << "\n";);            
+                    new_transf = m_var_subst(t_new, denormalizer);
+                    TRACE(dl, tout  << mk_pp(rt1, m) << " " << mk_pp(rt2, m) << " -> " << new_transf << "\n";);            
                     counter.count_vars(rt2, -1);
                     var_idx_set rt2_vars = rm.collect_vars(rt2);
                     var_idx_set tr_vars = rm.collect_vars(new_transf);
@@ -542,25 +541,41 @@ namespace datalog {
                     set_intersection(non_local_vars, rt2_vars);
                     counter.count_vars(rt2, +1);
                     // require that tr_vars contains non_local_vars
-                    TRACE("dl", tout << "non-local : " << non_local_vars << " tr_vars " << tr_vars << " rt12_vars " << rt2_vars << "\n";);
+                    TRACE(dl, tout << "non-local : " << non_local_vars << " tr_vars " << tr_vars << " rt12_vars " << rt2_vars << "\n";);
                     if (!non_local_vars.subset_of(tr_vars)) {                        
-                        expr_ref_vector normalizer2 = get_normalizer(rt2, rt1);
-                        TRACE("dl", tout << normalizer << "\nnorm\n" << normalizer2 << "\n";);
+                        var_ref_vector normalizer2 = get_normalizer(rt2, rt1);
+                        TRACE(dl, tout << normalizer << "\nnorm\n" << normalizer2 << "\n";);
                         denormalizer.reset();
-                        reverse_renaming(m, normalizer2, denormalizer);
-                        new_transf = m_var_subst(t_new, denormalizer.size(), denormalizer.c_ptr());
+                        reverse_renaming(normalizer2, denormalizer);
+                        new_transf = m_var_subst(t_new, denormalizer);
+                        TRACE(dl, tout  << mk_pp(rt2, m) << " " << mk_pp(rt1, m) << " -> " << new_transf << "\n";);            
                         SASSERT(non_local_vars.subset_of(rm.collect_vars(new_transf)));
-                        TRACE("dl", tout  << mk_pp(rt2, m) << " " << mk_pp(rt1, m) << " -> " << new_transf << "\n";);            
                     }
                     app * new_lit = to_app(new_transf);
-                    m_pinned.push_back(new_lit);
-                    rule_content[i1] = new_lit;
-                    rule_content[i2] = rule_content.back();
-                    rule_content.pop_back();
-                    len--;                                  //here the bound of both loops changes!!!
-                    removed_tails.push_back(rt1);
-                    removed_tails.push_back(rt2);
-                    added_tails.push_back(new_lit);
+                    if (added_tails.contains(new_lit)) {
+                        if (i1 < i2)
+                            std::swap(i1, i2);
+                        if (i1 < rule_content.size()) 
+                            rule_content[i1] = rule_content.back();
+                        rule_content.pop_back();
+                        if (i2 < rule_content.size()) 
+                            rule_content[i2] = rule_content.back();
+                        rule_content.pop_back();
+                        len -= 2;
+                        removed_tails.push_back(rt1);
+                        removed_tails.push_back(rt2);
+                        counter.count_vars(new_lit, -1);
+                    }
+                    else {
+                        m_pinned.push_back(new_lit);
+                        rule_content[i1] = new_lit;
+                        rule_content[i2] = rule_content.back();
+                        rule_content.pop_back();
+                        len--;                                  //here the bound of both loops changes!!!
+                        removed_tails.push_back(rt1);
+                        removed_tails.push_back(rt2);
+                        added_tails.push_back(new_lit);
+                    }
                     // this exits the inner loop, the outer one continues in case there will 
                     // be other matches
                     break;
@@ -570,13 +585,17 @@ namespace datalog {
             SASSERT(!removed_tails.empty());
             SASSERT(!added_tails.empty());
             m_modified_rules = true;
-            TRACE("dl", tout << "replace rule content\n";);
+            TRACE(dl, tout << "replace rule content\n";);
             replace_edges(r, removed_tails, added_tails, rule_content);
         }
 
-        cost get_domain_size(func_decl * pred, unsigned arg_index) const {
-            relation_sort sort = pred->get_domain(arg_index);
-            return static_cast<cost>(m_context.get_sort_size_estimate(sort));
+
+        cost get_domain_size(expr* e) const {
+            return get_domain_size(e->get_sort());
+        }
+
+        cost get_domain_size(sort* s) const {
+            return static_cast<cost>(m_context.get_sort_size_estimate(s));            
         }
 
         unsigned get_stratum(func_decl * pred) const {
@@ -584,73 +603,65 @@ namespace datalog {
         }
 
         cost estimate_size(app * t) const {
-            func_decl * pred = t->get_decl();
-            unsigned n = pred->get_arity();
             rel_context_base* rel = m_context.get_rel_context();
             if (!rel) {
                 return cost(1);
             }
             relation_manager& rm = rel->get_rmanager();
-            if ( (m_context.saturation_was_run() && rm.try_get_relation(pred))
-                || rm.is_saturated(pred)) {
+            func_decl * pred = t->get_decl();
+            if ( (m_context.saturation_was_run() && rm.try_get_relation(pred)) || rm.is_saturated(pred)) {
                 SASSERT(rm.try_get_relation(pred)); //if it is saturated, it should exist
                 unsigned rel_size_int = rel->get_relation(pred).get_size_estimate_rows();
                 if (rel_size_int != 0) {
-                    cost rel_size = static_cast<cost>(rel_size_int);
-                    cost curr_size = rel_size;
-                    for (unsigned i = 0; i < n; i++) {
-                        if (!is_var(t->get_arg(i))) {
-                            curr_size /= get_domain_size(pred, i);
+                    cost curr_size = static_cast<cost>(rel_size_int);
+                    for (expr* arg : *t) {
+                        if (!is_var(arg)) {
+                            curr_size /= get_domain_size(arg);
                         }
                     }
                     return curr_size;
                 }
             }
             cost res = 1;
-            for (unsigned i = 0; i < n; i++) {
-                if (is_var(t->get_arg(i))) {
-                    res *= get_domain_size(pred, i);
-                }
+            for (expr* arg : *t) {
+                if (is_var(arg))
+                    res *= get_domain_size(arg);
             }
             return res;
         }
 
         cost compute_cost(app * t1, app * t2, const var_idx_set & non_local_vars) const {
-            func_decl * t1_pred = t1->get_decl();
-            func_decl * t2_pred = t2->get_decl();
             cost inters_size = 1;
             variable_intersection vi(m_context.get_manager());
             vi.populate(t1, t2);
             unsigned n = vi.size();
             // remove contributions from joined columns.
-            for (unsigned i = 0; i < n; i++) {
+            for (unsigned i = 0; i < n; ++i) {
                 unsigned arg_index1, arg_index2;
                 vi.get(i, arg_index1, arg_index2);
-                SASSERT(is_var(t1->get_arg(arg_index1)));
-                if (non_local_vars.contains(to_var(t1->get_arg(arg_index1))->get_idx())) {
-                    inters_size *= get_domain_size(t1_pred, arg_index1);
+                expr* arg = t1->get_arg(arg_index1);
+                SASSERT(is_var(arg));
+                if (non_local_vars.contains(to_var(arg)->get_idx())) {
+                    inters_size *= get_domain_size(arg);
                 }
-                //joined arguments must have the same domain
-                SASSERT(get_domain_size(t1_pred, arg_index1)==get_domain_size(t2_pred, arg_index2));
+                // joined arguments must have the same domain
+                SASSERT(get_domain_size(arg) == get_domain_size(t2->get_arg(arg_index2)));
             }
             // remove contributions from projected columns.
-            for (unsigned i = 0; i < t1->get_num_args(); ++i) {
-                if (is_var(t1->get_arg(i)) && 
-                    !non_local_vars.contains(to_var(t1->get_arg(i))->get_idx())) {
-                    inters_size *= get_domain_size(t1_pred, i);
+            for (expr* arg : *t1) {
+                if (is_var(arg) && !non_local_vars.contains(to_var(arg)->get_idx())) {
+                    inters_size *= get_domain_size(arg);
                 }
             }
-            for (unsigned i = 0; i < t2->get_num_args(); ++i) {
-                if (is_var(t2->get_arg(i)) && 
-                    !non_local_vars.contains(to_var(t2->get_arg(i))->get_idx())) {
-                    inters_size *= get_domain_size(t2_pred, i);
+            for (expr* arg : *t2) {
+                if (is_var(arg) && !non_local_vars.contains(to_var(arg)->get_idx())) {
+                    inters_size *= get_domain_size(arg);
                 }
             }
 
-            cost res = estimate_size(t1)*estimate_size(t2)/ inters_size; // (inters_size*inters_size);
-            //cost res = -inters_size;
+            cost res = (estimate_size(t1) * estimate_size(t2)) / inters_size; 
 
-            TRACE("report_costs",                  
+            TRACE(report_costs,                  
                   display_predicate(m_context, t1, tout);
                   display_predicate(m_context, t2, tout);
                   tout << res << "\n";);
@@ -659,10 +670,8 @@ namespace datalog {
 
 
         bool pick_best_pair(app_pair & p) {
-            app_pair best;
             bool found = false;
             cost best_cost;
-
             for (auto const& kv : m_costs) {
                 app_pair key = kv.m_key;
                 pair_info & inf = *kv.m_value;
@@ -673,14 +682,10 @@ namespace datalog {
                 if (!found || c < best_cost) {
                     found = true;
                     best_cost = c;
-                    best = key;
+                    p = key;
                 }
             }
-            if (!found) {
-                return false;
-            }
-            p = best;
-            return true;
+            return found;
         }
 
 
@@ -699,10 +704,10 @@ namespace datalog {
             if (!m_modified_rules) {
                 return nullptr;
             }
-            rule_set * result = alloc(rule_set, m_context);       
+            scoped_ptr<rule_set> result = alloc(rule_set, m_context);       
             for (auto& kv : m_rules_content) {
                 rule * orig_r = kv.m_key;
-                ptr_vector<app> content = kv.m_value;
+                ptr_vector<app> const& content = kv.m_value;
                 SASSERT(content.size() <= 2);
                 if (content.size() == orig_r->get_positive_tail_size()) {
                     //rule did not change
@@ -711,27 +716,27 @@ namespace datalog {
                 }
 
                 ptr_vector<app> tail(content);
-                svector<bool> negs(tail.size(), false);
+                bool_vector negs(tail.size(), false);
                 unsigned or_len = orig_r->get_tail_size();
-                for (unsigned i=orig_r->get_positive_tail_size(); i < or_len; i++) {
+                for (unsigned i = orig_r->get_positive_tail_size(); i < or_len; ++i) {
                     tail.push_back(orig_r->get_tail(i));
                     negs.push_back(orig_r->is_neg_tail(i));
                 }
 
-                rule * new_rule = m_context.get_rule_manager().mk(orig_r->get_head(), tail.size(), tail.c_ptr(), 
-                    negs.c_ptr(), orig_r->name());
+                rule * new_rule = rm.mk(orig_r->get_head(), tail.size(), tail.data(), 
+                    negs.data(), orig_r->name());
 
                 new_rule->set_accounting_parent_object(m_context, orig_r);
-                m_context.get_rule_manager().mk_rule_rewrite_proof(*orig_r, *new_rule);
+                rm.mk_rule_rewrite_proof(*orig_r, *new_rule);
                 result->add_rule(new_rule);
             }
-            while (!m_introduced_rules.empty()) {
-                result->add_rule(m_introduced_rules.back());
-                m_context.get_rule_manager().mk_rule_asserted_proof(*m_introduced_rules.back());
-                m_introduced_rules.pop_back();
+            for (rule* r : m_introduced_rules) {
+                result->add_rule(r);
+                rm.mk_rule_asserted_proof(*r);
             }
+            m_introduced_rules.reset();
             result->inherit_predicates(source);
-            return result;
+            return result.detach();
         }
     };
 
@@ -741,12 +746,10 @@ namespace datalog {
         if (!rs_aux_copy.is_closed()) {
             rs_aux_copy.close();
         }
-
         join_planner planner(m_context, rs_aux_copy);
-
         return planner.run(source);
     }
 
 
-};
+}
 

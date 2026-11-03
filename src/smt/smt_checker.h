@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_CHECKER_H_
-#define SMT_CHECKER_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "util/obj_hashtable.h"
@@ -38,10 +37,10 @@ namespace smt {
         unsigned               m_num_bindings;
         enode * const *        m_bindings;
 
-        bool all_args(app * a, bool is_true);
-        bool any_arg(app * a, bool is_true);
-        bool check_core(expr * n, bool is_true);
-        bool check(expr * n, bool is_true);
+        bool all_args(app *a, unsigned depth, bool is_true);
+        bool any_arg(app *a, unsigned depth, bool is_true);
+        bool check_core(expr * n, unsigned depth, bool is_true);
+        bool check(expr *n, unsigned depth, bool is_true);
         enode * get_enode_eq_to_core(app * n);
         enode * get_enode_eq_to(expr * n);
 
@@ -51,7 +50,6 @@ namespace smt {
         bool is_unsat(expr * n, unsigned num_bindings = 0, enode * const * bindings = nullptr);
     };
 
-};
+}
 
-#endif /* SMT_CHECKER_H_ */
 

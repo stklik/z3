@@ -20,10 +20,9 @@ Revision History:
 
 namespace smt {
 
-    fingerprint::fingerprint(region & r, void * d, unsigned d_h, expr* def, unsigned n, enode * const * args):
+    fingerprint::fingerprint(region & r, void * d, unsigned d_h, unsigned n, enode * const * args):
         m_data(d), 
         m_data_hash(d_h),
-        m_def(def),
         m_num_args(n), 
         m_args(nullptr) {
         m_args = new (r) enode*[n];
@@ -36,7 +35,7 @@ namespace smt {
         if (f1->get_num_args() != f2->get_num_args())
             return false;
         unsigned n = f1->get_num_args();
-        for(unsigned i = 0; i < n; i++)
+        for(unsigned i = 0; i < n; ++i)
             if (f1->get_arg(i) != f2->get_arg(i))
                 return false;
         return true;
@@ -48,7 +47,7 @@ namespace smt {
         m_dummy.m_data      = data;
         m_dummy.m_data_hash = data_hash;
         m_dummy.m_num_args  = num_args;
-        m_dummy.m_args      = m_tmp.c_ptr();
+        m_dummy.m_args      = m_tmp.data();
         return &m_dummy;
     }
 
@@ -62,25 +61,39 @@ namespace smt {
     }
 
     
-    fingerprint * fingerprint_set::insert(void * data, unsigned data_hash, unsigned num_args, enode * const * args, expr* def) {
+    fingerprint * fingerprint_set::insert(void * data, unsigned data_hash, unsigned num_args, enode * const * args) {
+        
+        struct arg_data {
+            unsigned data_hash;
+            enode* const* args;
+        };
+        struct khash {
+            unsigned operator()(arg_data const& d) const {
+                return d.data_hash;
+            }
+        };
+        struct arghash {
+            unsigned operator()(arg_data const& d, unsigned i) const {
+                return d.args[i]->hash();
+            }
+        };
+        arg_data arg_data({ data_hash, args });
+        khash kh;
+        arghash ah;
+        data_hash = get_composite_hash(arg_data, num_args, kh, ah);
+
         fingerprint * d = mk_dummy(data, data_hash, num_args, args);
         if (m_set.contains(d)) 
             return nullptr;
-        TRACE("fingerprint_bug", tout << "1) inserting: " << data_hash << " num_args: " << num_args;
-              for (unsigned i = 0; i < num_args; i++) tout << " " << args[i]->get_owner_id(); 
-              tout << "\n";);
-        for (unsigned i = 0; i < num_args; i++)
+        for (unsigned i = 0; i < num_args; ++i)
             d->m_args[i] = d->m_args[i]->get_root();
         if (m_set.contains(d)) {
-            TRACE("fingerprint_bug", tout << "failed: " << data_hash << " num_args: " << num_args;
-                  for (unsigned i = 0; i < num_args; i++) tout << " " << d->m_args[i]->get_owner_id(); 
-                  tout << "\n";);
+            TRACE(fingerprint_bug, tout << "failed: " << *d;);
             return nullptr;
         }
-        TRACE("fingerprint_bug", tout << "2) inserting: " << *d;);
-        fingerprint * f = new (m_region) fingerprint(m_region, data, data_hash, def, num_args, d->m_args);
+        TRACE(fingerprint_bug, tout << "inserting @" << m_scopes.size() << " " << *d;);
+        fingerprint * f = new (m_region) fingerprint(m_region, data, data_hash, num_args, d->m_args);
         m_fingerprints.push_back(f);
-        m_defs.push_back(def);
         m_set.insert(f);
         return f;
     }
@@ -89,17 +102,14 @@ namespace smt {
         fingerprint * d = mk_dummy(data, data_hash, num_args, args);
         if (m_set.contains(d)) 
             return true;
-        for (unsigned i = 0; i < num_args; i++)
+        for (unsigned i = 0; i < num_args; ++i)
             d->m_args[i] = d->m_args[i]->get_root();
-        if (m_set.contains(d))
-            return true;
-        return false;
+        return m_set.contains(d);
     }
     
     void fingerprint_set::reset() {
         m_set.reset();
         m_fingerprints.reset();
-        m_defs.reset();
     }
         
     void fingerprint_set::push_scope() {
@@ -112,11 +122,15 @@ namespace smt {
         unsigned new_lvl  = lvl - num_scopes;
         unsigned old_size = m_scopes[new_lvl];
         unsigned size     = m_fingerprints.size();
-        for (unsigned i = old_size; i < size; i++) 
-            m_set.erase(m_fingerprints[i]);
+        if (old_size == 0 && size > 0) 
+            m_set.reset();
+        else {
+            for (unsigned i = old_size; i < size; ++i) 
+                m_set.erase(m_fingerprints[i]);
+        }
         m_fingerprints.shrink(old_size);
-        m_defs.shrink(old_size);
         m_scopes.shrink(new_lvl);
+        TRACE(fingerprint_bug, tout << "pop @" << m_scopes.size() << "\n";);
     }
 
     void fingerprint_set::display(std::ostream & out) const {
@@ -138,11 +152,11 @@ namespace smt {
             if (f->get_num_args() != num_args)
                 continue;
             unsigned i = 0;
-            for (i = 0; i < num_args; i++)
+            for (i = 0; i < num_args; ++i)
                 if (f->get_arg(i)->get_root() != args[i]->get_root())
                     break;
             if (i == num_args) {
-                TRACE("missing_instance_detail", tout << "found instance data: " << data << "=" << *f;);
+                TRACE(missing_instance_detail, tout << "found instance data: " << data << "=" << *f;);
                 return true;
             }
         }
@@ -151,4 +165,4 @@ namespace smt {
 #endif
 
     
-};
+}

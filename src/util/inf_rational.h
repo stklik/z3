@@ -17,8 +17,8 @@ Author:
 Revision History:
 
 --*/
-#ifndef INF_RATIONAL_H_
-#define INF_RATIONAL_H_
+#pragma once
+
 #include<stdlib.h>
 #include<string>
 #include "util/debug.h"
@@ -44,7 +44,7 @@ class inf_rational {
 
     struct eq_proc { bool operator()(inf_rational const& r1, inf_rational const& r2) const { return r1 == r2; } };
 
-    void swap(inf_rational & n) { 
+    void swap(inf_rational & n) noexcept {
         m_first.swap(n.m_first);
         m_second.swap(n.m_second);
     }
@@ -65,12 +65,7 @@ class inf_rational {
         return s;
     }
 
-    inf_rational() {}
-
-    inf_rational(const inf_rational & r): 
-        m_first(r.m_first),
-        m_second(r.m_second)
-     {}
+    inf_rational() = default;
 
     explicit inf_rational(int n):
         m_first(rational(n)),
@@ -97,8 +92,6 @@ class inf_rational {
         m_first(r),
         m_second(i) {
     }
-
-    ~inf_rational() {}
 
     /**
        \brief Set inf_rational to 0.
@@ -141,12 +134,6 @@ class inf_rational {
     }
 
     rational const & get_first() const { return m_first; }
-
-    inf_rational & operator=(const inf_rational & r) {
-        m_first = r.m_first;
-        m_second = r.m_second;
-        return *this;
-    }
 
     inf_rational & operator=(const rational & r) {
         m_first = r;
@@ -470,5 +457,3 @@ inline inf_rational abs(const inf_rational & r) {
     }
     return result;
 }
-
-#endif /* INF_RATIONAL_H_ */

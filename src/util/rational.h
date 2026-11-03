@@ -16,10 +16,10 @@ Author:
 Revision History:
 
 --*/
-#ifndef RATIONAL_H_
-#define RATIONAL_H_
+#pragma once
 
 #include "util/mpq.h"
+#include "util/memory_manager.h"
 
 class rational {
     mpq   m_val;
@@ -31,31 +31,34 @@ class rational {
     
     static synch_mpq_manager & m() { return *g_mpq_manager; }
 
+    void display_hex(std::ostream & out, unsigned num_bits) const { SASSERT(is_int()); m().display_hex(out, m_val.numerator(), num_bits); }
+
+    void display_bin(std::ostream& out, unsigned num_bits) const { SASSERT(is_int()); m().display_bin(out, m_val.numerator(), num_bits);  }
+
 public:
     static void initialize();
     static void finalize();
-    /*
-      ADD_INITIALIZER('rational::initialize();')
-      ADD_FINALIZER('rational::finalize();')
-    */
-    rational() {}
-    
+    rational() = default;
+
     rational(rational const & r) { m().set(m_val, r.m_val); }
-    rational(rational && r) : m_val(std::move(r.m_val)) {}
+    rational(rational&&) = default;
 
     explicit rational(int n) { m().set(m_val, n); }
-
     explicit rational(unsigned n) { m().set(m_val, n); }
-      
+    explicit rational(int64_t n) { m().set(m_val, n); }
+    explicit rational(uint64_t n) { m().set(m_val, n); }
+
     rational(int n, int d) { m().set(m_val, n, d); }
-
     rational(mpq const & q) { m().set(m_val, q); }
-
+    rational(mpq && q) noexcept : m_val(std::move(q)) {}
     rational(mpz const & z) { m().set(m_val, z); }
+    rational(mpz && z) noexcept : m_val(std::move(z)) {}
 
-    rational(double  z) { UNREACHABLE(); }
+    explicit rational(double  z) { UNREACHABLE(); }
     
     explicit rational(char const * v) { m().set(m_val, v); }
+    
+    explicit rational(unsigned const * v, unsigned sz) { m().set(m_val, sz, v); }
 
     struct i64 {};
     rational(int64_t i, i64) { m().set(m_val, i); }
@@ -63,7 +66,7 @@ public:
     struct ui64 {};
     rational(uint64_t i, ui64) { m().set(m_val, i); }
     
-    ~rational() { m().del(m_val); }
+    ~rational() { synch_mpq_manager::del(g_mpq_manager, m_val); }
     
     mpq const & to_mpq() const { return m_val; }
 
@@ -85,13 +88,43 @@ public:
 
     struct eq_proc { bool operator()(rational const& r1, rational const& r2) const { return r1 == r2; } };
     
-    void swap(rational & n) { m().swap(m_val, n.m_val); }
+    void swap(rational & n) noexcept { m().swap(m_val, n.m_val); }
     
     std::string to_string() const { return m().to_string(m_val); }
 
     void display(std::ostream & out) const { return m().display(out, m_val); }
     
     void display_decimal(std::ostream & out, unsigned prec, bool truncate = false) const { return m().display_decimal(out, m_val, prec, truncate); }
+
+    void display_smt2(std::ostream & out) const { return m().display_smt2(out, m_val, false); }
+
+
+    struct as_hex_wrapper {
+        rational const& r;
+        unsigned bw;
+    };
+
+    as_hex_wrapper as_hex(unsigned bw) const { return as_hex_wrapper{*this, bw}; }
+
+    friend inline std::ostream& operator<<(std::ostream& out, as_hex_wrapper const& ab) {
+        ab.r.display_hex(out, ab.bw);
+        return out;
+    }
+
+
+
+    struct as_bin_wrapper {
+        rational const& r;
+        unsigned bw;
+    };
+
+    as_bin_wrapper as_bin(unsigned bw) const { return as_bin_wrapper{*this, bw}; }
+
+    friend inline std::ostream& operator<<(std::ostream& out, as_bin_wrapper const& ab) {
+        ab.r.display_bin(out, ab.bw);
+        return out;
+    }
+
 
     bool is_uint64() const { return m().is_uint64(m_val); }
 
@@ -101,7 +134,7 @@ public:
 
     int64_t get_int64() const { return m().get_int64(m_val); }
     
-    bool is_unsigned() const { return is_uint64() && (get_uint64() < (1ull << 32)); }
+    bool is_unsigned() const { return is_uint64() && (get_uint64() < (1ull << 32ull)); }
 
     unsigned get_unsigned() const {
         SASSERT(is_unsigned());
@@ -126,21 +159,33 @@ public:
     rational const & get_rational() const { return *this; }
 
     rational const & get_infinitesimal() const { return m_zero; }
-    
+
+    rational & operator=(rational&&) = default;
+
     rational & operator=(rational const & r) {
         m().set(m_val, r.m_val);
         return *this;
     }
 
-    rational & operator=(int v) {
-        *this = rational(v);
+    rational & operator=(bool) = delete;
+    rational operator*(bool  r1) const = delete;
+
+    rational & operator=(int v) { return *this = (int64_t)v; }
+    rational & operator=(int64_t v) {
+        m().set(m_val, v);
         return *this;
     }
-    rational & operator=(double v) { UNREACHABLE(); return *this; }
+    rational & operator=(double v) = delete;
 
     friend inline rational numerator(rational const & r) { rational result; m().get_numerator(r.m_val, result.m_val); return result; }
     
     friend inline rational denominator(rational const & r) { rational result; m().get_denominator(r.m_val, result.m_val); return result; }
+
+    friend inline rational inv(rational const & r) {
+        rational result;
+        m().inv(r.m_val, result.m_val);
+        return result;
+    }
     
     rational & operator+=(rational const & r) { 
         m().add(m_val, r.m_val, m_val);
@@ -157,6 +202,11 @@ public:
         return *this; 
     }
 
+    rational& operator-=(int r) {
+        (*this) -= rational(r);
+        return *this;
+    }
+
     rational & operator*=(rational const & r) {
         m().mul(m_val, r.m_val, m_val);
         return *this; 
@@ -170,6 +220,18 @@ public:
     rational & operator%=(rational const & r) {
         m().rem(m_val, r.m_val, m_val);
         return *this; 
+    }    
+
+    rational & operator%=(int v) {
+        return *this %= rational(v);
+    }    
+
+    rational & operator/=(int v) {
+        return *this /= rational(v);
+    }    
+
+    rational & operator*=(int v) {
+        return *this *= rational(v);
     }    
 
     friend inline rational div(rational const & r1, rational const & r2) {
@@ -194,14 +256,26 @@ public:
         return r;
     }
 
+    friend inline rational machine_div2k(rational const & r1, unsigned k) {
+        rational r;
+        rational::m().machine_idiv2k(r1.m_val, k, r.m_val);
+        return r;
+    }
+
     friend inline rational mod(rational const & r1, rational const & r2) {
         rational r;
         rational::m().mod(r1.m_val, r2.m_val, r.m_val);
         return r;
     }
-
+    
     friend inline void mod(rational const & r1, rational const & r2, rational & r) {
         rational::m().mod(r1.m_val, r2.m_val, r.m_val);
+    }
+
+    friend inline rational mod2k(rational const & a, unsigned k) {
+        if (a.is_int())
+            return rational::m().mod2k(a.m_val.numerator(), k);
+        return mod(a, power_of_two(k));
     }
 
     friend inline rational operator%(rational const & r1, rational const & r2) {
@@ -279,6 +353,10 @@ public:
     bool is_even() const {
         return m().is_even(m_val);
     }
+
+    bool is_odd() const { 
+        return !is_even(); 
+    }
     
     friend inline rational floor(rational const & r) {
         rational f;
@@ -300,9 +378,17 @@ public:
 
     static rational power_of_two(unsigned k);
 
-    bool is_power_of_two(unsigned & shift) {
+    bool is_power_of_two(unsigned & shift) const {
         return m().is_power_of_two(m_val, shift);
     }
+    
+    bool is_power_of_two() const {
+        unsigned shift = 0;
+        return m().is_power_of_two(m_val, shift);
+    }
+
+    bool mult_inverse(unsigned num_bits, rational & result) const;
+    rational pseudo_inverse(unsigned num_bits) const;
 
     static rational const & zero() {
         return m_zero;
@@ -316,29 +402,19 @@ public:
         return m_minus_one;
     }
 
+    // Perform:  this += c * k
     void addmul(rational const & c, rational const & k) {
-        if (c.is_one())
-            operator+=(k);
-        else if (c.is_minus_one())
-            operator-=(k);
-        else {
-            rational tmp(k);
-            tmp *= c;
-            operator+=(tmp);
-        }
+        m().addmul(m_val, c.m_val, k.m_val, m_val);
     }
 
     // Perform:  this -= c * k
     void submul(const rational & c, const rational & k) {
-        if (c.is_one())
-            operator-=(k);
-        else if (c.is_minus_one())
-            operator+=(k);
-        else {
-            rational tmp(k);
-            tmp *= c;
-            operator-=(tmp);
-        }
+        m().submul(m_val, c.m_val, k.m_val, m_val);
+    }
+
+    // r = a * b, without a temporary
+    static void mul(rational const & a, rational const & b, rational & r) {
+        m().mul(a.m_val, b.m_val, r.m_val);
     }
 
     bool is_int_perfect_square(rational & root) const {
@@ -354,8 +430,11 @@ public:
     }
 
     friend inline std::ostream & operator<<(std::ostream & target, rational const & r) {
-        target << m().to_string(r.m_val);
-        return target;
+        return target << m().to_string(r.m_val);
+    }
+
+    friend inline bool divides(rational const& a, rational const& b) {
+        return m().divides(a.to_mpq(), b.to_mpq());
     }
 
     friend inline rational gcd(rational const & r1, rational const & r2);
@@ -402,22 +481,67 @@ public:
 
     static bool is_rational() { return true; }
 
-    unsigned get_num_bits() const {
-        rational two(2);
+    unsigned get_num_digits(rational const& base) const {
         SASSERT(is_int());
         SASSERT(!is_neg());
         rational n(*this);
-        unsigned num_bits = 1;
-        n = div(n, two);
+        unsigned num_digits = 1;
+        n = div(n, base);
         while (n.is_pos()) {
-            ++num_bits;
-            n = div(n, two);
+            ++num_digits;
+            n = div(n, base);
         }
-        return num_bits;
+        return num_digits;
     }
+
+    unsigned get_num_bits() const {
+        return get_num_digits(rational(2));
+    }
+
+    unsigned get_num_decimal() const {
+        return get_num_digits(rational(10));
+    }
+
+    /**
+     * \brief Return the biggest k s.t. 2^k <= a.
+     * \remark Return 0 if a is not positive.
+     */
+    unsigned prev_power_of_two() const { return m().prev_power_of_two(m_val); }
+
+    /**
+     * \brief Return the smallest k s.t. a <= 2^k.
+     * \remark Return 0 if a is not positive.
+     */
+    unsigned next_power_of_two() const { return m().next_power_of_two(m_val); }
+
+    bool get_bit(unsigned index) const {
+        return m().get_bit(m_val, index);
+    }
+
+    unsigned trailing_zeros() const {
+        if (is_zero())
+            return 0;
+        unsigned k = 0;
+        for (; !get_bit(k); ++k); 
+        return k;
+    }
+
+    /** Number of trailing zeros in an N-bit representation */
+    unsigned parity(unsigned num_bits) const {
+        SASSERT(!is_neg());
+        SASSERT(*this < rational::power_of_two(num_bits));
+        if (is_zero())
+            return num_bits;
+        return trailing_zeros();
+    }
+
+    static bool limit_denominator(rational &num, rational const& limit);
 };
 
-inline bool operator!=(rational const & r1, rational const & r2) { 
+Z3_ADD_INITIALIZER(rational, rational::initialize, 0);
+Z3_ADD_FINALIZER(rational, rational::finalize);
+
+inline bool operator!=(rational const & r1, rational const & r2) {
     return !operator==(r1, r2); 
 }
 
@@ -437,11 +561,6 @@ inline bool operator<=(rational const & r1, rational const & r2) {
     return !operator>(r1, r2); 
 }
 
-inline bool operator<=(rational const & r1, int r2) { 
-    return r1 <= rational(r2);
-}
-
-
 inline bool operator>=(rational const & r1, rational const & r2) { 
     return !operator<(r1, r2); 
 }
@@ -454,8 +573,23 @@ inline bool operator>(int a, rational const & b) {
     return rational(a) > b;
 }
 
+inline bool operator>=(rational const& a, int b) {
+    return a >= rational(b);
+}
 
-inline bool operator!=(rational const & a, int b) {
+inline bool operator>=(int a, rational const& b) {
+    return rational(a) >= b;
+}
+
+inline bool operator<=(rational const& a, int b) {
+    return a <= rational(b);
+}
+
+inline bool operator<=(int a, rational const& b) {
+    return rational(a) <= b;
+}
+
+inline bool operator!=(rational const& a, int b) {
     return !(a == rational(b));
 }
 
@@ -498,9 +632,18 @@ inline rational operator*(rational const & r1, rational const & r2) {
     return rational(r1) *= r2; 
 }
 
+inline rational operator*(rational const & r1, bool r2) {
+    UNREACHABLE();
+    return r1 * rational(r2);
+}
 inline rational operator*(rational const & r1, int r2) {
     return r1 * rational(r2);
 }
+inline rational operator*(bool  r1, rational const & r2) {
+    UNREACHABLE();
+    return rational(r1) * r2;
+}
+
 inline rational operator*(int  r1, rational const & r2) {
     return rational(r1) * r2;
 }
@@ -510,6 +653,11 @@ inline rational operator/(rational const & r1, rational const & r2) {
 }
 
 inline rational operator/(rational const & r1, int r2) {
+    return r1 / rational(r2);
+}
+
+inline rational operator/(rational const & r1, bool r2) {
+    UNREACHABLE();
     return r1 / rational(r2);
 }
 
@@ -539,6 +687,6 @@ inline rational gcd(rational const & r1, rational const & r2, rational & a, rati
   return result;
 }
 
-
-#endif /* RATIONAL_H_ */
-
+inline void swap(rational& r1, rational& r2) noexcept {
+    r1.swap(r2);
+}

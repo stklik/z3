@@ -25,13 +25,13 @@ Author:
 Revision History:
 
 --*/
-#ifndef SMT_MODEL_GENERATOR_H_
-#define SMT_MODEL_GENERATOR_H_
+#pragma once
 
 #include "ast/ast.h"
 #include "smt/smt_types.h"
 #include "util/obj_hashtable.h"
 #include "util/map.h"
+#include "util/ref.h"
 
 class value_factory;
 class proto_model;
@@ -76,14 +76,16 @@ namespace smt {
        \brief Stub for extra fresh value.
     */
     struct extra_fresh_value {
+        expr*    m_src;
         sort *   m_sort;
         unsigned m_idx;
-        expr *   m_value;
+        expr *   m_value = nullptr;
     public:
-        extra_fresh_value(sort * s, unsigned idx):m_sort(s), m_idx(idx), m_value(nullptr) {}
+        extra_fresh_value(expr * src, sort* s, unsigned idx):m_src(src), m_sort(s), m_idx(idx) {}
         sort * get_sort() const { return m_sort; }
+        expr* get_src() const { return m_src; }
         unsigned get_idx() const { return m_idx; }
-        void set_value(expr * n) { SASSERT(m_value == 0); m_value = n; }
+        void set_value(expr * n) { SASSERT(!m_value); m_value = n; }
         expr * get_value() const { return m_value; }
     };
 
@@ -96,7 +98,7 @@ namespace smt {
     class model_value_dependency {
         bool m_fresh; //!< True if the dependency is a new fresh value;
         union {
-            enode *             m_enode; //!< When m_fresh == false, contains an enode depedency. 
+            enode *             m_enode; //!< When m_fresh == false, contains an enode dependency.
             extra_fresh_value * m_value; //!< When m_fresh == true, contains the sort of the fresh value
         };
     public:
@@ -136,7 +138,7 @@ namespace smt {
     */
     class model_value_proc {
     public:
-        virtual ~model_value_proc() {}
+        virtual ~model_value_proc() = default;
         /**
            \brief Fill result with the dependencies of this functor.
            That is, to invoke mk_value, the dependencies in result must be constructed.
@@ -146,7 +148,7 @@ namespace smt {
            \brief The array values has size equal to the size of the argument \c result in get_dependencies.
            It contain the values built for the dependencies.
         */
-        virtual app * mk_value(model_generator & m, ptr_vector<expr> & values) = 0;
+        virtual app * mk_value(model_generator & m, expr_ref_vector const & values) = 0;
         /**
            \brief Return true if it is associated with a fresh value.
         */
@@ -161,7 +163,7 @@ namespace smt {
         app * m_value;
     public:
         expr_wrapper_proc(app * v):m_value(v) {}
-        app * mk_value(model_generator & m, ptr_vector<expr> & values) override { return m_value; }
+        app * mk_value(model_generator & m, expr_ref_vector const & values) override { return m_value; }
     };
 
     class fresh_value_proc : public model_value_proc {
@@ -169,7 +171,7 @@ namespace smt {
     public:
         fresh_value_proc(extra_fresh_value * v):m_value(v) {}
         void get_dependencies(buffer<model_value_dependency> & result) override;
-        app * mk_value(model_generator & m, ptr_vector<expr> & values) override { return to_app(values[0]); }
+        app * mk_value(model_generator & m, expr_ref_vector const & values) override { return to_app(values[0]); }
         bool is_fresh() const override { return true; }
     };
 
@@ -177,13 +179,13 @@ namespace smt {
        \brief Auxiliary class used during model generation.
     */
     class model_generator {
-        ast_manager &                 m_manager;
+        ast_manager &                 m;
         context *                     m_context;
         ptr_vector<extra_fresh_value> m_extra_fresh_values;
         unsigned                      m_fresh_idx;
         obj_map<enode, app *>         m_root2value;
         ast_ref_vector                m_asts;
-        proto_model *                 m_model;
+        ref<proto_model>              m_model;
         obj_hashtable<func_decl>      m_hidden_ufs;
 
         void init_model();
@@ -205,6 +207,13 @@ namespace smt {
 
         void top_sort_sources(ptr_vector<enode> const & roots, obj_map<enode, model_value_proc *> const & root2proc, svector<source> & sorted_sources);
 
+        struct scoped_reset {
+            model_generator& mg;
+            ptr_vector<model_value_proc>& procs;
+            scoped_reset(model_generator& mg, ptr_vector<model_value_proc>& procs);
+            ~scoped_reset();            
+        };
+
     public:
         model_generator(ast_manager & m);
         ~model_generator();
@@ -213,13 +222,13 @@ namespace smt {
         void set_context(context * c) { SASSERT(m_context == 0); m_context = c; }
 
         void register_factory(value_factory * f);
-        extra_fresh_value * mk_extra_fresh_value(sort * s);
+        extra_fresh_value * mk_extra_fresh_value(expr * src, sort* s);
         model_value_proc * mk_model_value(enode* r);
         expr * get_some_value(sort * s);
         proto_model & get_model() { SASSERT(m_model); return *m_model; }
         void register_value(expr * val);
-        ast_manager & get_manager() { return m_manager; }
-        proto_model * mk_model();
+        ast_manager & get_manager() { return m; }
+        proto_model* mk_model();
 
         obj_map<enode, app *> const & get_root2value() const { return m_root2value; }
         app * get_value(enode * n) const;
@@ -227,12 +236,11 @@ namespace smt {
         void hide(func_decl * f) { 
             if (!m_hidden_ufs.contains(f)) {
                 m_hidden_ufs.insert(f);
-                m_manager.inc_ref(f); 
+                m.inc_ref(f); 
             }
         }
     };
-};
+}
 
-#endif /* SMT_MODEL_GENERATOR_H_ */
 
 

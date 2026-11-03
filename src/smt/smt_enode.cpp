@@ -16,15 +16,16 @@ Author:
 Revision History:
 
 --*/
+#include "ast/ast_pp.h"
 #include "smt/smt_context.h"
 #include "smt/smt_enode.h"
 
 namespace smt {
-    
+
     /**
        \brief Initialize an enode in the given memory position.
     */
-    enode * enode::init(ast_manager & m, void * mem, app2enode_t const & app2enode, app * owner, 
+    enode * enode::init(ast_manager & m, void * mem, app2enode_t const & app2enode, expr * owner, 
                         unsigned generation, bool suppress_args, bool merge_tf, unsigned iscope_lvl,
                         bool cgc_enabled, bool update_children_parent) {
         SASSERT(m.is_bool(owner) || !merge_tf);
@@ -41,31 +42,33 @@ namespace smt {
         n->m_interpreted      = false;
         n->m_suppress_args    = suppress_args;
         n->m_eq               = m.is_eq(owner);
-        n->m_commutative      = n->get_num_args() == 2 && owner->get_decl()->is_commutative();
+        n->m_commutative      = n->get_num_args() == 2 && n->get_decl()->is_commutative();
         n->m_bool             = m.is_bool(owner);
         n->m_merge_tf         = merge_tf;
         n->m_cgc_enabled      = cgc_enabled;
         n->m_iscope_lvl       = iscope_lvl;
         n->m_lbl_hash         = -1;
-        n->m_proof_logged_status = smt::logged_status::NOT_LOGGED;
+        n->m_proof_is_logged = false;
+        n->m_is_shared        = 2;
         unsigned num_args     = n->get_num_args();
-        for (unsigned i = 0; i < num_args; i++) {
-            enode * arg  = app2enode[owner->get_arg(i)->get_id()];
+        for (unsigned i = 0; i < num_args; ++i) {            
+            enode * arg  = app2enode[to_app(owner)->get_arg(i)->get_id()];
             n->m_args[i] = arg;
+            arg->get_root()->m_is_shared = 2;
             SASSERT(n->get_arg(i) == arg);
             if (update_children_parent)
                 arg->get_root()->m_parents.push_back(n);
         }
-        TRACE("mk_enode_detail", tout << "new enode suppress_args: " << n->m_suppress_args << "\n";);
+        TRACE(mk_enode_detail, tout << "new enode suppress_args: " << n->m_suppress_args << "\n";);
         SASSERT(n->m_suppress_args == suppress_args);
         return n;
     }
 
-    enode * enode::mk(ast_manager & m, region & r, app2enode_t const & app2enode, app * owner, 
-                           unsigned generation, bool suppress_args, bool merge_tf, unsigned iscope_lvl,
-                           bool cgc_enabled, bool update_children_parent) {
+    enode * enode::mk(ast_manager & m, region & r, app2enode_t const & app2enode, expr * owner, 
+                        unsigned generation, bool suppress_args, bool merge_tf, unsigned iscope_lvl,
+                        bool cgc_enabled, bool update_children_parent) {
         SASSERT(m.is_bool(owner) || !merge_tf);
-        unsigned sz           = get_enode_size(suppress_args ? 0 : owner->get_num_args());
+        unsigned sz           = get_enode_size(suppress_args || !::is_app(owner) ? 0 : to_app(owner)->get_num_args());
         void * mem            = r.allocate(sz);
         return init(m, mem, app2enode, owner, generation, suppress_args, merge_tf, iscope_lvl, cgc_enabled, update_children_parent);
     }
@@ -81,7 +84,7 @@ namespace smt {
         SASSERT(m_root == this);
         SASSERT(m_next == this);
         unsigned num_args = get_num_args();
-        for (unsigned i = 0; i < num_args; i++) {
+        for (unsigned i = 0; i < num_args; ++i) {
             enode * arg = get_arg(i);
             if (update_children_parent) {
                 SASSERT(arg->get_root()->m_parents.back() == this);
@@ -92,13 +95,7 @@ namespace smt {
     }
     
     unsigned enode::get_num_th_vars() const {
-        unsigned r = 0;
-        theory_var_list const * l = get_th_var_list();
-        while(l) {
-            r++;
-            l = l->get_next();
-        }
-        return r;
+        return m_th_var_list.size();
     }
     
     /**
@@ -108,44 +105,14 @@ namespace smt {
        with a variable of theory th_id
     */
     theory_var enode::get_th_var(theory_id th_id) const {
-        if (m_th_var_list.get_th_var() == null_theory_var)
-            return null_theory_var;
-        theory_var_list const * l = &m_th_var_list;
-        while (l) {
-            if (l->get_th_id() == th_id) {
-                return l->get_th_var();
-            }
-            l = l->get_next();
-        }
-        return null_theory_var;
+        return m_th_var_list.find(th_id);
     }
     
     /**
        \brief Add the entry (v, id) to the list of theory variables.
     */
     void enode::add_th_var(theory_var v, theory_id id, region & r) {
-#ifdef Z3DEBUG
-        unsigned old_size = get_num_th_vars();
-#endif
-        SASSERT(get_th_var(id) == null_theory_var);
-        if (m_th_var_list.get_th_var() == null_theory_var) {
-            m_th_var_list.set_th_var(v);
-            m_th_var_list.set_th_id(id);
-            m_th_var_list.set_next(nullptr);
-        }
-        else {
-            theory_var_list * l = &m_th_var_list;
-            while (l->get_next() != nullptr) {
-                SASSERT(l->get_th_id() != id);
-                l = l->get_next();
-            }
-            SASSERT(l); 
-            SASSERT(l->get_next() == 0);
-            theory_var_list * new_cell = new (r) theory_var_list(id, v);
-            l->set_next(new_cell);
-        }
-        SASSERT(get_num_th_vars() == old_size + 1);
-        SASSERT(get_th_var(id) == v);
+        m_th_var_list.add_var(v, id, r);
     }
     
     /**
@@ -153,16 +120,7 @@ namespace smt {
        The enode must have an entry (v', id)
     */
     void enode::replace_th_var(theory_var v, theory_id id) {
-        SASSERT(get_th_var(id) != null_theory_var);
-        theory_var_list * l = get_th_var_list();
-        while (l) {
-            if (l->get_th_id() == id) {
-                l->set_th_var(v);
-                return;
-            }
-            l = l->get_next();
-        }
-        UNREACHABLE();
+        m_th_var_list.replace(v, id);
     }
 
     /**
@@ -170,74 +128,36 @@ namespace smt {
        enode is associated with a variable of the given theory.
     */
     void enode::del_th_var(theory_id id) {
-        SASSERT(get_th_var(id) != null_theory_var);
-        if (m_th_var_list.get_th_id() == id) {
-            theory_var_list * next = m_th_var_list.get_next();
-            if (next == nullptr) {
-                // most common case
-                m_th_var_list.set_th_var(null_theory_var);
-                m_th_var_list.set_th_id(null_theory_id);
-                m_th_var_list.set_next(nullptr);
-            }
-            else {
-                m_th_var_list = *next;
-            }
-        }
-        else {
-            theory_var_list * prev = get_th_var_list();
-            theory_var_list * l    = prev->get_next();
-            while (l) {
-                SASSERT(prev->get_next() == l);
-                if (l->get_th_id() == id) {
-                    prev->set_next(l->get_next());
-                    return;
-                }
-                prev = l;
-                l    = l->get_next();
-            }
-            UNREACHABLE();
-        }
+        m_th_var_list.del_var(id);
     }
-
-    
-    /**
-       \brief Push old value of generation on the context trail stack
-       and update the generation.       
-    */
-    void enode::set_generation(context & ctx, unsigned generation) {
-        if (m_generation == generation)
-            return;
-        ctx.push_trail(value_trail<context, unsigned>(m_generation));
-        m_generation = generation;
-    }
-
 
     void enode::set_lbl_hash(context & ctx) {
         SASSERT(m_lbl_hash == -1);
         // m_lbl_hash should be different from -1, if and only if,
         // there is a pattern that contains the enode. So,
         // I use a trail to restore the value of m_lbl_hash to -1.
-        ctx.push_trail(value_trail<context, signed char>(m_lbl_hash));
+        ctx.push_trail(value_trail<signed char>(m_lbl_hash));
         unsigned h = hash_u(get_owner_id());
         m_lbl_hash = h & (APPROX_SET_CAPACITY - 1);
         // propagate modification to the root m_lbls set.
         approx_set & r_lbls = m_root->m_lbls;
         if (!r_lbls.may_contain(m_lbl_hash)) {
-            ctx.push_trail(value_trail<context, approx_set>(r_lbls));
+            ctx.push_trail(value_trail<approx_set>(r_lbls));
             r_lbls.insert(m_lbl_hash);
         }
     }
 
-    enode * enode::get_eq_enode_with_min_gen() {
-        if (m_generation == 0)
-            return this;
+    enode * enode::get_eq_enode_with_min_gen(context * ctx) {
         enode * r = this;
         enode * curr = this; 
+        unsigned r_gen = ctx->get_generation(r);
         do {
-            if (curr->m_generation < r->m_generation) {
+            unsigned curr_gen = ctx->get_generation(curr);
+            if (curr_gen == 0)
+                return curr;
+            if (curr_gen < r_gen) {
                 r = curr;
-                if (r->m_generation == 0)
-                    return r;
+                r_gen = curr_gen;
             }
             curr = curr->m_next;
         }
@@ -274,14 +194,11 @@ namespace smt {
 
         // Parent use-list
         if (this == m_root) {
-            enode_vector::const_iterator it2  = m_parents.begin();
-            enode_vector::const_iterator end2 = m_parents.end();
-            for (; it2 != end2; ++it2) {
-                enode const * parent = *it2;
+            for (enode* parent : m_parents) {
                 unsigned i = 0;
                 unsigned num_args = parent->get_num_args();
                 SASSERT(num_args > 0);
-                for (; i < num_args; i++) {
+                for (; i < num_args; ++i) {
                     enode * arg = parent->get_arg(i);
                     if (arg->get_root() == m_root)
                         break;
@@ -318,10 +235,7 @@ namespace smt {
         enode const * curr = m_root; 
         do {
             if (curr != m_root) {
-                enode_vector::const_iterator it  = curr->m_parents.begin();
-                enode_vector::const_iterator end = curr->m_parents.end();
-                for (; it != end; ++it) {
-                    enode * p = *it;
+                for (enode * p : curr->m_parents) {
                     if (!p->is_true_eq() && !m_root->contains_parent_congruent_to(p)) {
                         UNREACHABLE();
                     }
@@ -334,10 +248,7 @@ namespace smt {
     }
     
     bool enode::contains_parent_congruent_to(enode * p) const {
-        enode_vector::const_iterator it  = m_parents.begin();
-        enode_vector::const_iterator end = m_parents.end();
-        for (; it != end; ++it) {
-            enode * curr = *it;
+        for (enode* curr : m_parents) {
             if (congruent(curr, p))
                 return true;
         }
@@ -356,7 +267,7 @@ namespace smt {
 
     bool congruent(enode * n1, enode * n2, bool & comm) {
         comm          = false;
-        if (n1->get_owner()->get_decl() != n2->get_owner()->get_decl())
+        if (!n1->is_app() || n1->get_decl() != n2->get_decl())
             return false;
         unsigned num_args = n1->get_num_args();
         if (num_args != n2->get_num_args())
@@ -376,30 +287,20 @@ namespace smt {
             return false;
         }
         else {
-            for (unsigned i = 0; i < num_args; i++)
+            for (unsigned i = 0; i < num_args; ++i)
                 if (n1->get_arg(i)->get_root() != n2->get_arg(i)->get_root())
                     return false;
             return true;
         }
     }
 
-    unsigned get_max_generation(unsigned num_enodes, enode * const * enodes) {
-        unsigned max = 0;
-        for (unsigned i = 0; i < num_enodes; i++) {
-            unsigned curr = enodes[i]->get_generation();
-            if (curr > max)
-                max = curr;
-        }
-        return max;
-    }
-
     void unmark_enodes(unsigned num_enodes, enode * const * enodes) {
-        for (unsigned i = 0; i < num_enodes; i++)
+        for (unsigned i = 0; i < num_enodes; ++i)
             enodes[i]->unset_mark();
     }
 
     void unmark_enodes2(unsigned num_enodes, enode * const * enodes) {
-        for (unsigned i = 0; i < num_enodes; i++)
+        for (unsigned i = 0; i < num_enodes; ++i)
             enodes[i]->unset_mark2();
     }
     
@@ -450,5 +351,5 @@ namespace smt {
         get_enode()->m_func_decl_id = UINT_MAX;
     }
 
-};
+}
 

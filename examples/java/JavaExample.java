@@ -521,8 +521,13 @@ class JavaExample
 
         // each column contains a digit at most once
         BoolExpr[] cols_c = new BoolExpr[9];
-        for (int j = 0; j < 9; j++)
-            cols_c[j] = ctx.mkDistinct(X[j]);
+        for (int j = 0; j < 9; j++) {
+            IntExpr[] col = new IntExpr[9];
+            for (int i = 0; i < 9; i++) {
+                col[i] = X[i][j];
+            }
+            cols_c[j] = ctx.mkDistinct(col);
+        }
 
         // each 3x3 square contains a digit at most once
         BoolExpr[][] sq_c = new BoolExpr[3][];
@@ -557,12 +562,10 @@ class JavaExample
         BoolExpr instance_c = ctx.mkTrue();
         for (int i = 0; i < 9; i++)
             for (int j = 0; j < 9; j++)
-                instance_c = ctx.mkAnd(
-                        instance_c,
-                        (BoolExpr) ctx.mkITE(
-                                ctx.mkEq(ctx.mkInt(instance[i][j]),
-                                        ctx.mkInt(0)), ctx.mkTrue(),
-                                ctx.mkEq(X[i][j], ctx.mkInt(instance[i][j]))));
+                if (0 != instance[i][j])
+                    instance_c = ctx.mkAnd(
+                            instance_c,
+                            ctx.mkEq(X[i][j], ctx.mkInt(instance[i][j])));
 
         Solver s = ctx.mkSolver();
         s.add(sudoku_c);
@@ -596,7 +599,7 @@ class JavaExample
         System.out.println("QuantifierExample");
         Log.append("QuantifierExample");
 
-        Sort[] types = new Sort[3];
+        IntSort[] types = new IntSort[3];
         IntExpr[] xs = new IntExpr[3];
         Symbol[] names = new Symbol[3];
         IntExpr[] vars = new IntExpr[3];
@@ -1395,7 +1398,7 @@ class JavaExample
         System.out.println("BitvectorExample1");
         Log.append("BitvectorExample1");
 
-        Sort bv_type = ctx.mkBitVecSort(32);
+        BitVecSort bv_type = ctx.mkBitVecSort(32);
         BitVecExpr x = (BitVecExpr) ctx.mkConst("x", bv_type);
         BitVecNum zero = (BitVecNum) ctx.mkNumeral("0", bv_type);
         BitVecNum ten = ctx.mkBV(10, 32);
@@ -1417,7 +1420,7 @@ class JavaExample
         Log.append("BitvectorExample2");
 
         /* construct x ^ y - 103 == x * y */
-        Sort bv_type = ctx.mkBitVecSort(32);
+        BitVecSort bv_type = ctx.mkBitVecSort(32);
         BitVecExpr x = ctx.mkBVConst("x", 32);
         BitVecExpr y = ctx.mkBVConst("y", 32);
         BitVecExpr x_xor_y = ctx.mkBVXOR(x, y);
@@ -1865,7 +1868,7 @@ class JavaExample
             }
         } else
         {
-            System.out.println("BUG, the constraints are satisfiable.");
+            System.out.println("BUG, the constraints are not satisfiable.");
         }
     }
 
@@ -2256,6 +2259,238 @@ class JavaExample
         System.out.println(e1.equals(e3));
     }
 
+    public void stringExample() {
+	System.out.println("String example");
+	Context ctx = new Context();
+	Expr a = ctx.mkToRe(ctx.mkString("abcd"));
+	Expr b = ctx.mkFullRe(ctx.mkReSort(ctx.mkStringSort()));
+	System.out.println(a);
+	System.out.println(b);
+	System.out.println(a.getSort());
+	System.out.println(b.getSort());
+	Expr c = ctx.mkConcat(ctx.mkToRe(ctx.mkString("abc")),
+			     ctx.mkFullRe(ctx.mkReSort(ctx.mkStringSort())),
+			     ctx.mkEmptyRe(ctx.mkReSort(ctx.mkStringSort())),
+			     ctx.mkAllcharRe(ctx.mkReSort(ctx.mkStringSort())),
+			     ctx.mkToRe(ctx.mkString("d")));
+	System.out.println(c);
+	
+    }    
+
+    void numeralDoubleExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("NumeralDoubleExample");
+        Log.append("NumeralDoubleExample");
+
+        IntNum n42 = ctx.mkInt(42);
+        if (n42.getNumeralDouble() != 42.0)
+            throw new TestFailedException();
+
+        RatNum half = ctx.mkReal(1, 2);
+        if (Math.abs(half.getNumeralDouble() - 0.5) > 1e-10)
+            throw new TestFailedException();
+
+        System.out.println("NumeralDoubleExample passed.");
+    }
+
+    void unsignedNumeralExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("UnsignedNumeralExample");
+        Log.append("UnsignedNumeralExample");
+
+        IntNum n100 = ctx.mkInt(100);
+        if (n100.getUint() != 100)
+            throw new TestFailedException();
+
+        IntNum big = ctx.mkInt(3000000000L);
+        if (big.getUint64() != 3000000000L)
+            throw new TestFailedException();
+
+        System.out.println("UnsignedNumeralExample passed.");
+    }
+
+    void rationalExtractionExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("RationalExtractionExample");
+        Log.append("RationalExtractionExample");
+
+        RatNum r34 = ctx.mkReal(3, 4);
+
+        // getSmall returns [numerator, denominator]
+        long[] small = r34.getSmall();
+        if (small[0] != 3 || small[1] != 4)
+            throw new TestFailedException();
+
+        // getRationalInt64 returns [numerator, denominator] or null
+        long[] ri64 = r34.getRationalInt64();
+        if (ri64 == null || ri64[0] != 3 || ri64[1] != 4)
+            throw new TestFailedException();
+
+        // integer as rational: 7/1
+        RatNum r71 = ctx.mkReal(7, 1);
+        long[] small71 = r71.getSmall();
+        if (small71[0] != 7 || small71[1] != 1)
+            throw new TestFailedException();
+
+        System.out.println("RationalExtractionExample passed.");
+    }
+
+    void isGroundExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("IsGroundExample");
+        Log.append("IsGroundExample");
+
+        // a constant integer is ground
+        IntExpr five = ctx.mkInt(5);
+        if (!five.isGround())
+            throw new TestFailedException();
+
+        // an uninterpreted constant is also ground (no bound variables)
+        IntExpr x = ctx.mkIntConst("x");
+        if (!x.isGround())
+            throw new TestFailedException();
+
+        // an addition of constants is ground
+        Expr sum = ctx.mkAdd(ctx.mkInt(1), ctx.mkInt(2));
+        if (!sum.isGround())
+            throw new TestFailedException();
+
+        System.out.println("IsGroundExample passed.");
+    }
+
+    @SuppressWarnings("unchecked")
+    void astDepthExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("AstDepthExample");
+        Log.append("AstDepthExample");
+
+        // a plain integer constant has depth 1
+        IntExpr five = ctx.mkInt(5);
+        if (five.getDepth() != 1)
+            throw new TestFailedException();
+
+        // (x + 1) should have depth 2
+        IntExpr x = ctx.mkIntConst("x");
+        Expr sum = ctx.mkAdd(x, ctx.mkInt(1));
+        if (sum.getDepth() != 2)
+            throw new TestFailedException();
+
+        // nested: (x + 1) * y should have depth 3
+        IntExpr y = ctx.mkIntConst("y");
+        Expr prod = ctx.mkMul(sum, y);
+        if (prod.getDepth() != 3)
+            throw new TestFailedException();
+
+        System.out.println("AstDepthExample passed.");
+    }
+
+    void arrayArityExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("ArrayArityExample");
+        Log.append("ArrayArityExample");
+
+        // Array Int -> Int has arity 1
+        ArraySort<IntSort, IntSort> arr1 = ctx.mkArraySort(ctx.getIntSort(), ctx.getIntSort());
+        if (arr1.getArity() != 1)
+            throw new TestFailedException();
+
+        // Array (Int, Bool) -> Int has arity 2
+        ArraySort arr2 = ctx.mkArraySort(new Sort[]{ctx.getIntSort(), ctx.getBoolSort()}, ctx.getIntSort());
+        if (arr2.getArity() != 2)
+            throw new TestFailedException();
+
+        System.out.println("ArrayArityExample passed.");
+    }
+
+    void recursiveDatatypeExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("RecursiveDatatypeExample");
+        Log.append("RecursiveDatatypeExample");
+
+        // a list sort is recursive (cons refers back to the list)
+        Constructor<Sort> nil = ctx.mkConstructor("nil", "is_nil", null, null, null);
+        Constructor<Sort> cons = ctx.mkConstructor("cons", "is_cons",
+                new String[]{"head", "tail"},
+                new Sort[]{ctx.getIntSort(), null},
+                new int[]{0, 0});
+        DatatypeSort<Sort> intList = ctx.mkDatatypeSort("intlist", new Constructor[]{nil, cons});
+        if (!intList.isRecursive())
+            throw new TestFailedException();
+
+        // a simple pair sort is not recursive
+        Constructor<Sort> mkPair = ctx.mkConstructor("mkpair", "is_pair",
+                new String[]{"fst", "snd"},
+                new Sort[]{ctx.getIntSort(), ctx.getBoolSort()},
+                null);
+        DatatypeSort<Sort> pair = ctx.mkDatatypeSort("Pair", new Constructor[]{mkPair});
+        if (pair.isRecursive())
+            throw new TestFailedException();
+
+        System.out.println("RecursiveDatatypeExample passed.");
+    }
+
+    void fpNumeralExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("FpNumeralExample");
+        Log.append("FpNumeralExample");
+
+        FPSort fpsort = ctx.mkFPSort32();
+
+        // a floating point numeral
+        FPExpr fpval = (FPExpr) ctx.mkFP(3.14, fpsort);
+        if (!fpval.isNumeral())
+            throw new TestFailedException();
+
+        // a symbolic FP variable is not a numeral
+        FPExpr fpvar = (FPExpr) ctx.mkConst("fpx", fpsort);
+        if (fpvar.isNumeral())
+            throw new TestFailedException();
+
+        System.out.println("FpNumeralExample passed.");
+    }
+
+    @SuppressWarnings("unchecked")
+    void isLambdaExample(Context ctx) throws TestFailedException
+    {
+        System.out.println("IsLambdaExample");
+        Log.append("IsLambdaExample");
+
+        // build lambda x : Int . x + 1
+        IntExpr x = (IntExpr) ctx.mkBound(0, ctx.getIntSort());
+        Expr body = ctx.mkAdd(x, ctx.mkInt(1));
+        Expr lam = ctx.mkLambda(new Sort[]{ctx.getIntSort()},
+                new Symbol[]{ctx.mkSymbol("x")}, body);
+        if (!lam.isLambda())
+            throw new TestFailedException();
+
+        // a regular expression is not a lambda
+        IntExpr y = ctx.mkIntConst("y");
+        if (y.isLambda())
+            throw new TestFailedException();
+
+        System.out.println("IsLambdaExample passed.");
+    }
+
+    public void complexExample(Context ctx) throws TestFailedException
+    {
+        ComplexExpr z = ctx.mkComplexConst("complex_z");
+        ComplexExpr value = ctx.mkComplex(ctx.mkInt(1), ctx.mkReal(2));
+        ArithExpr<ComplexSort> square = ctx.mkMul(z, z);
+        if (!(square instanceof ComplexExpr) || !(square.getSort() instanceof ComplexSort))
+            throw new TestFailedException();
+        Solver solver = ctx.mkSolver();
+        solver.add(ctx.mkEq(z, value));
+        solver.add(ctx.mkNot(ctx.mkEq(square, ctx.mkComplex(ctx.mkReal(-3), ctx.mkReal(4)))));
+        if (solver.check() != Status.UNSATISFIABLE)
+            throw new TestFailedException();
+        solver.reset();
+        solver.add(ctx.mkEq(z, value));
+        if (solver.check() != Status.SATISFIABLE ||
+            !solver.getModel().eval(ctx.mkEq(ctx.mkRealPart(z), ctx.mkReal(1)), true).isTrue() ||
+            !solver.getModel().eval(ctx.mkEq(ctx.mkImagPart(z), ctx.mkReal(2)), true).isTrue())
+            throw new TestFailedException();
+    }
+
     public static void main(String[] args)
     {
         JavaExample p = new JavaExample();
@@ -2271,15 +2506,19 @@ class JavaExample
             System.out.print("Z3 Full Version String: ");
             System.out.println(Version.getFullVersion());
 
+	    p.stringExample();
+
             p.simpleExample();
 
             { // These examples need model generation turned on.
                 HashMap<String, String> cfg = new HashMap<String, String>();
                 cfg.put("model", "true");
                 Context ctx = new Context(cfg);
+
         
                 p.optimizeExample(ctx);
                 p.basicTests(ctx);
+                p.complexExample(ctx);
                 p.castingTest(ctx);
                 p.sudokuExample(ctx);
                 p.quantifierExample1(ctx);
@@ -2304,6 +2543,15 @@ class JavaExample
                 p.finiteDomainExample(ctx);
                 p.floatingPointExample1(ctx);
                 // core dumps: p.floatingPointExample2(ctx);
+                p.numeralDoubleExample(ctx);
+                p.unsignedNumeralExample(ctx);
+                p.rationalExtractionExample(ctx);
+                p.isGroundExample(ctx);
+                p.astDepthExample(ctx);
+                p.arrayArityExample(ctx);
+                p.recursiveDatatypeExample(ctx);
+                p.fpNumeralExample(ctx);
+                p.isLambdaExample(ctx);
             }
 
             { // These examples need proof generation turned on.

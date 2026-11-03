@@ -16,10 +16,9 @@ Author:
 Revision History:
 
 --*/
-#ifndef SUBPAVING_T_H_
-#define SUBPAVING_T_H_
+#pragma once
 
-#include<iostream>
+#include<ostream>
 #include "util/tptr.h"
 #include "util/small_object_allocator.h"
 #include "util/chashtable.h"
@@ -121,7 +120,9 @@ public:
         justification(justification const & source) { m_data = source.m_data; }
         explicit justification(clause * c) { m_data = TAG(void*, c, CLAUSE); }
         explicit justification(var x) { m_data = BOXTAGINT(void*, x, VAR_DEF);  }
-        
+
+        justification &operator=(justification const &) = default;
+
         kind get_kind() const { return static_cast<kind>(GET_TAG(m_data)); }
         bool is_clause() const { return get_kind() == CLAUSE; }
         bool is_axiom() const { return get_kind() == AXIOM; }
@@ -202,7 +203,7 @@ public:
     public:
         node(context_t & s, unsigned id);
         node(node * parent, unsigned id);
-        // return unique indentifier.
+        // return unique identifier.
         unsigned id() const { return m_id; }
         bound_array_manager & bm() const { return m_bm; }
         bound_array & lowers() { return m_lowers; }
@@ -386,7 +387,7 @@ public:
         context_t * m_ctx;
     public:
         node_selector(context_t * ctx):m_ctx(ctx) {}
-        virtual ~node_selector() {}
+        virtual ~node_selector() = default;
 
         context_t * ctx() const { return m_ctx; }
 
@@ -404,7 +405,7 @@ public:
         context_t * m_ctx;
     public:
         var_selector(context_t * ctx):m_ctx(ctx) {}
-        virtual ~var_selector() {}
+        virtual ~var_selector() = default;
 
         context_t * ctx() const { return m_ctx; }
 
@@ -437,7 +438,7 @@ public:
         context_t * m_ctx;
     public:
         node_splitter(context_t * ctx):m_ctx(ctx) {}
-        virtual ~node_splitter() {}
+        virtual ~node_splitter() = default;
         
         context_t * ctx() const { return m_ctx; }
         node * mk_node(node * p) { return ctx()->mk_node(p); }
@@ -476,7 +477,7 @@ private:
     interval_manager          m_im;
     scoped_numeral_vector     m_num_buffer;
 
-    svector<bool>             m_is_int;
+    bool_vector             m_is_int;
     ptr_vector<definition>    m_defs;
     vector<watch_list>        m_wlist;
 
@@ -846,6 +847,5 @@ public:
     void operator()();
 };
 
-};
+}
 
-#endif

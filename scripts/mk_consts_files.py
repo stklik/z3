@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -- /usr/bin/env python
 """
 Reads a list of Z3 API header files and
 generate the constant declarations need
@@ -12,7 +12,7 @@ import sys
 
 
 def main(args):
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARNING)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("api_files", nargs="+")
     parser.add_argument("--z3py-output-dir", dest="z3py_output_dir", default=None)

@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef MAP_H_
-#define MAP_H_
+#pragma once
 
 #include "util/hashtable.h"
 
@@ -25,15 +24,6 @@ template<typename Key, typename Value>
 struct _key_data {
     Key   m_key;
     Value m_value;
-    _key_data() {
-    }
-    _key_data(Key const & k):
-        m_key(k) {
-    }
-    _key_data(Key const & k, Value const & v):
-        m_key(k),
-        m_value(v) {
-    }
 };
 
 template<typename Entry, typename HashProc, typename EqProc>
@@ -105,23 +95,27 @@ public:
     }
     
     void insert(key const & k, value const & v) {
-        m_table.insert(key_data(k, v));
+        m_table.insert(key_data{k, v});
+    }
+
+    void insert(key const& k, value&& v) {
+        m_table.insert(key_data{k, std::move(v)});
     }
   
     bool insert_if_not_there_core(key const & k, value const & v, entry *& et) {
-        return m_table.insert_if_not_there_core(key_data(k,v), et);
+        return m_table.insert_if_not_there_core(key_data{k,v}, et);
     }
 
-    key_data const & insert_if_not_there(key const & k, value const & v) {
-        return m_table.insert_if_not_there(key_data(k, v));
+    value & insert_if_not_there(key const & k, value const & v) {
+        return m_table.insert_if_not_there2(key_data{k, v})->get_data().m_value;
     }
     
-    entry * insert_if_not_there2(key const & k, value const & v) {
-        return m_table.insert_if_not_there2(key_data(k, v));
+    entry * insert_if_not_there3(key const & k, value const & v) {
+        return m_table.insert_if_not_there2(key_data{k, v});
     }
         
     entry * find_core(key const & k) const {
-        return m_table.find_core(key_data(k));
+        return m_table.find_core(key_data{k});
     }
 
     bool find(key const & k, value & v) const {
@@ -143,7 +137,7 @@ public:
     }
         
     iterator find_iterator(key const & k) const { 
-        return m_table.find(key_data(k));
+        return m_table.find(key_data{k});
     }
     
     value const & find(key const& k) const {
@@ -168,7 +162,7 @@ public:
     }
 
     void remove(key const & k) {
-        m_table.remove(key_data(k));
+        m_table.remove(key_data{k});
     }
     
     void erase(key const & k) {
@@ -177,8 +171,18 @@ public:
 
     unsigned long long get_num_collision() const { return m_table.get_num_collision(); }
 
-    void swap(table2map & other) {
+    void swap(table2map & other) noexcept {
         m_table.swap(other.m_table);
+    }
+
+    bool operator==(table2map const& other) const {
+        if (size() != other.size()) return false;
+        for (auto const& kv : *this) {
+            auto* e = other.find_core(kv.m_key);
+            if (!e) return false;
+            if (e->get_data().m_value != kv.m_value) return false;
+        }
+        return true;
     }
     
 #ifdef Z3DEBUG
@@ -277,6 +281,11 @@ struct u_hash { unsigned operator()(unsigned u) const { return u; } };
 
 struct u_eq { bool operator()(unsigned u1, unsigned u2) const { return u1 == u2; } };
 
+
+struct u64_hash { unsigned operator()(uint64_t u) const { return mk_mix((unsigned)u, (unsigned)(u >> 32ull), 0); } };
+
+struct u64_eq { bool operator()(uint64_t u1, uint64_t u2) const { return u1 == u2; } };
+
 struct size_t_eq { bool operator()(size_t u1, size_t u2) const { return u1 == u2; } };
 
 struct int_eq { bool operator()(int u1, int u2) const { return u1 == u2; } };
@@ -287,4 +296,6 @@ class u_map : public map<unsigned, Value, u_hash, u_eq> {};
 template<typename Value>
 class size_t_map : public map<size_t, Value, size_t_hash, size_t_eq> {};
 
-#endif
+template<typename Value> 
+class u64_map : public map<uint64_t, Value, u64_hash, u64_eq> {};
+

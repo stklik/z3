@@ -16,10 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef HASH_H_
-#define HASH_H_
+#pragma once
 
 #include<algorithm>
+#include<string_view>
+#include<span>
 #include "util/util.h"
 
 #define mix(a,b,c)              \
@@ -35,7 +36,7 @@ Revision History:
   c -= a; c -= b; c ^= (b>>15); \
 }
 
-inline unsigned hash_u(unsigned a) {
+static inline unsigned hash_u(unsigned a) {
    a = (a+0x7ed55d16) + (a<<12);
    a = (a^0xc761c23c) ^ (a>>19);
    a = (a+0x165667b1) + (a<<5);
@@ -45,7 +46,7 @@ inline unsigned hash_u(unsigned a) {
    return a;
 }
 
-inline unsigned hash_ull(unsigned long long a) {
+static inline unsigned hash_ull(unsigned long long a) {
   a  = (~a) + (a << 18); 
   a ^= (a >> 31);
   a += (a << 2) + (a << 4);
@@ -55,29 +56,37 @@ inline unsigned hash_ull(unsigned long long a) {
   return static_cast<unsigned>(a);
 }
 
-inline unsigned combine_hash(unsigned h1, unsigned h2) {
-    h2 -= h1; h2 ^= (h1 << 8);
-    h1 -= h2; h2 ^= (h1 << 16);
-    h2 -= h1; h2 ^= (h1 << 10);
-    return h2;
+static inline unsigned combine_hash(unsigned h1, unsigned h2) {
+    h1 ^= h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2);
+    return hash_u(h1);
 }
 
-inline unsigned hash_u_u(unsigned a, unsigned b) {
+static inline unsigned hash_u_u(unsigned a, unsigned b) {
     return combine_hash(hash_u(a), hash_u(b));
 }
 
-unsigned string_hash(const char * str, unsigned len, unsigned init_value);
+unsigned string_hash(std::string_view str, unsigned init_value);
+
+static inline unsigned unsigned_ptr_hash(std::span<unsigned const> vec, unsigned init_value) {
+    return string_hash(std::string_view(reinterpret_cast<char const*>(vec.data()), vec.size() * sizeof(unsigned)), init_value);
+}
+
+// Backward compatibility overload
+static inline unsigned unsigned_ptr_hash(unsigned const* vec, unsigned len, unsigned init_value) {
+    return unsigned_ptr_hash(std::span<unsigned const>(vec, len), init_value);
+}
 
 template<typename Composite, typename GetKindHashProc, typename GetChildHashProc>
 unsigned get_composite_hash(Composite app, unsigned n, GetKindHashProc const & khasher = GetKindHashProc(), GetChildHashProc const & chasher = GetChildHashProc()) {
     unsigned a, b, c;
-    SASSERT(n > 0);
     unsigned kind_hash = khasher(app);
 
     a = b = 0x9e3779b9;
     c = 11;    
 
     switch (n) {
+    case 0:
+        return c;
     case 1:
         a += kind_hash;
         b  = chasher(app, 0);
@@ -125,33 +134,33 @@ template<typename Composite>
 struct default_kind_hash_proc { unsigned operator()(Composite const & c) const { return 17; } };
 
 struct int_hash {
-    typedef int data;
+    typedef int data_t;
     unsigned operator()(int x) const { return static_cast<unsigned>(x); }
 };
 
 struct unsigned_hash {
-    typedef unsigned data;
+    typedef unsigned data_t;
     unsigned operator()(unsigned x) const { return x; }
 };
 
 struct size_t_hash {
-    typedef size_t data;
+    typedef size_t data_t;
     unsigned operator()(size_t x) const { return static_cast<unsigned>(x); }
 };
 
 struct uint64_hash {
-    typedef uint64_t data;
+    typedef uint64_t data_t;
     unsigned operator()(uint64_t x) const { return static_cast<unsigned>(x); }
 };
 
 struct bool_hash {
-    typedef bool data;
+    typedef bool data_t;
     unsigned operator()(bool x) const { return static_cast<unsigned>(x); }
 };
 
 template<typename T>
 struct obj_hash {
-    typedef T data;
+    typedef T data_t;
     unsigned operator()(const T & e) const { 
         return e.hash();
     }
@@ -159,7 +168,7 @@ struct obj_hash {
 
 template<typename T>
 struct obj_ptr_hash {
-    typedef T * data;
+    typedef T * data_t;
     unsigned operator()(T * a) const {
         return a->hash();
     }
@@ -167,8 +176,8 @@ struct obj_ptr_hash {
 
 template<typename T1, typename T2>
 struct obj_ptr_pair_hash {
-    typedef std::pair<T1*, T2*> data;
-    unsigned operator()(data const & d) const {
+    typedef std::pair<T1*, T2*> data_t;
+    unsigned operator()(data_t const & d) const {
         return combine_hash(d.first->hash(), d.second->hash());
     }
 };
@@ -193,22 +202,22 @@ template<typename Hash1, typename Hash2, typename Hash3>
 struct triple_hash : private Hash1 {
     Hash2 m_hash2;
     Hash3 m_hash3;
-    typedef triple<typename Hash1::data, typename Hash2::data, typename Hash3::data> data;
+    typedef triple<typename Hash1::data_t, typename Hash2::data_t, typename Hash3::data> data_t;
     triple_hash(Hash1 const & h1 = Hash1(), Hash2 const & h2 = Hash2(), Hash3 const & h3 = Hash3()):
         Hash1(h1),
         m_hash2(h2),
         m_hash3(h3) {
     }
 
-    unsigned operator()(std::pair<typename Hash1::data, typename Hash2::data> const & p) const {
+    unsigned operator()(std::pair<typename Hash1::data_t, typename Hash2::data_t> const & p) const {
         return combine_hash(combine_hash(Hash1::operator()(p.first), m_hash2.operator()(p.second)), m_hash3.operator()(p.third));
     }
 };
 
 template<typename T1, typename T2, typename T3>
 struct obj_ptr_triple_hash {
-    typedef triple<T1*, T2*, T3*> data;
-    unsigned operator()(data const & d) const {
+    typedef triple<T1*, T2*, T3*> data_t;
+    unsigned operator()(data_t const & d) const {
         return combine_hash(combine_hash(d.first->hash(), d.second->hash()), d.third->hash());
     }
 };
@@ -216,13 +225,13 @@ struct obj_ptr_triple_hash {
 template<typename Hash1, typename Hash2>
 struct pair_hash : private Hash1 {
     Hash2 m_hash2;
-    typedef std::pair<typename Hash1::data, typename Hash2::data> data;
+    typedef std::pair<typename Hash1::data_t, typename Hash2::data_t> data_t;
     pair_hash(Hash1 const & h1 = Hash1(), Hash2 const & h2 = Hash2()):
         Hash1(h1),
         m_hash2(h2) {
     }
 
-    unsigned operator()(std::pair<typename Hash1::data, typename Hash2::data> const & p) const {
+    unsigned operator()(std::pair<typename Hash1::data_t, typename Hash2::data_t> const & p) const {
         return combine_hash(Hash1::operator()(p.first), m_hash2.operator()(p.second));
     }
 };
@@ -234,16 +243,14 @@ inline unsigned get_ptr_hash(T * ptr) {
 
 template<typename T>
 struct ptr_hash {
-    typedef T * data;
+    typedef T * data_t;
     unsigned operator()(T * ptr) const { 
         return get_ptr_hash(ptr);
     }
 };
 
-inline unsigned mk_mix(unsigned a, unsigned b, unsigned c) {
+static inline unsigned mk_mix(unsigned a, unsigned b, unsigned c) {
     mix(a, b, c);
     return c;
 }
-
-#endif /* HASH_H_ */
 

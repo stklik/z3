@@ -16,8 +16,7 @@ Author:
 Revision History:
 
 --*/
-#ifndef DL_TABLE_RELATION_H_
-#define DL_TABLE_RELATION_H_
+#pragma once
 
 
 #include "muz/rel/dl_base.h"
@@ -127,7 +126,6 @@ namespace datalog {
         bool knows_exact_size() const override { return m_table->knows_exact_size(); }
     };
 
-};
+}
 
-#endif /* DL_TABLE_RELATION_H_ */
 

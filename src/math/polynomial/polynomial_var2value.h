@@ -16,8 +16,7 @@ Author:
 Notes:
 
 --*/
-#ifndef POLYNOMIAL_VAR2VALUE_H_
-#define POLYNOMIAL_VAR2VALUE_H_
+#pragma once
 
 #include "math/polynomial/polynomial.h"
 #include "util/scoped_numeral_vector.h"
@@ -35,7 +34,7 @@ namespace polynomial {
         ValManager & m() const override { return m_vs.m(); }
         bool contains(var x) const override { return std::find(m_xs.begin(), m_xs.end(), x) != m_xs.end(); }
         typename ValManager::numeral const & operator()(var x) const override {
-            for (unsigned i = 0; i < m_xs.size(); i++)
+            for (unsigned i = 0; i < m_xs.size(); ++i)
                 if (m_xs[i] == x)
                     return m_vs[i];
             UNREACHABLE();
@@ -44,7 +43,6 @@ namespace polynomial {
         }
     };
     
-};
+}
 
 
-#endif

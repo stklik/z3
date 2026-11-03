@@ -19,8 +19,7 @@ Revision History:
 
 --*/
 
-#ifndef CONTAINER_UTIL_H_
-#define CONTAINER_UTIL_H_
+#pragma once
 
 // -----------------------------------
 //
@@ -31,7 +30,7 @@ Revision History:
 template<class Set1, class Set2>
 void set_intersection(Set1 & tgt, const Set2 & src) {
     svector<typename Set1::data> to_remove;
-    for (auto const& itm : tgt) 
+    for (auto itm : tgt) 
         if (!src.contains(itm)) 
             to_remove.push_back(itm);
     while (!to_remove.empty()) {
@@ -42,7 +41,7 @@ void set_intersection(Set1 & tgt, const Set2 & src) {
 
 template<class Set>
 void set_difference(Set & tgt, const Set & to_remove) {
-    for (auto const& itm : to_remove) 
+    for (auto itm : to_remove) 
         tgt.remove(itm);
 }
 
@@ -86,7 +85,7 @@ void print_container(const T & cont, std::ostream & out) {
 
 template<class T, class M>
 void print_container(const ref_vector<T,M> & cont, std::ostream & out) {
-    print_container(cont.c_ptr(), cont.c_ptr() + cont.size(), out);
+    print_container(cont.data(), cont.data() + cont.size(), out);
 }
 
 template<class T>
@@ -103,7 +102,7 @@ void print_map(const T & cont, std::ostream & out) {
 template<class It, class V> 
 unsigned find_index(const It & begin, const It & end, const V & val) {
     It it = begin;
-    for (unsigned idx = 0; it != end; it++, idx++) {
+    for (unsigned idx = 0; it != end; ++it, ++idx) {
         if (*it == val) {
             return idx;
         }
@@ -119,4 +118,3 @@ bool containers_equal(const T & begin1, const T & end1, const U & begin2, const 
     return it1 == end1 && it2 == end2;
 }
 
-#endif

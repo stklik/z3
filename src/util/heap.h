@@ -16,11 +16,11 @@ Author:
 Revision History:
 
 --*/
-#ifndef HEAP_H_
-#define HEAP_H_
+#pragma once
 
 #include "util/vector.h"
 #include "util/debug.h"
+#include <cstring>
 
 template<typename LT>
 class heap : private LT {
@@ -55,6 +55,19 @@ class heap : private LT {
     }
 
     bool check_invariant_core(int idx) const {
+        
+        // Check that m_values starts with a dummy value at index 0.
+        if (m_values.empty() || m_values[0] != -1) {
+            return false;
+        }
+
+        // // All indices in m_value2indices that are not used in m_values should be 0
+        // for (int val = 0; val < static_cast<int>(m_value2indices.size()); ++val) {
+        //     if (std::find(m_values.begin(), m_values.end(), val) == m_values.end() && m_value2indices[val] != 0) {
+        //         return false; // Unused indices should have a 0 value
+        //     }
+        // }
+
         if (idx < static_cast<int>(m_values.size())) {
             SASSERT(m_value2indices[m_values[idx]] == idx);
             SASSERT(parent(idx) == 0 || !less_than(m_values[idx], m_values[parent(idx)]));
@@ -139,7 +152,7 @@ public:
         if (empty()) {
             return;
         }
-        memset(m_value2indices.begin(), 0, sizeof(int) * m_value2indices.size());
+        memset(m_value2indices.data(), 0, sizeof(int) * m_value2indices.size());
         m_values.reset();
         m_values.push_back(-1);
         CASSERT("heap", check_invariant());
@@ -156,6 +169,10 @@ public:
     
     unsigned get_bounds() const {
         return m_value2indices.size();
+    }
+
+    unsigned size() const {
+        return m_values.size() - 1;
     }
 
     void reserve(int s) {
@@ -240,11 +257,11 @@ public:
     }
 
     iterator begin() { 
-        return m_values.begin() + 1; 
+        return m_values.data() + 1; 
     }
 
     iterator end() { 
-        return m_values.end(); 
+        return m_values.data() + m_values.size(); 
     }
 
     const_iterator begin() const { 
@@ -255,7 +272,7 @@ public:
         return m_values.end(); 
     }
 
-    void swap(heap & other) {
+    void swap(heap & other) noexcept {
         if (this != &other) {
             CASSERT("heap", other.check_invariant());
             CASSERT("heap", check_invariant());
@@ -290,6 +307,3 @@ public:
 
   
 };
-
-#endif /* HEAP_H_ */
-

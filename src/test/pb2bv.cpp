@@ -12,12 +12,14 @@ Copyright (c) 2015 Microsoft Corporation
 #include "ast/rewriter/pb2bv_rewriter.h"
 #include "smt/smt_kernel.h"
 #include "model/model_smt2_pp.h"
-#include "smt/params/smt_params.h"
+#include "params/smt_params.h"
 #include "ast/ast_util.h"
 #include "ast/pb_decl_plugin.h"
 #include "ast/rewriter/th_rewriter.h"
-#include "tactic/portfolio/fd_solver.h"
+#include "tactic/fd_solver/fd_solver.h"
 #include "solver/solver.h"
+#include "ast/arith_decl_plugin.h"
+#include <iostream>
 
 static void test1() {
     ast_manager m;
@@ -30,13 +32,13 @@ static void test1() {
     for (unsigned i = 0; i < N; ++i) {
         std::stringstream strm;
         strm << "b" << i;
-        vars.push_back(m.mk_const(symbol(strm.str().c_str()), m.mk_bool_sort()));
+        vars.push_back(m.mk_const(symbol(strm.str()), m.mk_bool_sort()));
     }
     
     for (unsigned k = 1; k <= N; ++k) {
         expr_ref fml(m), result(m);
         proof_ref proof(m);
-        fml = pb.mk_at_least_k(vars.size(), vars.c_ptr(), k);
+        fml = pb.mk_at_least_k(vars.size(), vars.data(), k);
         rw(true, fml, result, proof);
         std::cout << fml << " |-> " << result << "\n";
     }
@@ -56,9 +58,9 @@ static void test_semantics(ast_manager& m, expr_ref_vector const& vars, vector<r
     th_rewriter th_rw(m);
 
     switch (kind) {
-    case 0: fml1 = pb.mk_ge(vars.size(), coeffs.c_ptr(), vars.c_ptr(), rational(k)); break;
-    case 1: fml1 = pb.mk_le(vars.size(), coeffs.c_ptr(), vars.c_ptr(), rational(k)); break;
-    default: fml1 = pb.mk_eq(vars.size(), coeffs.c_ptr(), vars.c_ptr(), rational(k)); break;
+    case 0: fml1 = pb.mk_ge(vars.size(), coeffs.data(), vars.data(), rational(k)); break;
+    case 1: fml1 = pb.mk_le(vars.size(), coeffs.data(), vars.data(), rational(k)); break;
+    default: fml1 = pb.mk_eq(vars.size(), coeffs.data(), vars.data(), rational(k)); break;
     }
     rw(true, fml1, result1, proof);
     rw.flush_side_constraints(lemmas);
@@ -76,9 +78,9 @@ static void test_semantics(ast_manager& m, expr_ref_vector const& vars, vector<r
         
         solver.assert_expr(lemmas);
         switch (kind) {
-        case 0: fml2 = pb.mk_ge(tf.size(), coeffs.c_ptr(), tf.c_ptr(), rational(k)); break;
-        case 1: fml2 = pb.mk_le(tf.size(), coeffs.c_ptr(), tf.c_ptr(), rational(k)); break;
-        default: fml2 = pb.mk_eq(tf.size(), coeffs.c_ptr(), tf.c_ptr(), rational(k)); break;
+        case 0: fml2 = pb.mk_ge(tf.size(), coeffs.data(), tf.data(), rational(k)); break;
+        case 1: fml2 = pb.mk_le(tf.size(), coeffs.data(), tf.data(), rational(k)); break;
+        default: fml2 = pb.mk_eq(tf.size(), coeffs.data(), tf.data(), rational(k)); break;
         }
         std::cout << fml1 << " " << fml2 << "\n";
         th_rw(fml2, result2, proof);
@@ -111,7 +113,7 @@ static void test2() {
     for (unsigned i = 0; i < N; ++i) {
         std::stringstream strm;
         strm << "b" << i;
-        vars.push_back(m.mk_const(symbol(strm.str().c_str()), m.mk_bool_sort()));
+        vars.push_back(m.mk_const(symbol(strm.str()), m.mk_bool_sort()));
     }
     for (unsigned coeff = 0; coeff < static_cast<unsigned>(1 << N); ++coeff) {
         vector<rational> coeffs;
@@ -135,9 +137,9 @@ static void test_solver_semantics(ast_manager& m, expr_ref_vector const& vars, v
     th_rewriter th_rw(m);
 
     switch (kind) {
-    case 0: fml1 = pb.mk_ge(vars.size(), coeffs.c_ptr(), vars.c_ptr(), rational(k)); break;
-    case 1: fml1 = pb.mk_le(vars.size(), coeffs.c_ptr(), vars.c_ptr(), rational(k)); break;
-    default: fml1 = pb.mk_eq(vars.size(), coeffs.c_ptr(), vars.c_ptr(), rational(k)); break;
+    case 0: fml1 = pb.mk_ge(vars.size(), coeffs.data(), vars.data(), rational(k)); break;
+    case 1: fml1 = pb.mk_le(vars.size(), coeffs.data(), vars.data(), rational(k)); break;
+    default: fml1 = pb.mk_eq(vars.size(), coeffs.data(), vars.data(), rational(k)); break;
     }
     result1 = m.mk_fresh_const("xx", m.mk_bool_sort());
     for (unsigned values = 0; values < static_cast<unsigned>(1 << N); ++values) {
@@ -151,9 +153,9 @@ static void test_solver_semantics(ast_manager& m, expr_ref_vector const& vars, v
         slv->assert_expr(m.mk_eq(result1, fml1));
         
         switch (kind) {
-        case 0: fml2 = pb.mk_ge(tf.size(), coeffs.c_ptr(), tf.c_ptr(), rational(k)); break;
-        case 1: fml2 = pb.mk_le(tf.size(), coeffs.c_ptr(), tf.c_ptr(), rational(k)); break;
-        default: fml2 = pb.mk_eq(tf.size(), coeffs.c_ptr(), tf.c_ptr(), rational(k)); break;
+        case 0: fml2 = pb.mk_ge(tf.size(), coeffs.data(), tf.data(), rational(k)); break;
+        case 1: fml2 = pb.mk_le(tf.size(), coeffs.data(), tf.data(), rational(k)); break;
+        default: fml2 = pb.mk_eq(tf.size(), coeffs.data(), tf.data(), rational(k)); break;
         }
         std::cout << fml1 << " " << fml2 << "\n";
         th_rw(fml2, result2, proof);
@@ -180,7 +182,7 @@ static void test3() {
     for (unsigned i = 0; i < N; ++i) {
         std::stringstream strm;
         strm << "b" << i;
-        vars.push_back(m.mk_const(symbol(strm.str().c_str()), m.mk_bool_sort()));
+        vars.push_back(m.mk_const(symbol(strm.str()), m.mk_bool_sort()));
     }
     for (unsigned coeff = 0; coeff < static_cast<unsigned>(1 << N); ++coeff) {
         vector<rational> coeffs;
@@ -194,9 +196,20 @@ static void test3() {
     }
 }
 
+static void test4() {
+    ast_manager m;
+    reg_decl_plugins(m);
+    arith_util arith(m);
+    expr_ref a(m.mk_const(symbol("a"), arith.mk_int()), m);
+    expr_ref b(m.mk_const(symbol("b"), arith.mk_int()), m);
+    expr_ref eq(m.mk_eq(a,b), m);
+    std::cout << "is_atom: " << is_atom(m, eq) << "\n";
+}
+
 void tst_pb2bv() {
     test1();
     test2();
     test3();
+    test4();
 }
 
